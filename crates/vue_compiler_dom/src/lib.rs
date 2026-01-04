@@ -177,11 +177,11 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(root.children.len(), 1);
-        // Static elements are hoisted, so _createElementVNode appears in preamble
+        // Root elements use createElementBlock (blocks for tracking)
         let full_output = format!("{}\n{}", result.preamble, result.code);
         assert!(
-            full_output.contains("_createElementVNode"),
-            "Expected output to contain _createElementVNode, got:\n{}",
+            full_output.contains("_createElementBlock"),
+            "Expected output to contain _createElementBlock, got:\n{}",
             full_output
         );
     }

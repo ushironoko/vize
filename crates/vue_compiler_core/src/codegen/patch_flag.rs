@@ -1,6 +1,53 @@
 //! Patch flag calculation and naming functions.
 
 use crate::ast::*;
+use crate::options::{BindingMetadata, BindingType};
+
+/// Check if an interpolation references only constant bindings (LiteralConst or SetupConst)
+/// These bindings never change at runtime, so no TEXT patch flag is needed.
+fn is_constant_interpolation(
+    expr: &ExpressionNode<'_>,
+    bindings: Option<&BindingMetadata>,
+) -> bool {
+    let bindings = match bindings {
+        Some(b) => b,
+        None => return false, // No binding info, assume dynamic
+    };
+
+    match expr {
+        ExpressionNode::Simple(simple) => {
+            // Check if the expression is a simple identifier that's a constant
+            // Both LiteralConst (e.g., const x = 'hello') and SetupConst (e.g., class Foo {})
+            // are constant at runtime and don't need TEXT patch flag
+            let name = simple.content.as_str();
+            matches!(
+                bindings.bindings.get(name),
+                Some(BindingType::LiteralConst | BindingType::SetupConst)
+            )
+        }
+        ExpressionNode::Compound(_) => false, // Compound expressions are dynamic
+    }
+}
+
+/// Check if an event handler references a constant binding (SetupConst or LiteralConst)
+fn is_const_handler(expr: &ExpressionNode<'_>, bindings: Option<&BindingMetadata>) -> bool {
+    let bindings = match bindings {
+        Some(b) => b,
+        None => return false, // No binding info, assume dynamic
+    };
+
+    match expr {
+        ExpressionNode::Simple(simple) => {
+            // Check if the expression is a simple identifier that's a constant
+            let name = simple.content.as_str();
+            matches!(
+                bindings.bindings.get(name),
+                Some(BindingType::SetupConst | BindingType::LiteralConst)
+            )
+        }
+        ExpressionNode::Compound(_) => false, // Compound expressions are dynamic
+    }
+}
 
 /// Check if a directive is a built-in directive (not custom)
 fn is_builtin_directive(name: &str) -> bool {
@@ -25,7 +72,10 @@ fn is_builtin_directive(name: &str) -> bool {
 }
 
 /// Calculate patch flag and dynamic props for an element
-pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Option<Vec<String>>) {
+pub fn calculate_element_patch_info(
+    el: &ElementNode<'_>,
+    bindings: Option<&BindingMetadata>,
+) -> (Option<i32>, Option<Vec<String>>) {
     let mut flag: i32 = 0;
     // Pre-allocate with small capacity - most elements have few dynamic props
     let mut dynamic_props: Vec<String> = Vec::with_capacity(4);
@@ -126,7 +176,18 @@ pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Optio
                                     }
                                 }
 
-                                flag |= 8; // PROPS
+                                // Check if the handler references a constant binding
+                                // If so, we don't need PROPS flag since the handler won't change
+                                let handler_is_const = if let Some(handler_exp) = &dir.exp {
+                                    is_const_handler(handler_exp, bindings)
+                                } else {
+                                    false
+                                };
+
+                                if !handler_is_const {
+                                    flag |= 8; // PROPS
+                                    dynamic_props.push(event_name.clone());
+                                }
 
                                 // Check if this is a custom event (non-standard DOM event)
                                 // Custom events, events with option modifiers, and events with key modifiers need NEED_HYDRATION
@@ -154,11 +215,9 @@ pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Optio
                                     && !has_right_modifier
                                     && !has_middle_modifier;
 
-                                if !is_simple_click && !is_vmodel_update {
+                                if !is_simple_click && !is_vmodel_update && !handler_is_const {
                                     flag |= 32; // NEED_HYDRATION
                                 }
-
-                                dynamic_props.push(event_name);
                             }
                         } else {
                             flag |= 16;
@@ -186,6 +245,7 @@ pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Optio
 
     // Check for dynamic text children
     // TEXT flag should be set when children contain interpolations and only consist of text/interpolation
+    // But skip if all interpolations reference only LiteralConst bindings (compile-time constants)
     let has_interpolation = el
         .children
         .iter()
@@ -197,7 +257,17 @@ pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Optio
         )
     });
     if has_interpolation && all_text_or_interp {
-        flag |= 1; // TEXT
+        // Check if all interpolations reference only constant bindings
+        let all_constant = el.children.iter().all(|child| {
+            if let TemplateChildNode::Interpolation(interp) = child {
+                is_constant_interpolation(&interp.content, bindings)
+            } else {
+                true // Text nodes are always "constant"
+            }
+        });
+        if !all_constant {
+            flag |= 1; // TEXT
+        }
     }
 
     let patch_flag = if flag > 0 { Some(flag) } else { None };

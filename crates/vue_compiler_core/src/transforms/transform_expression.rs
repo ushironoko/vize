@@ -118,7 +118,11 @@ pub fn process_expression<'a>(
             // Strip TypeScript if needed, then optionally prefix identifiers
             let processed = if ctx.options.prefix_identifiers {
                 // rewrite_expression handles both TS stripping and prefixing
-                rewrite_expression(content, ctx, as_params)
+                let result = rewrite_expression(content, ctx, as_params);
+                if result.used_unref {
+                    ctx.helper(crate::ast::RuntimeHelper::Unref);
+                }
+                result.code
             } else if ctx.options.is_ts {
                 // Only strip TypeScript, no prefixing
                 strip_typescript_from_expression(content)
@@ -147,12 +151,18 @@ pub fn process_expression<'a>(
     }
 }
 
+/// Result of expression rewriting
+struct RewriteResult {
+    code: std::string::String,
+    used_unref: bool,
+}
+
 /// Rewrite an expression string, prefixing identifiers with _ctx. where needed
 fn rewrite_expression(
     content: &str,
     ctx: &TransformContext<'_>,
     _as_params: bool,
-) -> std::string::String {
+) -> RewriteResult {
     // First, if this is TypeScript, strip type annotations
     let js_content = if ctx.options.is_ts {
         strip_typescript_from_expression(content)
@@ -174,6 +184,8 @@ fn rewrite_expression(
             // Successfully parsed - walk the AST and collect identifiers to rewrite
             let mut collector = IdentifierCollector::new(ctx);
             collector.visit_expression(&expr);
+
+            let used_unref = collector.used_unref;
 
             // Combine prefix rewrites (from HashSet) with suffix rewrites
             // Each rewrite is (position, prefix, suffix)
@@ -208,11 +220,14 @@ fn rewrite_expression(
                 }
             }
 
-            result
+            RewriteResult {
+                code: result,
+                used_unref,
+            }
         }
         Err(_) => {
             // Parse failed - fallback to simple identifier check
-            if is_simple_identifier(&js_content) {
+            let code = if is_simple_identifier(&js_content) {
                 if let Some(prefix) = get_identifier_prefix(&js_content, ctx) {
                     [prefix, &js_content].concat()
                 } else if is_ref_binding_simple(&js_content, ctx) {
@@ -223,6 +238,10 @@ fn rewrite_expression(
                 }
             } else {
                 js_content
+            };
+            RewriteResult {
+                code,
+                used_unref: false,
             }
         }
     }
@@ -505,6 +524,8 @@ struct IdentifierCollector<'a, 'ctx> {
     rewrites: FxHashSet<(usize, &'static str)>,
     /// (position, suffix) pairs for suffix rewrites (e.g., .value for refs)
     suffix_rewrites: Vec<(usize, &'static str)>,
+    /// Whether _unref helper was used
+    used_unref: bool,
 }
 
 impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
@@ -514,6 +535,7 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
             local_scope: FxHashSet::default(),
             rewrites: FxHashSet::default(),
             suffix_rewrites: Vec::new(),
+            used_unref: false,
         }
     }
 
@@ -535,6 +557,30 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
         }
         false
     }
+
+    /// Check if an identifier needs _unref() wrapping
+    /// This applies to let/var declarations and maybe-ref bindings
+    fn needs_unref(&self, name: &str) -> bool {
+        // Skip if in local scope
+        if self.local_scope.contains(name) {
+            return false;
+        }
+
+        // Check if this is an inline mode let/maybe-ref binding
+        if self.ctx.options.inline {
+            if let Some(bindings) = &self.ctx.options.binding_metadata {
+                if let Some(binding_type) = bindings.bindings.get(name) {
+                    // SetupLet and SetupMaybeRef need _unref()
+                    return matches!(
+                        binding_type,
+                        crate::options::BindingType::SetupLet
+                            | crate::options::BindingType::SetupMaybeRef
+                    );
+                }
+            }
+        }
+        false
+    }
 }
 
 impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
@@ -551,6 +597,11 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
             // Add .value suffix for refs in inline mode
             self.suffix_rewrites
                 .push((ident.span.end as usize, ".value"));
+        } else if self.needs_unref(name) {
+            // Wrap with _unref() for let/var bindings
+            self.rewrites.insert((ident.span.start as usize, "_unref("));
+            self.suffix_rewrites.push((ident.span.end as usize, ")"));
+            self.used_unref = true;
         }
     }
 
@@ -734,10 +785,13 @@ pub fn process_inline_handler<'a>(
             if content.contains("=>") || content.starts_with("function") {
                 // Process identifiers in the handler
                 if ctx.options.prefix_identifiers {
-                    let rewritten = rewrite_expression(content, ctx, false);
+                    let result = rewrite_expression(content, ctx, false);
+                    if result.used_unref {
+                        ctx.helper(crate::ast::RuntimeHelper::Unref);
+                    }
                     return ExpressionNode::Simple(Box::new_in(
                         SimpleExpressionNode {
-                            content: String::new(&rewritten),
+                            content: String::new(&result.code),
                             is_static: false,
                             const_type: ConstantType::NotConstant,
                             loc: simple.loc.clone(),
@@ -795,7 +849,11 @@ pub fn process_inline_handler<'a>(
 
             // Compound expression - rewrite and wrap in arrow function
             let rewritten = if ctx.options.prefix_identifiers {
-                rewrite_expression(content, ctx, false)
+                let result = rewrite_expression(content, ctx, false);
+                if result.used_unref {
+                    ctx.helper(crate::ast::RuntimeHelper::Unref);
+                }
+                result.code
             } else if ctx.options.is_ts {
                 // Strip TypeScript type annotations even without prefix_identifiers
                 strip_typescript_from_expression(content)

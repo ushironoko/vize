@@ -127,6 +127,15 @@ pub fn hoist_static<'a>(
     ctx: &mut TransformContext<'a>,
     children: &mut Vec<'a, TemplateChildNode<'a>>,
 ) {
+    hoist_static_inner(ctx, children, true)
+}
+
+/// Inner implementation with is_root flag
+fn hoist_static_inner<'a>(
+    ctx: &mut TransformContext<'a>,
+    children: &mut Vec<'a, TemplateChildNode<'a>>,
+    is_root: bool,
+) {
     if !ctx.options.hoist_static {
         return;
     }
@@ -139,13 +148,24 @@ pub fn hoist_static<'a>(
 
         match static_type {
             StaticType::FullyStatic => {
-                // Create VNodeCall from the element and hoist it
-                if let TemplateChildNode::Element(el) = &children[i] {
-                    let vnode_call = create_vnode_call_from_element(allocator, el);
-                    let hoist_index = ctx.hoist(vnode_call);
-                    // Replace with hoisted reference
-                    children[i] = TemplateChildNode::Hoisted(hoist_index);
-                    ctx.helper(RuntimeHelper::CreateElementVNode);
+                // Root elements should NOT be fully hoisted as VNodes
+                // They must use createElementBlock for proper block tracking
+                // Only hoist their props instead
+                if is_root {
+                    if let TemplateChildNode::Element(el) = &mut children[i] {
+                        if has_static_props(el) {
+                            hoist_element_props(ctx, el, allocator);
+                        }
+                    }
+                } else {
+                    // Non-root static elements can be fully hoisted
+                    if let TemplateChildNode::Element(el) = &children[i] {
+                        let vnode_call = create_vnode_call_from_element(allocator, el);
+                        let hoist_index = ctx.hoist(vnode_call);
+                        // Replace with hoisted reference
+                        children[i] = TemplateChildNode::Hoisted(hoist_index);
+                        ctx.helper(RuntimeHelper::CreateElementVNode);
+                    }
                 }
             }
             StaticType::HasDynamicText => {
@@ -157,10 +177,10 @@ pub fn hoist_static<'a>(
                 }
             }
             StaticType::NotStatic => {
-                // Cannot hoist, but check children recursively
+                // Cannot hoist, but check children recursively (not as root)
                 match &mut children[i] {
                     TemplateChildNode::Element(el) => {
-                        hoist_static(ctx, &mut el.children);
+                        hoist_static_inner(ctx, &mut el.children, false);
                     }
                     TemplateChildNode::If(if_node) => {
                         // For v-if branches, only hoist nested children, not the branch root
@@ -169,13 +189,13 @@ pub fn hoist_static<'a>(
                             for child in branch.children.iter_mut() {
                                 if let TemplateChildNode::Element(el) = child {
                                     // Only hoist inside the branch root's children
-                                    hoist_static(ctx, &mut el.children);
+                                    hoist_static_inner(ctx, &mut el.children, false);
                                 }
                             }
                         }
                     }
                     TemplateChildNode::For(for_node) => {
-                        hoist_static(ctx, &mut for_node.children);
+                        hoist_static_inner(ctx, &mut for_node.children, false);
                     }
                     _ => {}
                 }

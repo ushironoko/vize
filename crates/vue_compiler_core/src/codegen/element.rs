@@ -571,7 +571,8 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             ctx.push("\"");
 
             // Calculate patch flag and dynamic props
-            let (patch_flag, dynamic_props) = calculate_element_patch_info(el);
+            let (patch_flag, dynamic_props) =
+                calculate_element_patch_info(el, ctx.options.binding_metadata.as_ref());
             let has_patch_info = patch_flag.is_some() || dynamic_props.is_some();
 
             // Generate props (only if there are renderable props, not just v-show)
@@ -660,7 +661,8 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             }
 
             // Calculate patch flag and dynamic props for component
-            let (patch_flag, dynamic_props) = calculate_element_patch_info(el);
+            let (patch_flag, dynamic_props) =
+                calculate_element_patch_info(el, ctx.options.binding_metadata.as_ref());
             let has_patch_info = patch_flag.is_some() || dynamic_props.is_some();
 
             // Generate props (only if there are renderable props, not just v-show)
@@ -786,7 +788,8 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             ctx.push("\"");
 
             // Calculate patch flag for v-show (NEED_PATCH)
-            let (patch_flag, _) = calculate_element_patch_info(el);
+            let (patch_flag, _) =
+                calculate_element_patch_info(el, ctx.options.binding_metadata.as_ref());
             let has_patch_info = patch_flag.is_some();
 
             // Generate props (only if there are renderable props, not just v-show)

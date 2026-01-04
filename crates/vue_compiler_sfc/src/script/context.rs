@@ -451,6 +451,15 @@ fn infer_binding_type(init: &Expression<'_>, kind: VariableDeclarationKind) -> B
         return BindingType::LiteralConst;
     }
 
+    // Arrow functions and function expressions are SetupConst (they never change)
+    if matches!(
+        init,
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+    ) && kind == VariableDeclarationKind::Const
+    {
+        return BindingType::SetupConst;
+    }
+
     match kind {
         VariableDeclarationKind::Const => BindingType::SetupMaybeRef,
         VariableDeclarationKind::Let | VariableDeclarationKind::Var => BindingType::SetupLet,

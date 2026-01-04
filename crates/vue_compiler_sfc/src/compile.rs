@@ -71,10 +71,10 @@ pub fn compile_sfc(
     // Case 1: Template only - just output render function
     if !has_script && !has_script_setup && has_template {
         let template = descriptor.template.as_ref().unwrap();
-        // Disable hoisting for template-only SFCs (no setup scope to hoist into)
+        // Enable hoisting for template-only SFCs (hoisted consts go at module level)
         let mut template_opts = options.template.clone();
         let mut dom_opts = template_opts.compiler_options.take().unwrap_or_default();
-        dom_opts.hoist_static = false;
+        dom_opts.hoist_static = true;
         template_opts.compiler_options = Some(dom_opts);
         let template_result =
             compile_template_block(template, &template_opts, &scope_id, has_scoped, is_ts, None);
@@ -453,7 +453,16 @@ fn compile_script_setup_inline(
 
     // Start export default (blank line before)
     output.push('\n');
-    output.push_str("export default {\n");
+    let has_options = ctx.macros.define_options.is_some();
+    if has_options {
+        // Use Object.assign for defineOptions
+        output.push_str("export default /*@__PURE__*/Object.assign(");
+        let options_args = ctx.macros.define_options.as_ref().unwrap().args.trim();
+        output.push_str(options_args);
+        output.push_str(", {\n");
+    } else {
+        output.push_str("export default {\n");
+    }
     output.push_str("  __name: '");
     output.push_str(component_name);
     output.push_str("',\n");
@@ -476,7 +485,7 @@ fn compile_script_setup_inline(
         }
     }
 
-    // Setup function - include emit destructure if defineEmits is used
+    // Setup function - include destructured args based on macros used
     let has_emit = ctx.macros.define_emits.is_some();
     let has_emit_binding = ctx
         .macros
@@ -484,17 +493,27 @@ fn compile_script_setup_inline(
         .as_ref()
         .map(|e| e.binding_name.is_some())
         .unwrap_or(false);
+    let has_expose = ctx.macros.define_expose.is_some();
 
+    // Build setup function signature based on what macros are used
+    let mut setup_args = Vec::new();
+    if has_expose {
+        setup_args.push("expose: __expose");
+    }
     if has_emit {
-        // If binding name exists, use __emit and add const inside
-        // Otherwise use $emit directly
         if has_emit_binding {
-            output.push_str("  setup(__props, { emit: __emit }) {\n");
+            setup_args.push("emit: __emit");
         } else {
-            output.push_str("  setup(__props, { emit: $emit }) {\n");
+            setup_args.push("emit: $emit");
         }
-    } else {
+    }
+
+    if setup_args.is_empty() {
         output.push_str("  setup(__props) {\n");
+    } else {
+        output.push_str("  setup(__props, { ");
+        output.push_str(&setup_args.join(", "));
+        output.push_str(" }) {\n");
     }
 
     // Always add a blank line after setup signature
@@ -524,6 +543,14 @@ fn compile_script_setup_inline(
         output.push('\n');
     }
 
+    // defineExpose: transform to __expose(...)
+    if let Some(ref expose_macro) = ctx.macros.define_expose {
+        let args = expose_macro.args.trim();
+        output.push_str("__expose(");
+        output.push_str(args);
+        output.push_str(")\n");
+    }
+
     // Inline render function as return (blank line before)
     output.push('\n');
     if !template.render_body.is_empty() {
@@ -536,7 +563,11 @@ fn compile_script_setup_inline(
 
     output.push_str("}\n");
     output.push('\n');
-    output.push_str("}\n");
+    if has_options {
+        output.push_str("})\n");
+    } else {
+        output.push_str("}\n");
+    }
 
     // Transform TypeScript if needed
     let final_code = if is_ts {
@@ -2429,6 +2460,71 @@ function handlePresetChange(key: PresetKey) {}
         assert!(
             !result.code.contains(" as PresetKey"),
             "Should strip TypeScript 'as' from event handler. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_let_var_unref() {
+        use crate::parse_sfc;
+
+        let input = r#"
+<script setup>
+const a = 1
+let b = 2
+var c = 3
+</script>
+
+<template>
+  <div>{{ a }} {{ b }} {{ c }}</div>
+</template>
+"#;
+
+        let parse_opts = SfcParseOptions::default();
+        let descriptor = parse_sfc(input, parse_opts).unwrap();
+
+        let mut compile_opts = SfcCompileOptions::default();
+        compile_opts.script.id = Some("test.vue".to_string());
+        let result = compile_sfc(&descriptor, compile_opts).unwrap();
+
+        eprintln!("Let/var unref test output:\n{}", result.code);
+
+        // Check that bindings are correctly identified
+        if let Some(bindings) = &result.bindings {
+            eprintln!("Bindings:");
+            for (name, binding_type) in &bindings.bindings {
+                eprintln!("  {} => {:?}", name, binding_type);
+            }
+            assert!(
+                matches!(bindings.bindings.get("a"), Some(BindingType::LiteralConst)),
+                "a should be LiteralConst"
+            );
+            assert!(
+                matches!(bindings.bindings.get("b"), Some(BindingType::SetupLet)),
+                "b should be SetupLet"
+            );
+            assert!(
+                matches!(bindings.bindings.get("c"), Some(BindingType::SetupLet)),
+                "c should be SetupLet"
+            );
+        }
+
+        // Check for _unref import
+        assert!(
+            result.code.contains("unref as _unref"),
+            "Should import _unref. Got:\n{}",
+            result.code
+        );
+
+        // Check that let/var variables are wrapped with _unref
+        assert!(
+            result.code.contains("_unref(b)"),
+            "b should be wrapped with _unref. Got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("_unref(c)"),
+            "c should be wrapped with _unref. Got:\n{}",
             result.code
         );
     }

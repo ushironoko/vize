@@ -76,9 +76,15 @@ pub fn generate(root: &RootNode<'_>, options: CodegenOptions) -> CodegenResult {
     ctx.push("}");
 
     // Now generate preamble after we know all used helpers
-    // Only use helpers that were actually used during codegen
-    // (root.helpers from transform may include unused helpers like createVNode when we use createBlock)
+    // Only include specific helpers from root.helpers that are known to be
+    // added during transform but not tracked during codegen (like Unref)
+    // We don't merge ALL root.helpers because transform may add helpers that
+    // get optimized away during codegen (e.g., createElementVNode -> createElementBlock)
     let mut all_helpers: Vec<RuntimeHelper> = ctx.used_helpers.iter().copied().collect();
+    if root.helpers.contains(&RuntimeHelper::Unref) && !all_helpers.contains(&RuntimeHelper::Unref)
+    {
+        all_helpers.push(RuntimeHelper::Unref);
+    }
     // Sort helpers for consistent output order
     all_helpers.sort();
 
