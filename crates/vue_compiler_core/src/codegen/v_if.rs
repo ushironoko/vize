@@ -12,10 +12,8 @@ use super::node::generate_node;
 pub fn generate_if(ctx: &mut CodegenContext, if_node: &IfNode<'_>) {
     ctx.use_helper(RuntimeHelper::OpenBlock);
 
-    // Check if we need createCommentVNode (when there's no else branch)
-    if if_node.branches.iter().all(|b| b.condition.is_some()) {
-        ctx.use_helper(RuntimeHelper::CreateComment);
-    }
+    // Vue always imports createCommentVNode for v-if nodes
+    ctx.use_helper(RuntimeHelper::CreateComment);
 
     for (i, branch) in if_node.branches.iter().enumerate() {
         if let Some(condition) = &branch.condition {

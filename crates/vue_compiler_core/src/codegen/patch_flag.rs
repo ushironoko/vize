@@ -2,12 +2,35 @@
 
 use crate::ast::*;
 
+/// Check if a directive is a built-in directive (not custom)
+fn is_builtin_directive(name: &str) -> bool {
+    matches!(
+        name,
+        "bind"
+            | "on"
+            | "if"
+            | "else"
+            | "else-if"
+            | "for"
+            | "show"
+            | "model"
+            | "slot"
+            | "cloak"
+            | "pre"
+            | "memo"
+            | "once"
+            | "text"
+            | "html"
+    )
+}
+
 /// Calculate patch flag and dynamic props for an element
 pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Option<Vec<String>>) {
     let mut flag: i32 = 0;
     // Pre-allocate with small capacity - most elements have few dynamic props
     let mut dynamic_props: Vec<String> = Vec::with_capacity(4);
     let mut has_vshow = false;
+    let mut has_custom_directive = false;
 
     for prop in el.props.iter() {
         if let PropNode::Directive(dir) = prop {
@@ -139,13 +162,18 @@ pub fn calculate_element_patch_info(el: &ElementNode<'_>) -> (Option<i32>, Optio
                     // v-show requires NEED_PATCH, but only if no other flags are set
                     has_vshow = true;
                 }
-                _ => {}
+                _ => {
+                    // Custom directive - requires NEED_PATCH
+                    if !is_builtin_directive(&dir.name) {
+                        has_custom_directive = true;
+                    }
+                }
             }
         }
     }
 
-    // Add NEED_PATCH for v-show only if no other dynamic bindings exist
-    if has_vshow && flag == 0 {
+    // Add NEED_PATCH for v-show or custom directives only if no other dynamic bindings exist
+    if (has_vshow || has_custom_directive) && flag == 0 {
         flag |= 512; // NEED_PATCH
     }
 

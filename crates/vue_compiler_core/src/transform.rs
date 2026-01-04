@@ -9,6 +9,28 @@ use crate::ast::*;
 use crate::errors::{CompilerError, ErrorCode};
 use crate::options::TransformOptions;
 
+/// Check if a directive is a built-in directive (not custom)
+fn is_builtin_directive_name(name: &str) -> bool {
+    matches!(
+        name,
+        "bind"
+            | "on"
+            | "if"
+            | "else"
+            | "else-if"
+            | "for"
+            | "show"
+            | "model"
+            | "slot"
+            | "cloak"
+            | "pre"
+            | "memo"
+            | "once"
+            | "text"
+            | "html"
+    )
+}
+
 /// Transform function for nodes - returns optional exit function(s)
 pub type NodeTransform<'a> =
     fn(&mut TransformContext<'a>, &mut TemplateChildNode<'a>) -> Option<std::vec::Vec<ExitFn<'a>>>;
@@ -559,6 +581,29 @@ struct SimpleExpressionContent {
     loc: SourceLocation,
 }
 
+/// Extract and remove key prop from element
+fn extract_key_prop<'a>(el: &mut ElementNode<'a>) -> Option<PropNode<'a>> {
+    let mut key_index = None;
+    for (i, prop) in el.props.iter().enumerate() {
+        match prop {
+            PropNode::Attribute(attr) if attr.name == "key" => {
+                key_index = Some(i);
+                break;
+            }
+            PropNode::Directive(dir) if dir.name == "bind" => {
+                if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                    if arg.content == "key" {
+                        key_index = Some(i);
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    key_index.map(|i| el.props.remove(i))
+}
+
 /// Remove structural directive from element props
 fn remove_structural_directive<'a>(el: &mut Box<'a, ElementNode<'a>>, dir_name: &str) {
     let mut i = 0;
@@ -622,6 +667,16 @@ fn transform_v_if<'a>(
             }
         });
 
+        // Extract user key from the element if present
+        let mut user_key = None;
+        let taken_node = match taken_node {
+            TemplateChildNode::Element(mut el) => {
+                user_key = extract_key_prop(&mut el);
+                TemplateChildNode::Element(el)
+            }
+            other => other,
+        };
+
         // Create branch with the taken element
         let mut branch_children = Vec::new_in(allocator);
         branch_children.push(taken_node);
@@ -629,7 +684,7 @@ fn transform_v_if<'a>(
         let branch = IfBranchNode {
             condition,
             children: branch_children,
-            user_key: None,
+            user_key,
             is_template_if,
             loc: element_loc.clone(),
         };
@@ -720,6 +775,16 @@ fn transform_v_if<'a>(
                 }
             });
 
+            // Extract user key from the element if present
+            let mut user_key = None;
+            let taken_node = match taken_node {
+                TemplateChildNode::Element(mut el) => {
+                    user_key = extract_key_prop(&mut el);
+                    TemplateChildNode::Element(el)
+                }
+                other => other,
+            };
+
             // Create new branch
             let mut branch_children = Vec::new_in(allocator);
             branch_children.push(taken_node);
@@ -727,7 +792,7 @@ fn transform_v_if<'a>(
             let branch = IfBranchNode {
                 condition,
                 children: branch_children,
-                user_key: None,
+                user_key,
                 is_template_if,
                 loc: element_loc,
             };
@@ -1024,7 +1089,22 @@ fn process_directive_expressions<'a>(
                         dir.exp = Some(processed);
                     }
                 }
-                _ => {}
+                _ => {
+                    // Custom directives - process value expression
+                    if let Some(exp) = &dir.exp {
+                        let processed = process_expression(ctx, exp, false);
+                        dir.exp = Some(processed);
+                    }
+                    // Process dynamic argument
+                    if let Some(arg) = &dir.arg {
+                        if let ExpressionNode::Simple(simple_arg) = arg {
+                            if !simple_arg.is_static {
+                                let processed = process_expression(ctx, arg, false);
+                                dir.arg = Some(processed);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1054,6 +1134,12 @@ fn process_element_props<'a>(ctx: &mut TransformContext<'a>, el: &mut Box<'a, El
                 // v-show is a built-in directive - it uses vShow helper directly
                 // No need to add to ctx.directives (which would use resolveDirective)
                 "show" => {}
+                // Handle custom directives - register them for resolveDirective
+                _ if !is_builtin_directive_name(&dir.name) => {
+                    ctx.helper(RuntimeHelper::WithDirectives);
+                    ctx.helper(RuntimeHelper::ResolveDirective);
+                    ctx.directives.insert(dir.name.clone());
+                }
                 _ => {}
             }
         }

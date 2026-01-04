@@ -35,6 +35,54 @@ pub fn has_vshow_directive(el: &ElementNode<'_>) -> bool {
     })
 }
 
+/// Check if a directive is a built-in directive (not custom)
+pub fn is_builtin_directive(name: &str) -> bool {
+    matches!(
+        name,
+        "bind"
+            | "on"
+            | "if"
+            | "else"
+            | "else-if"
+            | "for"
+            | "show"
+            | "model"
+            | "slot"
+            | "cloak"
+            | "pre"
+            | "memo"
+            | "once"
+            | "text"
+            | "html"
+    )
+}
+
+/// Check if element has custom directives
+pub fn has_custom_directives(el: &ElementNode<'_>) -> bool {
+    el.props.iter().any(|prop| {
+        if let PropNode::Directive(dir) = prop {
+            !is_builtin_directive(&dir.name)
+        } else {
+            false
+        }
+    })
+}
+
+/// Get custom directives from element
+pub fn get_custom_directives<'a, 'b>(el: &'b ElementNode<'a>) -> Vec<&'b DirectiveNode<'a>> {
+    el.props
+        .iter()
+        .filter_map(|prop| {
+            if let PropNode::Directive(dir) = prop {
+                if !is_builtin_directive(&dir.name) {
+                    return Some(dir.as_ref());
+                }
+            }
+            None
+        })
+        .collect()
+}
+
 /// Check if native element has v-model directive
 pub fn has_vmodel_directive(el: &ElementNode<'_>) -> bool {
     // Only native elements use withDirectives for v-model
@@ -165,6 +213,79 @@ pub fn generate_vshow_closing(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
     }
 }
 
+/// Generate custom directives closing
+pub fn generate_custom_directives_closing(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
+    let custom_dirs = get_custom_directives(el);
+    if custom_dirs.is_empty() {
+        return;
+    }
+
+    ctx.push(", [");
+    ctx.newline();
+
+    for (i, dir) in custom_dirs.iter().enumerate() {
+        if i > 0 {
+            ctx.push(",");
+            ctx.newline();
+        }
+        ctx.push("  [_directive_");
+        ctx.push(&dir.name.replace('-', "_"));
+
+        // Add value if present
+        if let Some(exp) = &dir.exp {
+            ctx.push(", ");
+            generate_expression(ctx, exp);
+        }
+
+        // Add argument if present
+        if let Some(arg) = &dir.arg {
+            // Need to add value placeholder if not present
+            if dir.exp.is_none() {
+                ctx.push(", void 0");
+            }
+            ctx.push(", ");
+            match arg {
+                ExpressionNode::Simple(simple) => {
+                    if simple.is_static {
+                        ctx.push("\"");
+                        ctx.push(&simple.content);
+                        ctx.push("\"");
+                    } else {
+                        ctx.push(&simple.content);
+                    }
+                }
+                ExpressionNode::Compound(compound) => {
+                    ctx.push(&compound.loc.source);
+                }
+            }
+        }
+
+        // Add modifiers if present
+        if !dir.modifiers.is_empty() {
+            // Need to add placeholders if not present
+            if dir.exp.is_none() && dir.arg.is_none() {
+                ctx.push(", void 0, void 0");
+            } else if dir.arg.is_none() {
+                ctx.push(", void 0");
+            }
+            ctx.push(", { ");
+            for (j, modifier) in dir.modifiers.iter().enumerate() {
+                if j > 0 {
+                    ctx.push(", ");
+                }
+                ctx.push(&modifier.content);
+                ctx.push(": true");
+            }
+            ctx.push(" }");
+        }
+
+        ctx.push("]");
+    }
+
+    ctx.newline();
+    ctx.push("])");
+}
+
 /// Check if element has any renderable props (excluding v-show and other handled-separately directives)
 pub fn has_renderable_props(el: &ElementNode<'_>) -> bool {
     el.props.iter().any(|prop| match prop {
@@ -205,6 +326,7 @@ pub fn generate_v_once_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
         ctx.push(&el.tag.replace('-', "_"));
         ctx.push(")");
     } else {
+        ctx.use_helper(RuntimeHelper::CreateElementVNode);
         ctx.push(ctx.helper(RuntimeHelper::CreateElementVNode));
         ctx.push("(\"");
         ctx.push(&el.tag);
@@ -364,16 +486,25 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
         return;
     }
 
-    // Check for v-model directive on native elements
-    let has_vmodel = has_vmodel_directive(el);
+    // Check for custom directives
+    let has_custom_dirs = has_custom_directives(el);
+    if has_custom_dirs {
+        ctx.use_helper(RuntimeHelper::WithDirectives);
+        ctx.use_helper(RuntimeHelper::ResolveDirective);
+        ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
+        ctx.push("(");
+    }
+
+    // Check for v-model directive on native elements (only if no custom directives)
+    let has_vmodel = has_vmodel_directive(el) && !has_custom_dirs;
     if has_vmodel {
         ctx.use_helper(RuntimeHelper::WithDirectives);
         ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
         ctx.push("(");
     }
 
-    // Check for v-show directive
-    let has_vshow = has_vshow_directive(el) && !has_vmodel;
+    // Check for v-show directive (only if no custom directives or vmodel)
+    let has_vshow = has_vshow_directive(el) && !has_vmodel && !has_custom_dirs;
     if has_vshow {
         ctx.use_helper(RuntimeHelper::WithDirectives);
         ctx.use_helper(RuntimeHelper::VShow);
@@ -481,6 +612,11 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
 
             ctx.push("))");
 
+            // Close withDirectives for custom directives
+            if has_custom_dirs {
+                generate_custom_directives_closing(ctx, el);
+            }
+
             // Close withDirectives for v-model
             if has_vmodel {
                 generate_vmodel_closing(ctx, el);
@@ -550,6 +686,11 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             }
 
             ctx.push("))");
+
+            // Close withDirectives for custom directives on component
+            if has_custom_dirs {
+                generate_custom_directives_closing(ctx, el);
+            }
 
             // Close withDirectives for v-show on component
             if has_vshow {
