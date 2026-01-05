@@ -226,10 +226,12 @@ impl ScriptCompileContext {
                         }
                         BindingPatternKind::ObjectPattern(obj_pat) => {
                             // Handle destructuring like: const { prop1, prop2 } = defineProps()
+                            let mut is_props_destructure = false;
                             if let Some(init) = &decl.init {
                                 if let Some((macro_name, _)) = extract_macro_from_expr(init, source)
                                 {
                                     if macro_name == "defineProps" {
+                                        is_props_destructure = true;
                                         // Use the proper process_props_destructure function
                                         let (destructure, binding_metadata, props_aliases) =
                                             process_props_destructure(obj_pat, source);
@@ -249,13 +251,16 @@ impl ScriptCompileContext {
                                 }
                             }
 
-                            // Register each destructured binding
-                            for prop in obj_pat.properties.iter() {
-                                if let BindingPatternKind::BindingIdentifier(id) = &prop.value.kind
-                                {
-                                    self.bindings
-                                        .bindings
-                                        .insert(id.name.to_string(), BindingType::SetupConst);
+                            // Register each destructured binding (skip for props destructure)
+                            if !is_props_destructure {
+                                for prop in obj_pat.properties.iter() {
+                                    if let BindingPatternKind::BindingIdentifier(id) =
+                                        &prop.value.kind
+                                    {
+                                        self.bindings
+                                            .bindings
+                                            .insert(id.name.to_string(), BindingType::SetupConst);
+                                    }
                                 }
                             }
                         }

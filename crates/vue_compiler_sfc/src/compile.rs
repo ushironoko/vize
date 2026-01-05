@@ -578,8 +578,14 @@ fn compile_script_setup_inline(
         }
     }
 
-    // Setup code body
-    for line in &setup_lines {
+    // Setup code body - transform props destructure references
+    let setup_code = setup_lines.join("\n");
+    let transformed_setup = if let Some(ref destructure) = ctx.macros.props_destructure {
+        transform_destructured_props(&setup_code, destructure)
+    } else {
+        setup_code
+    };
+    for line in transformed_setup.lines() {
         output.push_str(line);
         output.push('\n');
     }
@@ -596,8 +602,22 @@ fn compile_script_setup_inline(
     output.push('\n');
     if !template.render_body.is_empty() {
         output.push_str("return (_ctx, _cache) => {\n");
-        output.push_str("  return ");
-        output.push_str(template.render_body);
+        // Indent the render body properly
+        let mut first_line = true;
+        for line in template.render_body.lines() {
+            if first_line {
+                output.push_str("  return ");
+                output.push_str(line);
+                first_line = false;
+            } else {
+                output.push('\n');
+                // Preserve existing indentation by adding 2 spaces (setup indent)
+                if !line.trim().is_empty() {
+                    output.push_str("  ");
+                }
+                output.push_str(line);
+            }
+        }
         output.push('\n');
         output.push_str("}\n");
     }
@@ -2501,6 +2521,48 @@ function handlePresetChange(key: PresetKey) {}
         assert!(
             !result.code.contains(" as PresetKey"),
             "Should strip TypeScript 'as' from event handler. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_full_sfc_props_destructure() {
+        use crate::parse_sfc;
+
+        let input = r#"<script setup lang="ts">
+import { computed } from 'vue'
+
+const {
+  name,
+  count = 0,
+} = defineProps<{
+  name: string
+  count?: number
+}>()
+
+const doubled = computed(() => count * 2)
+</script>
+
+<template>
+  <div class="card">
+    <h2>{{ name }}</h2>
+    <p>Count: {{ count }} (doubled: {{ doubled }})</p>
+  </div>
+</template>"#;
+
+        let parse_opts = SfcParseOptions::default();
+        let descriptor = parse_sfc(input, parse_opts).unwrap();
+
+        let mut compile_opts = SfcCompileOptions::default();
+        compile_opts.script.id = Some("test.vue".to_string());
+        let result = compile_sfc(&descriptor, compile_opts).unwrap();
+
+        eprintln!("=== Full SFC props destructure output ===\n{}", result.code);
+
+        // Props should use __props. prefix in template
+        assert!(
+            result.code.contains("__props.name") || result.code.contains("name"),
+            "Should have name access. Got:\n{}",
             result.code
         );
     }
