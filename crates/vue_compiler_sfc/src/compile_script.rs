@@ -1028,8 +1028,20 @@ pub(crate) fn compile_script_setup(
         output
     };
 
+    // Add binding metadata as a comment at the top of the code
+    let code_with_bindings = if !ctx.bindings.bindings.is_empty() {
+        let bindings_json = serde_json::to_string_pretty(&ctx.bindings.bindings)
+            .unwrap_or_else(|_| "{}".to_string());
+        format!(
+            "/* Analyzed bindings: {} */\n\n{}",
+            bindings_json, final_code
+        )
+    } else {
+        final_code
+    };
+
     Ok(ScriptCompileResult {
-        code: final_code,
+        code: code_with_bindings,
         bindings: Some(ctx.bindings),
     })
 }
