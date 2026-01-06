@@ -27,7 +27,7 @@ function mapToObject(value: unknown): unknown {
   return value;
 }
 
-type TabType = 'code' | 'ast' | 'helpers' | 'sfc' | 'css';
+type TabType = 'code' | 'ast' | 'helpers' | 'sfc' | 'css' | 'bindings';
 
 // State
 const inputMode = ref<InputMode>('sfc');
@@ -250,6 +250,7 @@ onMounted(async () => {
             <template v-if="inputMode === 'sfc'">
               <button :class="['tab', { active: activeTab === 'sfc' }]" @click="activeTab = 'sfc'">SFC</button>
               <button :class="['tab', { active: activeTab === 'css' }]" @click="activeTab = 'css'">CSS</button>
+              <button :class="['tab', { active: activeTab === 'bindings' }]" @click="activeTab = 'bindings'">Bindings</button>
             </template>
           </div>
         </div>
@@ -368,6 +369,28 @@ onMounted(async () => {
                 </div>
               </template>
               <p v-else class="no-css">No styles in this SFC</p>
+            </div>
+
+            <!-- Bindings Tab -->
+            <div v-else-if="activeTab === 'bindings' && sfcResult?.script?.bindings" class="bindings-output">
+              <h4>Script Setup Bindings</h4>
+              <table class="bindings-table">
+                <thead>
+                  <tr>
+                    <th>Variable</th>
+                    <th>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(bindingType, varName) in sfcResult.script.bindings.bindings" :key="varName">
+                    <td class="var-name">{{ varName }}</td>
+                    <td class="binding-type"><span class="badge" :class="`badge-${bindingType}`">{{ bindingType }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else-if="activeTab === 'bindings'" class="bindings-output">
+              <p class="no-bindings">No bindings information available</p>
             </div>
           </template>
         </div>
