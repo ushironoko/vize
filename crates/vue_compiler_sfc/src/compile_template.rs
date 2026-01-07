@@ -273,6 +273,48 @@ fn compact_render_body(render_body: &str) -> String {
     result
 }
 
+/// Extract imports, hoisted consts, and render function from compiled template code
+/// Returns (imports, hoisted, render_function) where render_function is the full function definition
+pub(crate) fn extract_template_parts_full(template_code: &str) -> (String, String, String) {
+    let mut imports = String::new();
+    let mut hoisted = String::new();
+    let mut render_fn = String::new();
+    let mut in_render = false;
+    let mut brace_depth = 0;
+
+    for line in template_code.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("import ") {
+            imports.push_str(line);
+            imports.push('\n');
+        } else if trimmed.starts_with("const _hoisted_") {
+            hoisted.push_str(line);
+            hoisted.push('\n');
+        } else if trimmed.starts_with("export function render(")
+            || trimmed.starts_with("function render(")
+        {
+            in_render = true;
+            brace_depth = 0;
+            brace_depth += line.matches('{').count() as i32;
+            brace_depth -= line.matches('}').count() as i32;
+            render_fn.push_str(line);
+            render_fn.push('\n');
+        } else if in_render {
+            brace_depth += line.matches('{').count() as i32;
+            brace_depth -= line.matches('}').count() as i32;
+            render_fn.push_str(line);
+            render_fn.push('\n');
+
+            if brace_depth == 0 {
+                in_render = false;
+            }
+        }
+    }
+
+    (imports, hoisted, render_fn)
+}
+
 /// Extract imports, hoisted consts, and render body from compiled template code
 pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, String) {
     let mut imports = String::new();

@@ -2362,6 +2362,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.17",
+ "toml",
  "vue_allocator",
  "vue_compiler_core",
  "vue_compiler_dom",

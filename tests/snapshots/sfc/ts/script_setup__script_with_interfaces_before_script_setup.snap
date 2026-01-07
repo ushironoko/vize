@@ -1,0 +1,27 @@
+---
+source: crates/vue_compiler_sfc/src/snapshot_tests.rs
+assertion_line: 98
+expression: ts_output
+---
+export interface User {
+  id: number;
+  name: string;
+}
+
+import { defineComponent } from 'vue'
+import { openBlock as _openBlock, createElementBlock as _createElementBlock, createCommentVNode as _createCommentVNode, toDisplayString as _toDisplayString } from "vue"
+
+import { ref } from 'vue'
+
+export default defineComponent({
+  name: 'test',
+  setup(__props) {
+
+const user = ref<User | null>(null)
+
+return (_ctx, _cache) => {
+  return (user.value)
+}
+}
+
+})

@@ -21,12 +21,45 @@ Snapshot tests against `@vue/compiler-sfc` (v3.6.0-beta):
 |----------|--------|-------|----------|
 | **VDom** | 267 | 338 | 79.0% |
 | **Vapor** | 29 | 98 | 29.6% |
-| **SFC** | 28 | 40 | 70.0% |
-| **Total** | 324 | 476 | 68.1% |
+| **SFC** | 3 | 70 | 4.3% |
+| **Total** | 299 | 506 | 59.1% |
 
-### Recent Improvements
+### TypeScript Output Snapshots
 
-- **Props destructure handling**: Fixed compiler to properly handle both old-style array-based props destructuring (transformed away) and new Vue 3.5+ type-based props destructuring (preserved). This improved SFC test compatibility to 70.0%.
+We maintain **70 snapshot tests** for TypeScript output mode in `tests/snapshots/sfc/ts/`. These capture the current behavior for:
+
+- Basic script setup patterns
+- defineProps/defineEmits/defineModel
+- Props destructure with defaults
+- Generic components (Vue 3.3+)
+- Complex TypeScript types (arrow functions, unions, intersections)
+- Top-level await
+- withDefaults patterns
+- Real-world patterns from production codebases
+
+Run `mise run snapshot` to update snapshots after changes.
+
+### CLI Output Modes
+
+The CLI supports two output modes via `--script-ext`:
+
+- `downcompile` (default): Transpiles TypeScript to JavaScript
+- `preserve`: Keeps TypeScript output as-is
+
+```bash
+# Preserve TypeScript output (recommended for TypeScript projects)
+vuec "src/**/*.vue" --script-ext preserve -o dist
+
+# Downcompile to JavaScript (default)
+vuec "src/**/*.vue" -o dist
+```
+
+### Known Limitations
+
+Some Vue 3.3+ features are not yet fully supported:
+- Generic component declarations (`<script setup generic="T">`)
+- Complex TypeScript type extraction from interfaces
+- `as const` assertions in multiline expressions
 
 ## Quick Start
 

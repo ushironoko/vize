@@ -43,6 +43,7 @@ pub mod compile_script;
 pub mod compile_template;
 pub mod css;
 pub mod parse;
+pub mod rewrite_default;
 pub mod script;
 pub mod style;
 pub mod types;
@@ -56,6 +57,9 @@ pub use types::*;
 // Re-export key types from dependencies
 pub use vue_compiler_core::CompilerError;
 pub use vue_compiler_dom::compile_template;
+
+#[cfg(test)]
+mod snapshot_tests;
 
 #[cfg(test)]
 mod tests {

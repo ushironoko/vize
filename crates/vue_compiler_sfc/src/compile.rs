@@ -7,7 +7,9 @@
 use crate::compile_script::{compile_script_setup_inline, TemplateParts};
 use crate::compile_template::{
     compile_template_block, compile_template_block_vapor, extract_template_parts,
+    extract_template_parts_full,
 };
+use crate::rewrite_default::rewrite_default;
 use crate::script::ScriptCompileContext;
 use crate::types::*;
 
@@ -42,8 +44,8 @@ pub fn compile_sfc(
             .map(|s| s.attrs.contains_key("vapor"))
             .unwrap_or(false);
 
-    // Detect TypeScript from script lang attribute
-    let is_ts = descriptor
+    // Detect TypeScript from script lang attribute, but allow options to override
+    let detected_ts = descriptor
         .script_setup
         .as_ref()
         .and_then(|s| s.lang.as_ref())
@@ -55,6 +57,12 @@ pub fn compile_sfc(
             .and_then(|s| s.lang.as_ref())
             .map(|lang| lang == "ts" || lang == "tsx")
             .unwrap_or(false);
+    // Use options.script.is_ts if explicitly set, otherwise use detected value
+    let is_ts = if options.script.is_ts || options.template.is_ts {
+        true
+    } else {
+        detected_ts
+    };
 
     // Extract component name from filename
     let component_name = extract_component_name(filename);
@@ -98,11 +106,70 @@ pub fn compile_sfc(
         });
     }
 
-    // Case 2: Script (non-setup) + Template - output script unchanged (template attached by bundler)
+    // Case 2: Script (non-setup) + Template - rewrite default and compile template
     if has_script && !has_script_setup {
         let script = descriptor.script.as_ref().unwrap();
-        code = script.content.to_string();
-        code.push('\n');
+
+        // Rewrite `export default` to `const _sfc_main = ...`
+        let (rewritten_script, _has_default) = rewrite_default(&script.content, "_sfc_main", is_ts);
+
+        // Compile template if present
+        if has_template {
+            let template = descriptor.template.as_ref().unwrap();
+            let mut template_opts = options.template.clone();
+            let mut dom_opts = template_opts.compiler_options.take().unwrap_or_default();
+            dom_opts.hoist_static = true;
+            template_opts.compiler_options = Some(dom_opts);
+
+            let template_result = compile_template_block(
+                template,
+                &template_opts,
+                &scope_id,
+                has_scoped,
+                is_ts,
+                None, // No bindings for normal scripts
+            );
+
+            match template_result {
+                Ok(template_code) => {
+                    // Extract template parts (imports, hoisted, render function)
+                    let (template_imports, template_hoisted, render_fn) =
+                        extract_template_parts_full(&template_code);
+
+                    // Build output: imports + script + hoisted + render + export
+                    code.push_str(&template_imports);
+                    if !template_imports.is_empty() {
+                        code.push('\n');
+                    }
+                    code.push_str(&rewritten_script);
+                    code.push('\n');
+
+                    // Add hoisted declarations
+                    if !template_hoisted.is_empty() {
+                        code.push_str(&template_hoisted);
+                        code.push('\n');
+                    }
+
+                    // Add render function (without imports - they're already at top)
+                    code.push_str(&render_fn);
+                    code.push('\n');
+
+                    // Export the component with render attached
+                    code.push_str("_sfc_main.render = render\n");
+                    code.push_str("export default _sfc_main\n");
+                }
+                Err(e) => {
+                    errors.push(e);
+                    // Fall back to just the script
+                    code = script.content.to_string();
+                    code.push('\n');
+                }
+            }
+        } else {
+            // No template - just output rewritten script and export
+            code.push_str(&rewritten_script);
+            code.push_str("\nexport default _sfc_main\n");
+        }
 
         // Compile styles
         let all_css = compile_styles(&descriptor.styles, &scope_id, &options.style, &mut warnings);
@@ -135,6 +202,16 @@ pub fn compile_sfc(
         }
     };
     let _template_content = descriptor.template.as_ref().map(|t| t.content.as_ref());
+
+    // Extract normal script content if present (for type definitions, imports, etc.)
+    // When both <script> and <script setup> exist, normal script content should be preserved
+    // (except for export default which is handled by script setup)
+    let normal_script_content = if has_script {
+        let script = descriptor.script.as_ref().unwrap();
+        Some(extract_normal_script_content(&script.content, is_ts))
+    } else {
+        None
+    };
 
     // Analyze script first to get bindings
     let mut ctx = ScriptCompileContext::new(&script_setup.content);
@@ -181,6 +258,7 @@ pub fn compile_sfc(
             hoisted: &template_hoisted,
             render_body: &render_body,
         },
+        normal_script_content.as_deref(),
     )?;
     code = script_result.code;
 
@@ -242,6 +320,68 @@ fn extract_component_name(filename: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("anonymous")
         .to_string()
+}
+
+/// Extract content from normal script block that should be preserved when both
+/// `<script>` and `<script setup>` exist.
+/// This includes imports, type definitions, interfaces, but excludes `export default`.
+fn extract_normal_script_content(content: &str, is_ts: bool) -> String {
+    use oxc_allocator::Allocator;
+    use oxc_ast::ast::Statement;
+    use oxc_parser::Parser;
+    use oxc_span::{GetSpan, SourceType};
+
+    let source_type = if is_ts {
+        SourceType::ts()
+    } else {
+        SourceType::mjs()
+    };
+
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, content, source_type).parse();
+
+    if !ret.errors.is_empty() {
+        // If parsing fails, return original content minus any obvious export default
+        return content
+            .lines()
+            .filter(|line| !line.trim().starts_with("export default"))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    let program = ret.program;
+    let mut output = String::new();
+    let mut last_end = 0;
+
+    for stmt in program.body.iter() {
+        match stmt {
+            // Skip export default declarations
+            Statement::ExportDefaultDeclaration(_) => {
+                // Copy content before this statement
+                output.push_str(&content[last_end..stmt.span().start as usize]);
+                last_end = stmt.span().end as usize;
+            }
+            // Skip named exports that include default: export { foo as default }
+            Statement::ExportNamedDeclaration(decl) => {
+                let has_default_export = decl.specifiers.iter().any(|s| {
+                    matches!(&s.exported, oxc_ast::ast::ModuleExportName::IdentifierName(name) if name.name == "default")
+                        || matches!(&s.exported, oxc_ast::ast::ModuleExportName::IdentifierReference(name) if name.name == "default")
+                });
+                if has_default_export {
+                    output.push_str(&content[last_end..stmt.span().start as usize]);
+                    last_end = stmt.span().end as usize;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Copy remaining content
+    if last_end < content.len() {
+        output.push_str(&content[last_end..]);
+    }
+
+    output.trim().to_string()
 }
 
 #[cfg(test)]
@@ -535,6 +675,178 @@ var c = 3
         assert!(
             result.code.contains("_unref(c)"),
             "c should be wrapped with _unref. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_extract_normal_script_content() {
+        let input = r#"import type { NuxtRoute } from "@typed-router";
+import { useBreakpoint } from "./_utils";
+import Button from "./Button.vue";
+
+interface TabItem {
+  name: string;
+  label: string;
+}
+
+export default {
+  name: 'Tab'
+}
+"#;
+        let result = extract_normal_script_content(input, true);
+        eprintln!("Extracted normal script content:\n{}", result);
+
+        // Should contain imports
+        assert!(
+            result.contains("import type { NuxtRoute }"),
+            "Should contain type import"
+        );
+        assert!(
+            result.contains("import { useBreakpoint }"),
+            "Should contain named import"
+        );
+        assert!(
+            result.contains("import Button"),
+            "Should contain default import"
+        );
+
+        // Should contain interface
+        assert!(
+            result.contains("interface TabItem"),
+            "Should contain interface"
+        );
+
+        // Should NOT contain export default
+        assert!(
+            !result.contains("export default"),
+            "Should NOT contain export default"
+        );
+    }
+
+    #[test]
+    fn test_compile_both_script_blocks() {
+        let source = r#"<script lang="ts">
+import type { RouteLocation } from "vue-router";
+
+interface TabItem {
+  name: string;
+  label: string;
+}
+
+export type { TabItem };
+</script>
+
+<script setup lang="ts">
+const { items } = defineProps<{
+  items: Array<TabItem>;
+}>();
+</script>
+
+<template>
+  <div v-for="item in items" :key="item.name">
+    {{ item.label }}
+  </div>
+</template>"#;
+
+        let descriptor =
+            parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+        eprintln!(
+            "Descriptor script: {:?}",
+            descriptor.script.as_ref().map(|s| &s.content)
+        );
+        eprintln!(
+            "Descriptor script_setup: {:?}",
+            descriptor.script_setup.as_ref().map(|s| &s.content)
+        );
+
+        let opts = SfcCompileOptions::default();
+        let result = compile_sfc(&descriptor, opts).expect("Failed to compile SFC");
+
+        eprintln!("=== COMPILED OUTPUT ===\n{}", result.code);
+
+        // Should contain the type import
+        assert!(
+            result.code.contains("RouteLocation") || result.code.contains("interface TabItem"),
+            "Should contain type definitions from normal script. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_define_model_basic() {
+        let source = r#"<script setup>
+const model = defineModel()
+</script>
+
+<template>
+  <input v-model="model">
+</template>"#;
+
+        let descriptor =
+            parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+        let opts = SfcCompileOptions::default();
+        let result = compile_sfc(&descriptor, opts).expect("Failed to compile SFC");
+
+        eprintln!("=== defineModel OUTPUT ===\n{}", result.code);
+
+        // Should have useModel import
+        assert!(
+            result.code.contains("useModel as _useModel"),
+            "Should import useModel. Got:\n{}",
+            result.code
+        );
+
+        // Should have modelValue prop
+        assert!(
+            result.code.contains("modelValue"),
+            "Should have modelValue prop. Got:\n{}",
+            result.code
+        );
+
+        // Should have update:modelValue emit
+        assert!(
+            result.code.contains("update:modelValue"),
+            "Should have update:modelValue emit. Got:\n{}",
+            result.code
+        );
+
+        // Should have _useModel call in setup
+        assert!(
+            result.code.contains("_useModel(__props"),
+            "Should use _useModel in setup. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_define_model_with_name() {
+        let source = r#"<script setup>
+const title = defineModel('title')
+</script>
+
+<template>
+  <input v-model="title">
+</template>"#;
+
+        let descriptor =
+            parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+        let opts = SfcCompileOptions::default();
+        let result = compile_sfc(&descriptor, opts).expect("Failed to compile SFC");
+
+        eprintln!("=== defineModel with name OUTPUT ===\n{}", result.code);
+
+        // Should have title prop
+        assert!(
+            result.code.contains("title:") || result.code.contains("\"title\""),
+            "Should have title prop. Got:\n{}",
+            result.code
+        );
+
+        // Should have update:title emit
+        assert!(
+            result.code.contains("update:title"),
+            "Should have update:title emit. Got:\n{}",
             result.code
         );
     }

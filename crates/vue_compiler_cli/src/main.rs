@@ -33,9 +33,9 @@ enum OutputFormat {
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
 enum ScriptExtension {
     /// Preserve original script language extension (.ts -> .ts, .tsx -> .tsx, .jsx -> .jsx)
-    #[default]
     Preserve,
     /// Downcompile all scripts to JavaScript (.ts -> .js, .tsx -> .js, .jsx -> .js)
+    #[default]
     Downcompile,
 }
 
@@ -60,7 +60,7 @@ struct Cli {
     ssr: bool,
 
     /// Script extension handling: 'preserve' keeps original extension (.ts/.tsx/.jsx), 'downcompile' converts to .js
-    #[arg(long, value_enum, default_value = "preserve")]
+    #[arg(long, value_enum, default_value = "downcompile")]
     script_ext: ScriptExtension,
 
     /// Number of threads (default: number of CPUs)

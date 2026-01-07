@@ -1,0 +1,21 @@
+---
+source: crates/vue_compiler_sfc/src/snapshot_tests.rs
+assertion_line: 98
+expression: ts_output
+---
+import { defineComponent } from 'vue'
+import { openBlock as _openBlock, createElementBlock as _createElementBlock, toDisplayString as _toDisplayString, unref as _unref } from "vue"
+
+
+export default defineComponent({
+  name: 'test',
+  setup(__props) {
+
+const data = await fetch('/api').then(r => r.json())
+
+return (_ctx, _cache) => {
+  return (_openBlock(), _createElementBlock("div", null, _toDisplayString(_unref(data)), 1 /* TEXT */))
+}
+}
+
+})

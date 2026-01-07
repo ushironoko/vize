@@ -4,6 +4,11 @@ import MonacoEditor from './components/MonacoEditor.vue';
 import CodeHighlight from './components/CodeHighlight.vue';
 import { PRESETS, type PresetKey, type InputMode } from './presets';
 import { loadWasm, isWasmLoaded, type CompilerOptions, type CompileResult, type SfcCompileResult, type CssCompileResult, type CssCompileOptions } from './wasm/index';
+import * as prettier from 'prettier/standalone';
+import * as parserBabel from 'prettier/plugins/babel';
+import * as parserEstree from 'prettier/plugins/estree';
+import * as parserTypescript from 'prettier/plugins/typescript';
+import * as parserCss from 'prettier/plugins/postcss';
 
 // Convert Map objects to plain objects recursively (for serde_wasm_bindgen output)
 function mapToObject(value: unknown): unknown {
@@ -51,10 +56,48 @@ const cssOptions = ref<CssCompileOptions>({
   minify: false,
 });
 const compiler = shallowRef<Awaited<ReturnType<typeof loadWasm>> | null>(null);
+const formattedCode = ref<string>('');
+const formattedCss = ref<string>('');
+
+// Helper to format code with Prettier
+async function formatCode(code: string, parser: 'babel' | 'typescript'): Promise<string> {
+  try {
+    return await prettier.format(code, {
+      parser,
+      plugins: [parserBabel, parserEstree, parserTypescript],
+      semi: false,
+      singleQuote: true,
+      printWidth: 80,
+    });
+  } catch {
+    return code;
+  }
+}
+
+async function formatCss(code: string): Promise<string> {
+  try {
+    return await prettier.format(code, {
+      parser: 'css',
+      plugins: [parserCss],
+      printWidth: 80,
+    });
+  } catch {
+    return code;
+  }
+}
 
 // Computed
 const editorLanguage = computed(() => inputMode.value === 'sfc' ? 'vue' : 'html');
 const astJson = computed(() => output.value ? JSON.stringify(mapToObject(output.value.ast), null, 2) : '{}');
+
+// Computed: detect TypeScript from script lang
+const isTypeScript = computed(() => {
+  if (!sfcResult.value?.descriptor) return false;
+  const scriptSetup = sfcResult.value.descriptor.scriptSetup;
+  const script = sfcResult.value.descriptor.script;
+  const lang = scriptSetup?.lang || script?.lang;
+  return lang === 'ts' || lang === 'tsx';
+});
 
 // Methods
 async function compile() {
@@ -81,8 +124,11 @@ async function compile() {
             scoped: hasScoped || cssOptions.value.scoped,
           });
           cssResult.value = css;
+          // Format CSS
+          formattedCss.value = await formatCss(css.code);
         } else {
           cssResult.value = null;
+          formattedCss.value = '';
         }
 
         if (result?.script?.code) {
@@ -92,10 +138,14 @@ async function compile() {
             ast: result.template?.ast || {},
             helpers: result.template?.helpers || [],
           };
+          // Format JS code
+          formattedCode.value = await formatCode(result.script.code, 'babel');
         } else if (result?.template) {
           output.value = result.template;
+          formattedCode.value = await formatCode(result.template.code, 'babel');
         } else {
           output.value = null;
+          formattedCode.value = '';
         }
       } catch (sfcError) {
         console.error('SFC compile error:', sfcError);
@@ -106,6 +156,8 @@ async function compile() {
       compileTime.value = performance.now() - startTime;
       output.value = result;
       sfcResult.value = null;
+      formattedCode.value = await formatCode(result.code, 'babel');
+      formattedCss.value = '';
     }
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
@@ -266,14 +318,14 @@ onMounted(async () => {
           <template v-else-if="output">
             <!-- Code Tab -->
             <div v-if="activeTab === 'code'" class="code-output">
-              <h4>Compiled Code</h4>
+              <h4>Compiled Code {{ isTypeScript ? '(TypeScript)' : '' }}</h4>
               <div class="code-actions">
-                <button @click="copyToClipboard(output.code)" class="btn-ghost">Copy</button>
+                <button @click="copyToClipboard(formattedCode || output.code)" class="btn-ghost">Copy</button>
               </div>
               <div v-if="sfcResult?.bindingMetadata" class="bindings-comment">
                 <CodeHighlight :code="'/* Analyzed bindings: ' + JSON.stringify(sfcResult.bindingMetadata, null, 2) + ' */'" language="javascript" />
               </div>
-              <CodeHighlight :code="output.code" language="javascript" show-line-numbers />
+              <CodeHighlight :code="formattedCode || output.code" :language="isTypeScript ? 'typescript' : 'javascript'" show-line-numbers />
             </div>
 
             <!-- AST Tab -->
@@ -343,9 +395,9 @@ onMounted(async () => {
                 <div class="css-compiled">
                   <h5>Compiled CSS</h5>
                   <div class="code-actions">
-                    <button @click="copyToClipboard(cssResult.code)" class="btn-ghost">Copy</button>
+                    <button @click="copyToClipboard(formattedCss || cssResult.code)" class="btn-ghost">Copy</button>
                   </div>
-                  <CodeHighlight :code="cssResult.code" language="css" show-line-numbers />
+                  <CodeHighlight :code="formattedCss || cssResult.code" language="css" show-line-numbers />
                 </div>
 
                 <div v-if="cssResult.cssVars.length > 0" class="css-vars">

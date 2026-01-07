@@ -37,6 +37,8 @@ pub(crate) struct TemplateParts<'a> {
 pub(crate) struct PropTypeInfo {
     /// JavaScript type constructor name (String, Number, Boolean, Array, Object, Function)
     pub js_type: String,
+    /// Original TypeScript type (for PropType<T> usage)
+    pub ts_type: Option<String>,
     /// Whether the prop is optional
     pub optional: bool,
 }
@@ -47,11 +49,18 @@ pub(crate) fn compile_script_setup_inline(
     component_name: &str,
     is_ts: bool,
     template: TemplateParts<'_>,
+    normal_script_content: Option<&str>,
 ) -> Result<ScriptCompileResult, SfcError> {
     let mut ctx = ScriptCompileContext::new(content);
     ctx.analyze();
 
     let mut output = String::new();
+
+    // Store normal script content to add AFTER TypeScript transformation
+    // This preserves type definitions that would otherwise be stripped
+    let preserved_normal_script = normal_script_content
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
     // Check if we need mergeDefaults import (props destructure with defaults)
     let has_props_destructure = ctx.macros.props_destructure.is_some();
@@ -63,9 +72,34 @@ pub(crate) fn compile_script_setup_inline(
             .map(|d| d.bindings.values().any(|b| b.default.is_some()))
             .unwrap_or(false);
 
+    // Check if defineModel was used
+    let has_define_model = !ctx.macros.define_models.is_empty();
+
     // mergeDefaults import comes first if needed
     if needs_merge_defaults {
         output.push_str("import { mergeDefaults as _mergeDefaults } from 'vue'\n");
+    }
+
+    // useModel import if defineModel was used
+    if has_define_model {
+        output.push_str("import { useModel as _useModel } from 'vue'\n");
+    }
+
+    // defineComponent and PropType imports for TypeScript
+    if is_ts {
+        // Check if we need PropType (when there are typed props)
+        let needs_prop_type = ctx
+            .macros
+            .define_props
+            .as_ref()
+            .is_some_and(|p| p.type_args.is_some() || !p.args.is_empty())
+            || !ctx.macros.define_models.is_empty();
+
+        if needs_prop_type {
+            output.push_str("import { defineComponent, PropType } from 'vue'\n");
+        } else {
+            output.push_str("import { defineComponent } from 'vue'\n");
+        }
     }
 
     // Template imports (Vue helpers)
@@ -91,6 +125,15 @@ pub(crate) fn compile_script_setup_inline(
     let mut in_paren_macro_call = false;
     let mut paren_macro_depth: i32 = 0;
     let mut waiting_for_macro_close = false;
+    // Track multiline object literals: const xxx = { ... }
+    let mut in_object_literal = false;
+    let mut object_literal_buffer = String::new();
+    let mut object_literal_brace_depth: i32 = 0;
+    // Track TypeScript-only declarations (interface, type) to skip them
+    let mut in_ts_interface = false;
+    let mut ts_interface_brace_depth: i32 = 0;
+    let mut in_ts_type = false;
+    let mut ts_type_depth: i32 = 0; // Track angle brackets and parens for complex types
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -117,7 +160,10 @@ pub(crate) fn compile_script_setup_inline(
         if waiting_for_macro_close {
             destructure_buffer.push_str(line);
             destructure_buffer.push('\n');
-            if trimmed.ends_with("()") || trimmed.ends_with(')') {
+            // Track angle brackets for type args
+            macro_angle_depth += trimmed.matches('<').count() as i32;
+            macro_angle_depth -= trimmed.matches('>').count() as i32;
+            if macro_angle_depth <= 0 && (trimmed.ends_with("()") || trimmed.ends_with(')')) {
                 waiting_for_macro_close = false;
                 destructure_buffer.clear();
             }
@@ -127,9 +173,14 @@ pub(crate) fn compile_script_setup_inline(
         if in_destructure {
             destructure_buffer.push_str(line);
             destructure_buffer.push('\n');
+            // Track both braces and angle brackets for type args
             brace_depth += trimmed.matches('{').count() as i32;
             brace_depth -= trimmed.matches('}').count() as i32;
-            if brace_depth <= 0 {
+            macro_angle_depth += trimmed.matches('<').count() as i32;
+            macro_angle_depth -= trimmed.matches('>').count() as i32;
+            // Only consider closed when BOTH braces and angle brackets are balanced
+            // and we have the closing parentheses
+            if brace_depth <= 0 && macro_angle_depth <= 0 {
                 let is_props_macro = destructure_buffer.contains("defineProps")
                     || destructure_buffer.contains("withDefaults");
                 if is_props_macro && !trimmed.ends_with("()") && !trimmed.ends_with(')') {
@@ -163,7 +214,30 @@ pub(crate) fn compile_script_setup_inline(
             continue;
         }
 
-        // Detect destructure start
+        // Detect destructure start with type args: const { x } = defineProps<{...}>()
+        // This pattern has both the destructure closing brace AND type arg opening angle bracket
+        if (trimmed.starts_with("const {")
+            || trimmed.starts_with("let {")
+            || trimmed.starts_with("var {"))
+            && (trimmed.contains("defineProps<") || trimmed.contains("withDefaults("))
+        {
+            // Check if it's complete on a single line
+            if !trimmed.ends_with("()") && !trimmed.ends_with(')') {
+                // Multi-line: wait for completion
+                in_destructure = true;
+                destructure_buffer = line.to_string() + "\n";
+                brace_depth =
+                    trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+                macro_angle_depth =
+                    trimmed.matches('<').count() as i32 - trimmed.matches('>').count() as i32;
+                continue;
+            } else {
+                // Single line, complete - skip it
+                continue;
+            }
+        }
+
+        // Detect destructure start (without type args)
         if (trimmed.starts_with("const {")
             || trimmed.starts_with("let {")
             || trimmed.starts_with("var {"))
@@ -172,11 +246,46 @@ pub(crate) fn compile_script_setup_inline(
             in_destructure = true;
             destructure_buffer = line.to_string() + "\n";
             brace_depth = trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+            macro_angle_depth = 0;
             continue;
         }
 
         // Skip single-line props destructure
         if is_props_destructure_line(trimmed) {
+            continue;
+        }
+
+        // Handle multiline object literals: const xxx = { ... }
+        if in_object_literal {
+            object_literal_buffer.push_str(line);
+            object_literal_buffer.push('\n');
+            object_literal_brace_depth += trimmed.matches('{').count() as i32;
+            object_literal_brace_depth -= trimmed.matches('}').count() as i32;
+            if object_literal_brace_depth <= 0 {
+                // Object literal is complete, add to setup_lines
+                for buf_line in object_literal_buffer.lines() {
+                    setup_lines.push(buf_line.to_string());
+                }
+                in_object_literal = false;
+                object_literal_buffer.clear();
+            }
+            continue;
+        }
+
+        // Detect multiline object literal start: const xxx = { or const xxx: Type = {
+        if (trimmed.starts_with("const ")
+            || trimmed.starts_with("let ")
+            || trimmed.starts_with("var "))
+            && trimmed.contains('=')
+            && trimmed.ends_with('{')
+            && !trimmed.contains("defineProps")
+            && !trimmed.contains("defineEmits")
+            && !trimmed.contains("defineModel")
+        {
+            in_object_literal = true;
+            object_literal_buffer = line.to_string() + "\n";
+            object_literal_brace_depth =
+                trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
             continue;
         }
 
@@ -193,7 +302,80 @@ pub(crate) fn compile_script_setup_inline(
                 user_imports.push(import_buffer.clone());
                 in_import = false;
             }
-        } else if !trimmed.is_empty() && !is_macro_call_line(trimmed) {
+            continue;
+        }
+
+        // Handle TypeScript interface declarations (skip them)
+        if in_ts_interface {
+            ts_interface_brace_depth += trimmed.matches('{').count() as i32;
+            ts_interface_brace_depth -= trimmed.matches('}').count() as i32;
+            if ts_interface_brace_depth <= 0 {
+                in_ts_interface = false;
+            }
+            continue;
+        }
+
+        // Detect TypeScript interface start
+        if trimmed.starts_with("interface ") || trimmed.starts_with("export interface ") {
+            in_ts_interface = true;
+            ts_interface_brace_depth =
+                trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+            if ts_interface_brace_depth <= 0 {
+                in_ts_interface = false;
+            }
+            continue;
+        }
+
+        // Handle TypeScript type declarations (skip them)
+        if in_ts_type {
+            // Track balanced brackets for complex types like: type X = { a: string } | { b: number }
+            ts_type_depth += trimmed.matches('{').count() as i32;
+            ts_type_depth -= trimmed.matches('}').count() as i32;
+            ts_type_depth += trimmed.matches('<').count() as i32;
+            ts_type_depth -= trimmed.matches('>').count() as i32;
+            ts_type_depth += trimmed.matches('(').count() as i32;
+            ts_type_depth -= trimmed.matches(')').count() as i32;
+            // Type declaration ends when balanced and ends with semicolon or newline with no continuation
+            if ts_type_depth <= 0
+                && (trimmed.ends_with(';')
+                    || (!trimmed.ends_with('|')
+                        && !trimmed.ends_with('&')
+                        && !trimmed.ends_with(',')
+                        && !trimmed.ends_with('{')))
+            {
+                in_ts_type = false;
+            }
+            continue;
+        }
+
+        // Detect TypeScript type alias start
+        if trimmed.starts_with("type ") || trimmed.starts_with("export type ") {
+            // Check if it's a single-line type
+            let has_equals = trimmed.contains('=');
+            if has_equals {
+                ts_type_depth = trimmed.matches('{').count() as i32
+                    - trimmed.matches('}').count() as i32
+                    + trimmed.matches('<').count() as i32
+                    - trimmed.matches('>').count() as i32
+                    + trimmed.matches('(').count() as i32
+                    - trimmed.matches(')').count() as i32;
+                // Check if complete on one line
+                if ts_type_depth <= 0
+                    && (trimmed.ends_with(';')
+                        || (!trimmed.ends_with('|')
+                            && !trimmed.ends_with('&')
+                            && !trimmed.ends_with(',')
+                            && !trimmed.ends_with('{')))
+                {
+                    // Single line type, just skip
+                    continue;
+                }
+                in_ts_type = true;
+            }
+            continue;
+        }
+
+        if !trimmed.is_empty() && !is_macro_call_line(trimmed) {
             // Check if this is a hoistable const (const with literal value, no function calls)
             if is_hoistable_const(trimmed) {
                 hoisted_lines.push(line.to_string());
@@ -236,10 +418,18 @@ pub(crate) fn compile_script_setup_inline(
         let options_args = ctx.macros.define_options.as_ref().unwrap().args.trim();
         output.push_str(options_args);
         output.push_str(", {\n");
+    } else if is_ts {
+        // TypeScript: use defineComponent
+        output.push_str("export default defineComponent({\n");
     } else {
         output.push_str("export default {\n");
     }
-    output.push_str("  __name: '");
+    // Use 'name' for defineComponent (TypeScript), '__name' for plain object (JavaScript)
+    if is_ts {
+        output.push_str("  name: '");
+    } else {
+        output.push_str("  __name: '");
+    }
     output.push_str(component_name);
     output.push_str("',\n");
 
@@ -251,27 +441,107 @@ pub(crate) fn compile_script_setup_inline(
         .as_ref()
         .map(|wd| extract_with_defaults_defaults(&wd.args));
 
+    // Collect model names from defineModel calls (needed before props)
+    let model_infos: Vec<(String, String, Option<String>)> = ctx
+        .macros
+        .define_models
+        .iter()
+        .map(|m| {
+            // Extract model name from args: defineModel('count') -> 'count', defineModel() -> 'modelValue'
+            let model_name = if m.args.trim().is_empty() {
+                "modelValue".to_string()
+            } else {
+                // Check if first arg is a string literal (model name)
+                let args = m.args.trim();
+                if args.starts_with('\'') || args.starts_with('"') {
+                    // Extract the string literal
+                    args.trim_matches(|c| c == '\'' || c == '"')
+                        .split(',')
+                        .next()
+                        .unwrap_or("modelValue")
+                        .trim_matches(|c| c == '\'' || c == '"')
+                        .to_string()
+                } else {
+                    "modelValue".to_string()
+                }
+            };
+            let binding_name = m.binding_name.clone().unwrap_or_else(|| model_name.clone());
+            let options = if m.args.trim().is_empty() {
+                None
+            } else {
+                // Extract options (second argument or first if not a string)
+                let args = m.args.trim();
+                if args.starts_with('{') {
+                    Some(args.to_string())
+                } else if args.contains(',') {
+                    // defineModel('name', { options })
+                    args.split_once(',')
+                        .map(|(_, opts)| opts.trim().to_string())
+                } else {
+                    None
+                }
+            };
+            (model_name, binding_name, options)
+        })
+        .collect();
+
     if let Some(ref props_macro) = ctx.macros.define_props {
         if let Some(ref type_args) = props_macro.type_args {
             // Type-based props: extract prop definitions from type
             let prop_types = extract_prop_types_from_type(type_args);
-            if !prop_types.is_empty() {
+            if !prop_types.is_empty() || !model_infos.is_empty() {
                 output.push_str("  props: {\n");
-                for (name, prop_type) in &prop_types {
+                // Sort props for deterministic output
+                let mut sorted_props: Vec<_> = prop_types.iter().collect();
+                sorted_props.sort_by(|a, b| a.0.cmp(b.0));
+                for (name, prop_type) in sorted_props {
                     output.push_str("    ");
                     output.push_str(name);
                     output.push_str(": { type: ");
                     output.push_str(&prop_type.js_type);
+                    // Add PropType for TypeScript output
+                    if is_ts {
+                        if let Some(ref ts_type) = prop_type.ts_type {
+                            output.push_str(" as PropType<");
+                            output.push_str(ts_type);
+                            output.push('>');
+                        }
+                    }
                     output.push_str(", required: ");
                     output.push_str(if prop_type.optional { "false" } else { "true" });
-                    // Add default value if withDefaults provided one
+                    // Add default value from withDefaults or props destructure
+                    let mut has_default = false;
                     if let Some(ref defaults) = with_defaults_args {
                         if let Some(default_val) = defaults.get(name.as_str()) {
                             output.push_str(", default: ");
                             output.push_str(default_val);
+                            has_default = true;
+                        }
+                    }
+                    // Also check props destructure defaults (Vue 3.4+ reactive props destructure)
+                    if !has_default {
+                        if let Some(ref destructure) = ctx.macros.props_destructure {
+                            if let Some(binding) = destructure.bindings.get(name) {
+                                if let Some(ref default_val) = binding.default {
+                                    output.push_str(", default: ");
+                                    output.push_str(default_val);
+                                }
+                            }
                         }
                     }
                     output.push_str(" },\n");
+                }
+                // Add model props if any
+                for (model_name, _, options) in &model_infos {
+                    output.push_str("    ");
+                    output.push_str(model_name);
+                    output.push_str(": ");
+                    if let Some(opts) = options {
+                        output.push_str(opts);
+                    } else {
+                        output.push_str("{}");
+                    }
+                    output.push_str(",\n");
                 }
                 output.push_str("  },\n");
             }
@@ -307,29 +577,65 @@ pub(crate) fn compile_script_setup_inline(
         }
     }
 
-    // Emits definition
+    // Add model props to props definition if defineModel was used and no defineProps
+    if !model_infos.is_empty() && ctx.macros.define_props.is_none() {
+        output.push_str("  props: {\n");
+        for (model_name, _binding_name, options) in &model_infos {
+            output.push_str("    ");
+            output.push_str(model_name);
+            output.push_str(": ");
+            if let Some(opts) = options {
+                output.push_str(opts);
+            } else {
+                output.push_str("{}");
+            }
+            output.push_str(",\n");
+        }
+        output.push_str("  },\n");
+    }
+
+    // Emits definition - combine defineEmits and defineModel emits
+    let mut all_emits: Vec<String> = Vec::new();
+
+    // Collect emits from defineEmits
     if let Some(ref emits_macro) = ctx.macros.define_emits {
         if !emits_macro.args.is_empty() {
-            // Runtime array/object syntax: defineEmits(['click', 'update'])
-            output.push_str("  emits: ");
-            output.push_str(&emits_macro.args);
-            output.push_str(",\n");
+            // Runtime array syntax: defineEmits(['click', 'update'])
+            // Parse the array to extract event names
+            let args = emits_macro.args.trim();
+            if args.starts_with('[') && args.ends_with(']') {
+                let inner = &args[1..args.len() - 1];
+                for part in inner.split(',') {
+                    let name = part.trim().trim_matches(|c| c == '\'' || c == '"');
+                    if !name.is_empty() {
+                        all_emits.push(name.to_string());
+                    }
+                }
+            }
         } else if let Some(ref type_args) = emits_macro.type_args {
             // Type-based syntax: defineEmits<{ (e: 'click'): void }>()
             let emit_names = extract_emit_names_from_type(type_args);
-            if !emit_names.is_empty() {
-                output.push_str("  emits: [");
-                for (i, name) in emit_names.iter().enumerate() {
-                    if i > 0 {
-                        output.push_str(", ");
-                    }
-                    output.push('"');
-                    output.push_str(name);
-                    output.push('"');
-                }
-                output.push_str("],\n");
-            }
+            all_emits.extend(emit_names);
         }
+    }
+
+    // Add model update events
+    for (model_name, _, _) in &model_infos {
+        all_emits.push(format!("update:{}", model_name));
+    }
+
+    // Output combined emits
+    if !all_emits.is_empty() {
+        output.push_str("  emits: [");
+        for (i, name) in all_emits.iter().enumerate() {
+            if i > 0 {
+                output.push_str(", ");
+            }
+            output.push('"');
+            output.push_str(name);
+            output.push('"');
+        }
+        output.push_str("],\n");
     }
 
     // Setup function - include destructured args based on macros used
@@ -384,6 +690,17 @@ pub(crate) fn compile_script_setup_inline(
         }
     }
 
+    // Model bindings: const model = _useModel(__props, 'modelValue')
+    if !model_infos.is_empty() {
+        for (model_name, binding_name, _) in &model_infos {
+            output.push_str("const ");
+            output.push_str(binding_name);
+            output.push_str(" = _useModel(__props, \"");
+            output.push_str(model_name);
+            output.push_str("\")\n");
+        }
+    }
+
     // Setup code body - transform props destructure references
     let setup_code = setup_lines.join("\n");
     let transformed_setup = if let Some(ref destructure) = ctx.macros.props_destructure {
@@ -430,17 +747,29 @@ pub(crate) fn compile_script_setup_inline(
 
     output.push_str("}\n");
     output.push('\n');
-    if has_options {
+    if has_options || is_ts {
+        // Close defineComponent() or Object.assign()
         output.push_str("})\n");
     } else {
         output.push_str("}\n");
     }
 
-    // Transform TypeScript if needed
-    let final_code = if is_ts {
-        transform_typescript_to_js(&output)
-    } else {
+    // Transform TypeScript to JavaScript only for non-TypeScript output
+    // For TypeScript output, keep the code as-is
+    let transformed_code = if is_ts {
+        // Keep TypeScript as-is (no transformation)
         output
+    } else {
+        // Transform TypeScript syntax to JavaScript
+        transform_typescript_to_js(&output)
+    };
+
+    // Prepend preserved normal script content (type definitions, interfaces, etc.)
+    // This is added AFTER transformation to preserve TypeScript-only constructs
+    let final_code = if let Some(normal_script) = preserved_normal_script {
+        format!("{}\n\n{}", normal_script, transformed_code)
+    } else {
+        transformed_code
     };
 
     Ok(ScriptCompileResult {
@@ -810,7 +1139,10 @@ pub(crate) fn compile_script_setup(
             let prop_types = extract_prop_types_from_type(type_args);
             if !prop_types.is_empty() {
                 output.push_str("  props: {\n");
-                for (name, prop_type) in &prop_types {
+                // Sort props for deterministic output
+                let mut sorted_props: Vec<_> = prop_types.iter().collect();
+                sorted_props.sort_by(|a, b| a.0.cmp(b.0));
+                for (name, prop_type) in sorted_props {
                     output.push_str("    ");
                     output.push_str(name);
                     output.push_str(": { type: ");
@@ -1397,8 +1729,16 @@ fn extract_prop_type_info(
         let name = name_part.trim().trim_end_matches('?').trim();
 
         if !name.is_empty() && is_valid_identifier(name) {
-            let js_type = ts_type_to_js_type(type_part.trim());
-            props.insert(name.to_string(), PropTypeInfo { js_type, optional });
+            let ts_type_str = type_part.trim().to_string();
+            let js_type = ts_type_to_js_type(&ts_type_str);
+            props.insert(
+                name.to_string(),
+                PropTypeInfo {
+                    js_type,
+                    ts_type: Some(ts_type_str),
+                    optional,
+                },
+            );
         }
     }
 }

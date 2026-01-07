@@ -35,6 +35,7 @@ regex = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 criterion = { workspace = true }
+toml = { workspace = true }
 
 [[bench]]
 name = "sfc_parse"

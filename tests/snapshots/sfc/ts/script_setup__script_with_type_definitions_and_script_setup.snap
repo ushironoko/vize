@@ -1,0 +1,32 @@
+---
+source: crates/vue_compiler_sfc/src/snapshot_tests.rs
+assertion_line: 98
+expression: ts_output
+---
+import type { RouteLocation } from "vue-router";
+
+interface TabItem {
+  name: string;
+  label: string;
+}
+
+export type { TabItem };
+
+import { defineComponent, PropType } from 'vue'
+import { Fragment as _Fragment, openBlock as _openBlock, createElementBlock as _createElementBlock, renderList as _renderList, toDisplayString as _toDisplayString } from "vue"
+
+
+export default defineComponent({
+  name: 'test',
+  props: {
+    items: { type: Array as PropType<Array<TabItem>>, required: true },
+  },
+  setup(__props) {
+
+
+return (_ctx, _cache) => {
+  return (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.items, (item) => { return (_openBlock(), _createElementBlock("div", { key: item.name }, "\n    " + _toDisplayString(item.label) + "\n  ", 1 /* TEXT */)) }), 128 /* KEYED_FRAGMENT */))
+}
+}
+
+})

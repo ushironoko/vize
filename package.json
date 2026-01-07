@@ -9,6 +9,7 @@
     "install:plugin": "pnpm -C packages/vite-plugin-vue-compiler-rs install"
   },
   "devDependencies": {
+    "@iarna/toml": "^2.2.5",
     "@vue/compiler-sfc": "3.6.0-beta.1",
     "@vue/compiler-vapor": "3.6.0-beta.1",
     "vue": "3.6.0-beta.1"

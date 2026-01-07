@@ -106,6 +106,40 @@ alias = "cov"
 description = "Show test coverage report"
 run = "cargo run -p vue_test_runner --bin coverage"
 
+[tasks."expected:generate"]
+alias = "egen"
+description = "Generate expected outputs from Vue's official compiler"
+run = "node --experimental-strip-types scripts/generate-expected.ts"
+
+[tasks."expected:generate:sfc"]
+alias = "egens"
+description = "Generate expected outputs for SFC tests"
+run = "node --experimental-strip-types scripts/generate-expected.ts sfc/basic sfc/script-setup"
+
+# =============================================================================
+# Snapshot Management (TS/JSX/TSX outputs)
+# =============================================================================
+
+[tasks.snapshot]
+alias = "snap"
+description = "Run snapshot tests and review changes"
+run = "cargo insta test -p vue_compiler_sfc -- snapshot_tests && cargo insta review"
+
+[tasks."snapshot:test"]
+alias = "snapt"
+description = "Run snapshot tests only"
+run = "cargo insta test -p vue_compiler_sfc -- snapshot_tests"
+
+[tasks."snapshot:review"]
+alias = "snapr"
+description = "Review pending snapshot changes"
+run = "cargo insta review"
+
+[tasks."snapshot:accept"]
+alias = "snapa"
+description = "Accept all pending snapshot changes"
+run = "cargo insta accept"
+
 [tasks."coverage:verbose"]
 alias = "covv"
 description = "Show coverage with failing test names"
