@@ -58,8 +58,17 @@ vuec "src/**/*.vue" -o dist
 
 Some Vue 3.3+ features are not yet fully supported:
 - Generic component declarations (`<script setup generic="T">`)
-- Complex TypeScript type extraction from interfaces
 - `as const` assertions in multiline expressions
+
+### Recent Improvements
+
+- **TypeScript Interface Resolution**: `defineProps<Props>()` now correctly resolves interface and type alias references defined in the same file
+- **Props Destructure Defaults**: Default values in props destructure patterns are properly handled
+- **withDefaults Support**: `withDefaults(defineProps<Props>(), { ... })` works correctly with interface references
+- **Downcompile Mode Fix**: TypeScript files are now correctly transpiled to JavaScript in downcompile mode (default), including complex patterns like `ref<HTMLElement | null>(null)`
+- **Component Resolution**: Custom components like `v-btn` now correctly generate `resolveComponent` calls in inline templates
+- **v-on Object Spread**: `v-on="handlers"` object spread syntax is now correctly compiled using `toHandlers`
+- **$emit Prefixing**: `$emit` and other Vue instance properties are now correctly prefixed with `_ctx.` in template expressions
 
 ## Quick Start
 
@@ -82,28 +91,29 @@ Run `mise tasks` to see all available commands.
 cargo build -p vue_compiler_cli --release
 
 # Compile single file
-./target/release/vue-compiler "src/**/*.vue"
+./target/release/vuec "src/**/*.vue"
 
 # Compile with output directory
-./target/release/vue-compiler "src/**/*.vue" -o dist
+./target/release/vuec "src/**/*.vue" -o dist
 
 # Show statistics only
-./target/release/vue-compiler "src/**/*.vue" -f stats
+./target/release/vuec "src/**/*.vue" -f stats
 
 # SSR mode
-./target/release/vue-compiler "src/**/*.vue" --ssr
+./target/release/vuec "src/**/*.vue" --ssr
 
 # Control thread count
-./target/release/vue-compiler "src/**/*.vue" -j 4
+./target/release/vuec "src/**/*.vue" -j 4
 ```
 
 Options:
 - `-o, --output <DIR>` - Output directory (stdout if not specified)
 - `-f, --format <FORMAT>` - Output format: `js`, `json`, `stats` (default: js)
 - `-j, --threads <N>` - Number of threads (default: CPU count)
+- `--script-ext <MODE>` - Script extension handling: `preserve` or `downcompile` (default: downcompile)
 - `--ssr` - Enable SSR mode
 - `--continue-on-error` - Continue on errors
-- `-v, --verbose` - Verbose output
+- `--profile` - Show timing profile breakdown
 
 ### Node.js / Browser
 

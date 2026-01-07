@@ -28,6 +28,8 @@ pub struct ScriptCompileResult {
 pub(crate) struct TemplateParts<'a> {
     pub imports: &'a str,
     pub hoisted: &'a str,
+    /// Component/directive resolution statements (inside render function, before return)
+    pub preamble: &'a str,
     pub render_body: &'a str,
 }
 
@@ -725,6 +727,19 @@ pub(crate) fn compile_script_setup_inline(
     output.push('\n');
     if !template.render_body.is_empty() {
         output.push_str("return (_ctx, _cache) => {\n");
+
+        // Output component/directive resolution statements (preamble)
+        for line in template.preamble.lines() {
+            if !line.trim().is_empty() {
+                output.push_str("  ");
+                output.push_str(line);
+                output.push('\n');
+            }
+        }
+        if !template.preamble.is_empty() {
+            output.push('\n');
+        }
+
         // Indent the render body properly
         let mut first_line = true;
         for line in template.render_body.lines() {

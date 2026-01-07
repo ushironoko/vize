@@ -9,6 +9,7 @@ import * as parserBabel from 'prettier/plugins/babel';
 import * as parserEstree from 'prettier/plugins/estree';
 import * as parserTypescript from 'prettier/plugins/typescript';
 import * as parserCss from 'prettier/plugins/postcss';
+import ts from 'typescript';
 
 // Convert Map objects to plain objects recursively (for serde_wasm_bindgen output)
 function mapToObject(value: unknown): unknown {
@@ -58,6 +59,8 @@ const cssOptions = ref<CssCompileOptions>({
 const compiler = shallowRef<Awaited<ReturnType<typeof loadWasm>> | null>(null);
 const formattedCode = ref<string>('');
 const formattedCss = ref<string>('');
+const formattedJsCode = ref<string>('');
+const codeViewMode = ref<'ts' | 'js'>('ts');
 
 // Helper to format code with Prettier
 async function formatCode(code: string, parser: 'babel' | 'typescript'): Promise<string> {
@@ -81,6 +84,23 @@ async function formatCss(code: string): Promise<string> {
       plugins: [parserCss],
       printWidth: 80,
     });
+  } catch {
+    return code;
+  }
+}
+
+// Transpile TypeScript to JavaScript
+function transpileToJs(code: string): string {
+  try {
+    const result = ts.transpileModule(code, {
+      compilerOptions: {
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ESNext,
+        jsx: ts.JsxEmit.Preserve,
+        removeComments: false,
+      },
+    });
+    return result.outputText;
   } catch {
     return code;
   }
@@ -138,14 +158,29 @@ async function compile() {
             ast: result.template?.ast || {},
             helpers: result.template?.helpers || [],
           };
-          // Format JS code
-          formattedCode.value = await formatCode(result.script.code, 'babel');
+          // Detect TypeScript from script lang
+          const scriptLang = result.descriptor.scriptSetup?.lang || result.descriptor.script?.lang;
+          const usesTs = scriptLang === 'ts' || scriptLang === 'tsx';
+          console.log('scriptLang:', scriptLang, 'usesTs:', usesTs);
+          console.log('raw code:', result.script.code);
+          // Format code with appropriate parser
+          formattedCode.value = await formatCode(result.script.code, usesTs ? 'typescript' : 'babel');
+          console.log('formattedCode:', formattedCode.value);
+          // Also generate JS version for TypeScript
+          if (usesTs) {
+            const jsCode = transpileToJs(result.script.code);
+            formattedJsCode.value = await formatCode(jsCode, 'babel');
+          } else {
+            formattedJsCode.value = '';
+          }
         } else if (result?.template) {
           output.value = result.template;
           formattedCode.value = await formatCode(result.template.code, 'babel');
+          formattedJsCode.value = '';
         } else {
           output.value = null;
           formattedCode.value = '';
+          formattedJsCode.value = '';
         }
       } catch (sfcError) {
         console.error('SFC compile error:', sfcError);
@@ -318,14 +353,31 @@ onMounted(async () => {
           <template v-else-if="output">
             <!-- Code Tab -->
             <div v-if="activeTab === 'code'" class="code-output">
-              <h4>Compiled Code {{ isTypeScript ? '(TypeScript)' : '' }}</h4>
+              <div class="code-header">
+                <h4>Compiled Code</h4>
+                <div v-if="isTypeScript" class="code-mode-toggle">
+                  <button :class="['toggle-btn', { active: codeViewMode === 'ts' }]" @click="codeViewMode = 'ts'">TS</button>
+                  <button :class="['toggle-btn', { active: codeViewMode === 'js' }]" @click="codeViewMode = 'js'">JS</button>
+                </div>
+              </div>
               <div class="code-actions">
-                <button @click="copyToClipboard(formattedCode || output.code)" class="btn-ghost">Copy</button>
+                <button @click="copyToClipboard(isTypeScript && codeViewMode === 'js' ? formattedJsCode : (formattedCode || output.code))" class="btn-ghost">Copy</button>
               </div>
               <div v-if="sfcResult?.bindingMetadata" class="bindings-comment">
                 <CodeHighlight :code="'/* Analyzed bindings: ' + JSON.stringify(sfcResult.bindingMetadata, null, 2) + ' */'" language="javascript" />
               </div>
-              <CodeHighlight :code="formattedCode || output.code" :language="isTypeScript ? 'typescript' : 'javascript'" show-line-numbers />
+              <CodeHighlight
+                v-if="isTypeScript && codeViewMode === 'js'"
+                :code="formattedJsCode"
+                language="javascript"
+                show-line-numbers
+              />
+              <CodeHighlight
+                v-else
+                :code="formattedCode || output.code"
+                :language="isTypeScript ? 'typescript' : 'javascript'"
+                show-line-numbers
+              />
             </div>
 
             <!-- AST Tab -->

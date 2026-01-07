@@ -194,6 +194,7 @@ impl Compiler {
             },
             script: ScriptCompileOptions {
                 id: Some(filename.clone()),
+                is_ts,
                 ..Default::default()
             },
             template: TemplateCompileOptions {
@@ -235,7 +236,7 @@ impl Compiler {
             css: sfc_result.css,
             errors: sfc_result.errors.into_iter().map(|e| e.message).collect(),
             warnings: sfc_result.warnings.into_iter().map(|e| e.message).collect(),
-            binding_metadata: binding_metadata,
+            binding_metadata,
         };
 
         serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))

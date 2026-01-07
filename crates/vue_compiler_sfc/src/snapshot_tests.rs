@@ -61,8 +61,7 @@ fn load_fixture(path: &PathBuf) -> Result<Fixture, Box<dyn std::error::Error>> {
 /// Normalize a test case name to a valid snapshot file name
 fn normalize_name(name: &str) -> String {
     name.to_lowercase()
-        .replace(' ', "_")
-        .replace('-', "_")
+        .replace([' ', '-'], "_")
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_')
         .collect()

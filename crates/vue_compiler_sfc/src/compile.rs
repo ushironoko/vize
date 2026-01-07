@@ -44,25 +44,11 @@ pub fn compile_sfc(
             .map(|s| s.attrs.contains_key("vapor"))
             .unwrap_or(false);
 
-    // Detect TypeScript from script lang attribute, but allow options to override
-    let detected_ts = descriptor
-        .script_setup
-        .as_ref()
-        .and_then(|s| s.lang.as_ref())
-        .map(|lang| lang == "ts" || lang == "tsx")
-        .unwrap_or(false)
-        || descriptor
-            .script
-            .as_ref()
-            .and_then(|s| s.lang.as_ref())
-            .map(|lang| lang == "ts" || lang == "tsx")
-            .unwrap_or(false);
-    // Use options.script.is_ts if explicitly set, otherwise use detected value
-    let is_ts = if options.script.is_ts || options.template.is_ts {
-        true
-    } else {
-        detected_ts
-    };
+    // is_ts controls output format:
+    // - true: output TypeScript (preserve TypeScript syntax)
+    // - false: output JavaScript (transpile TypeScript to JS)
+    // The CLI should set is_ts = true for preserve mode, false for downcompile mode
+    let is_ts = options.script.is_ts || options.template.is_ts;
 
     // Extract component name from filename
     let component_name = extract_component_name(filename);
@@ -208,7 +194,16 @@ pub fn compile_sfc(
     // (except for export default which is handled by script setup)
     let normal_script_content = if has_script {
         let script = descriptor.script.as_ref().unwrap();
-        Some(extract_normal_script_content(&script.content, is_ts))
+        // Check if source is TypeScript
+        let source_is_ts = script
+            .lang
+            .as_ref()
+            .is_some_and(|l| l == "ts" || l == "tsx");
+        Some(extract_normal_script_content(
+            &script.content,
+            source_is_ts,
+            is_ts,
+        ))
     } else {
         None
     };
@@ -239,14 +234,15 @@ pub fn compile_sfc(
     };
 
     // Extract render function code from template result
-    let (template_imports, template_hoisted, render_body) = match &template_result {
-        Some(Ok(template_code)) => extract_template_parts(template_code),
-        Some(Err(e)) => {
-            errors.push(e.clone());
-            (String::new(), String::new(), String::new())
-        }
-        None => (String::new(), String::new(), String::new()),
-    };
+    let (template_imports, template_hoisted, template_preamble, render_body) =
+        match &template_result {
+            Some(Ok(template_code)) => extract_template_parts(template_code),
+            Some(Err(e)) => {
+                errors.push(e.clone());
+                (String::new(), String::new(), String::new(), String::new())
+            }
+            None => (String::new(), String::new(), String::new(), String::new()),
+        };
 
     // Compile script setup with inline template
     let script_result = compile_script_setup_inline(
@@ -256,6 +252,7 @@ pub fn compile_sfc(
         TemplateParts {
             imports: &template_imports,
             hoisted: &template_hoisted,
+            preamble: &template_preamble,
             render_body: &render_body,
         },
         normal_script_content.as_deref(),
@@ -325,13 +322,22 @@ fn extract_component_name(filename: &str) -> String {
 /// Extract content from normal script block that should be preserved when both
 /// `<script>` and `<script setup>` exist.
 /// This includes imports, type definitions, interfaces, but excludes `export default`.
-fn extract_normal_script_content(content: &str, is_ts: bool) -> String {
+///
+/// Parameters:
+/// - `content`: The script content
+/// - `source_is_ts`: Whether the source script is TypeScript (has lang="ts")
+/// - `output_is_ts`: Whether to preserve TypeScript in output (false = transpile to JS)
+fn extract_normal_script_content(content: &str, source_is_ts: bool, output_is_ts: bool) -> String {
     use oxc_allocator::Allocator;
     use oxc_ast::ast::Statement;
+    use oxc_codegen::Codegen;
     use oxc_parser::Parser;
+    use oxc_semantic::SemanticBuilder;
     use oxc_span::{GetSpan, SourceType};
+    use oxc_transformer::{TransformOptions, Transformer};
 
-    let source_type = if is_ts {
+    // Always parse as TypeScript if source is TypeScript
+    let source_type = if source_is_ts {
         SourceType::ts()
     } else {
         SourceType::mjs()
@@ -353,13 +359,14 @@ fn extract_normal_script_content(content: &str, is_ts: bool) -> String {
     let mut output = String::new();
     let mut last_end = 0;
 
+    // Collect spans of statements to skip (export default declarations)
+    let mut skip_spans: Vec<(u32, u32)> = Vec::new();
+
     for stmt in program.body.iter() {
         match stmt {
             // Skip export default declarations
             Statement::ExportDefaultDeclaration(_) => {
-                // Copy content before this statement
-                output.push_str(&content[last_end..stmt.span().start as usize]);
-                last_end = stmt.span().end as usize;
+                skip_spans.push((stmt.span().start, stmt.span().end));
             }
             // Skip named exports that include default: export { foo as default }
             Statement::ExportNamedDeclaration(decl) => {
@@ -368,20 +375,52 @@ fn extract_normal_script_content(content: &str, is_ts: bool) -> String {
                         || matches!(&s.exported, oxc_ast::ast::ModuleExportName::IdentifierReference(name) if name.name == "default")
                 });
                 if has_default_export {
-                    output.push_str(&content[last_end..stmt.span().start as usize]);
-                    last_end = stmt.span().end as usize;
+                    skip_spans.push((stmt.span().start, stmt.span().end));
                 }
             }
             _ => {}
         }
     }
 
-    // Copy remaining content
+    // Build output by copying content, skipping the export default statements
+    for (start, end) in &skip_spans {
+        output.push_str(&content[last_end..*start as usize]);
+        last_end = *end as usize;
+    }
     if last_end < content.len() {
         output.push_str(&content[last_end..]);
     }
 
-    output.trim().to_string()
+    let extracted = output.trim().to_string();
+
+    // If source is TypeScript and we need JavaScript output, transpile
+    if source_is_ts && !output_is_ts {
+        // Re-parse the extracted content
+        let allocator2 = Allocator::default();
+        let ret2 = Parser::new(&allocator2, &extracted, SourceType::ts()).parse();
+        if ret2.errors.is_empty() {
+            let mut program2 = ret2.program;
+
+            // Run semantic analysis
+            let semantic_ret = SemanticBuilder::new().build(&program2);
+            if semantic_ret.errors.is_empty() {
+                let (symbols, scopes) = semantic_ret.semantic.into_symbol_table_and_scope_tree();
+
+                // Transform TypeScript to JavaScript
+                let transform_options = TransformOptions::default();
+                let transform_ret =
+                    Transformer::new(&allocator2, std::path::Path::new(""), &transform_options)
+                        .build_with_symbols_and_scopes(symbols, scopes, &mut program2);
+
+                if transform_ret.errors.is_empty() {
+                    // Generate JavaScript code
+                    return Codegen::new().build(&program2).code;
+                }
+            }
+        }
+    }
+
+    extracted
 }
 
 #[cfg(test)]
@@ -694,8 +733,9 @@ export default {
   name: 'Tab'
 }
 "#;
-        let result = extract_normal_script_content(input, true);
-        eprintln!("Extracted normal script content:\n{}", result);
+        // Test preserving TypeScript output
+        let result = extract_normal_script_content(input, true, true);
+        eprintln!("Extracted normal script content (preserve TS):\n{}", result);
 
         // Should contain imports
         assert!(

@@ -16,13 +16,27 @@ fn has_vbind_object(props: &[PropNode<'_>]) -> bool {
     })
 }
 
-/// Check if there are other props besides v-bind object
+/// Check if there's a v-on without argument (event object spread)
+fn has_von_object(props: &[PropNode<'_>]) -> bool {
+    props.iter().any(|p| {
+        if let PropNode::Directive(dir) = p {
+            return dir.name == "on" && dir.arg.is_none();
+        }
+        false
+    })
+}
+
+/// Check if there are other props besides v-bind/v-on object spreads
 fn has_other_props(props: &[PropNode<'_>]) -> bool {
     props.iter().any(|p| match p {
         PropNode::Attribute(_) => true,
         PropNode::Directive(dir) => {
             // v-bind without arg is the object spread, not a regular prop
             if dir.name == "bind" && dir.arg.is_none() {
+                return false;
+            }
+            // v-on without arg is the event object spread, not a regular prop
+            if dir.name == "on" && dir.arg.is_none() {
                 return false;
             }
             is_supported_directive(dir)
@@ -44,6 +58,25 @@ fn generate_vbind_object_exp(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
     }
 }
 
+/// Generate the v-on object expression wrapped with toHandlers
+fn generate_von_object_exp(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
+    ctx.use_helper(RuntimeHelper::ToHandlers);
+    ctx.push(ctx.helper(RuntimeHelper::ToHandlers));
+    ctx.push("(");
+    for p in props {
+        if let PropNode::Directive(dir) = p {
+            if dir.name == "on" && dir.arg.is_none() {
+                if let Some(exp) = &dir.exp {
+                    generate_expression(ctx, exp);
+                    ctx.push(", true"); // true for handlerOnly
+                    break;
+                }
+            }
+        }
+    }
+    ctx.push(")");
+}
+
 /// Generate props object
 pub fn generate_props(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
     if props.is_empty() {
@@ -51,22 +84,46 @@ pub fn generate_props(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
         return;
     }
 
-    // Check for v-bind object (v-bind="attrs")
+    // Check for v-bind object (v-bind="attrs") and v-on object (v-on="handlers")
     let has_vbind_obj = has_vbind_object(props);
+    let has_von_obj = has_von_object(props);
     let has_other = has_other_props(props);
 
-    if has_vbind_obj {
-        if has_other {
-            // v-bind="attrs" with other props: _mergeProps(_ctx.attrs, { ...otherProps })
+    // Handle cases with object spreads (v-bind="obj" or v-on="obj")
+    if has_vbind_obj || has_von_obj {
+        if has_other || (has_vbind_obj && has_von_obj) {
+            // Multiple spreads or spread with other props: _mergeProps(...)
             ctx.use_helper(RuntimeHelper::MergeProps);
             ctx.push(ctx.helper(RuntimeHelper::MergeProps));
             ctx.push("(");
-            generate_vbind_object_exp(ctx, props);
-            ctx.push(", ");
-            // Generate other props as object
-            generate_props_object(ctx, props, true);
+
+            let mut first_merge_arg = true;
+
+            // Add v-bind object spread
+            if has_vbind_obj {
+                generate_vbind_object_exp(ctx, props);
+                first_merge_arg = false;
+            }
+
+            // Add v-on object spread (wrapped with toHandlers)
+            if has_von_obj {
+                if !first_merge_arg {
+                    ctx.push(", ");
+                }
+                generate_von_object_exp(ctx, props);
+                first_merge_arg = false;
+            }
+
+            // Add other props as object
+            if has_other {
+                if !first_merge_arg {
+                    ctx.push(", ");
+                }
+                generate_props_object(ctx, props, true);
+            }
+
             ctx.push(")");
-        } else {
+        } else if has_vbind_obj {
             // v-bind="attrs" alone: _normalizeProps(_guardReactiveProps(_ctx.attrs))
             ctx.use_helper(RuntimeHelper::NormalizeProps);
             ctx.use_helper(RuntimeHelper::GuardReactiveProps);
@@ -76,6 +133,9 @@ pub fn generate_props(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
             ctx.push("(");
             generate_vbind_object_exp(ctx, props);
             ctx.push("))");
+        } else {
+            // v-on="handlers" alone: _toHandlers(_ctx.handlers)
+            generate_von_object_exp(ctx, props);
         }
         return;
     }
@@ -100,7 +160,7 @@ pub fn generate_props(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
 fn generate_props_object(
     ctx: &mut CodegenContext,
     props: &[PropNode<'_>],
-    skip_vbind_object: bool,
+    skip_object_spreads: bool,
 ) {
     // Check for static class/style that need to be merged with dynamic
     let static_class = props.iter().find_map(|p| {
@@ -258,8 +318,11 @@ fn generate_props_object(
                 }
             }
             PropNode::Directive(dir) => {
-                // Skip v-bind object (handled separately by generate_props)
-                if skip_vbind_object && dir.name == "bind" && dir.arg.is_none() {
+                // Skip v-bind/v-on object spreads (handled separately by generate_props)
+                if skip_object_spreads
+                    && dir.arg.is_none()
+                    && (dir.name == "bind" || dir.name == "on")
+                {
                     continue;
                 }
                 // Only add comma if directive produces valid output

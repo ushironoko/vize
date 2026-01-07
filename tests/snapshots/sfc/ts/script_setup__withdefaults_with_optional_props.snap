@@ -12,7 +12,7 @@ export default defineComponent({
 
 
 return (_ctx, _cache) => {
-  return (_openBlock(), _createElementBlock("div", null, _toDisplayString(_ctx.msg), 1 /* TEXT */))
+  return (_openBlock(), _createElementBlock("div", null, _toDisplayString(__props.msg), 1 /* TEXT */))
 }
 }
 

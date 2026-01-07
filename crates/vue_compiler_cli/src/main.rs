@@ -4,15 +4,9 @@
 
 use clap::{Parser, ValueEnum};
 use ignore::Walk;
-use oxc_allocator::Allocator;
-use oxc_codegen::Codegen;
-use oxc_parser::Parser as OxcParser;
-use oxc_semantic::SemanticBuilder;
-use oxc_span::SourceType;
-use oxc_transformer::{TransformOptions, Transformer};
 use rayon::prelude::*;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use vue_compiler_sfc::{
@@ -203,54 +197,6 @@ fn detect_script_lang(source: &str) -> String {
     "js".to_string()
 }
 
-/// Transpile TypeScript/TSX/JSX to JavaScript using oxc
-fn transpile_to_js(code: &str, filename: &str, lang: &str) -> Result<String, String> {
-    let source_type = match lang {
-        "ts" => SourceType::ts(),
-        "tsx" => SourceType::tsx(),
-        "jsx" => SourceType::jsx(),
-        _ => return Ok(code.to_string()), // Already JS
-    };
-
-    let allocator = Allocator::default();
-    let ret = OxcParser::new(&allocator, code, source_type).parse();
-
-    if !ret.errors.is_empty() {
-        let error_messages: Vec<_> = ret.errors.iter().map(|e| e.to_string()).collect();
-        return Err(format!("Parse errors: {}", error_messages.join(", ")));
-    }
-
-    let mut program = ret.program;
-
-    // Run semantic analysis to get symbols and scopes
-    let semantic_ret = SemanticBuilder::new()
-        .with_excess_capacity(2.0)
-        .build(&program);
-
-    if !semantic_ret.errors.is_empty() {
-        // If semantic analysis fails, return original code
-        return Ok(code.to_string());
-    }
-
-    let (symbols, scopes) = semantic_ret.semantic.into_symbol_table_and_scope_tree();
-
-    // Transform TypeScript/JSX to JavaScript
-    let transform_options = TransformOptions::default();
-    let ret = Transformer::new(&allocator, Path::new(filename), &transform_options)
-        .build_with_symbols_and_scopes(symbols, scopes, &mut program);
-
-    if !ret.errors.is_empty() {
-        // If transformation fails, return original code
-        return Ok(code.to_string());
-    }
-
-    // Generate JavaScript code
-    let codegen = Codegen::new();
-    let result = codegen.build(&program);
-
-    Ok(result.code)
-}
-
 fn compile_file(
     path: &PathBuf,
     ssr: bool,
@@ -277,6 +223,10 @@ fn compile_file(
 
     // Compile
     let has_scoped = descriptor.styles.iter().any(|s| s.scoped);
+    // Set is_ts based on script_ext mode:
+    // - preserve mode: keep TypeScript output (is_ts = true)
+    // - downcompile mode: transpile to JavaScript (is_ts = false)
+    let is_ts = matches!(script_ext, ScriptExtension::Preserve);
     let compile_opts = SfcCompileOptions {
         parse: SfcParseOptions {
             filename: filename.clone(),
@@ -284,12 +234,14 @@ fn compile_file(
         },
         script: ScriptCompileOptions {
             id: Some(filename.clone()),
+            is_ts,
             ..Default::default()
         },
         template: TemplateCompileOptions {
             id: Some(filename.clone()),
             scoped: has_scoped,
             ssr,
+            is_ts,
             ..Default::default()
         },
         style: StyleCompileOptions {
@@ -301,13 +253,9 @@ fn compile_file(
 
     let result = compile_sfc(&descriptor, compile_opts).map_err(|e| e.message)?;
 
-    // Transpile to JS if downcompile mode is enabled and the script is TypeScript/JSX
-    let output_code = match script_ext {
-        ScriptExtension::Downcompile if script_lang != "js" => {
-            transpile_to_js(&result.code, &filename, &script_lang)?
-        }
-        _ => result.code,
-    };
+    // compile_sfc now handles TypeScript transpilation based on is_ts flag,
+    // so no additional transpilation is needed here
+    let output_code = result.code;
 
     Ok(CompileOutput {
         filename,

@@ -54,6 +54,14 @@ pub struct ScriptCompileContext {
 
     /// The variable name emits is assigned to (e.g., "emit")
     pub emit_decl_id: Option<String>,
+
+    /// TypeScript interface definitions (name -> body)
+    /// Used to resolve type references in defineProps<InterfaceName>()
+    pub interfaces: std::collections::HashMap<String, String>,
+
+    /// TypeScript type alias definitions (name -> body)
+    /// Used to resolve type references in defineProps<TypeName>()
+    pub type_aliases: std::collections::HashMap<String, String>,
 }
 
 impl ScriptCompileContext {
@@ -72,6 +80,8 @@ impl ScriptCompileContext {
             emits_runtime_decl: None,
             emits_type_decl: None,
             emit_decl_id: None,
+            interfaces: std::collections::HashMap::new(),
+            type_aliases: std::collections::HashMap::new(),
         }
     }
 
@@ -101,7 +111,29 @@ impl ScriptCompileContext {
 
         let program = ret.program;
 
-        // Walk through all statements
+        // First pass: collect all TypeScript interfaces and type aliases
+        // This ensures they're available when resolving type references in macros
+        for stmt in program.body.iter() {
+            match stmt {
+                Statement::TSInterfaceDeclaration(iface) => {
+                    let name = iface.id.name.to_string();
+                    let body_start = iface.body.span.start as usize;
+                    let body_end = iface.body.span.end as usize;
+                    let body = source[body_start..body_end].to_string();
+                    self.interfaces.insert(name, body);
+                }
+                Statement::TSTypeAliasDeclaration(type_alias) => {
+                    let name = type_alias.id.name.to_string();
+                    let type_start = type_alias.type_annotation.span().start as usize;
+                    let type_end = type_alias.type_annotation.span().end as usize;
+                    let type_body = source[type_start..type_end].to_string();
+                    self.type_aliases.insert(name, type_body);
+                }
+                _ => {}
+            }
+        }
+
+        // Second pass: process all statements (macros, bindings, etc.)
         for stmt in program.body.iter() {
             self.process_statement(stmt, &source);
         }
@@ -188,13 +220,15 @@ impl ScriptCompileContext {
                                     if is_call_of(inner_call, "defineProps") {
                                         let type_args =
                                             extract_type_args_from_call(inner_call, source);
-                                        self.macros.define_props = Some(MacroCall {
+                                        let props_call = MacroCall {
                                             start: inner_call.span.start as usize,
                                             end: inner_call.span.end as usize,
                                             args: extract_args_from_call(inner_call, source),
                                             type_args,
                                             binding_name: binding_name.clone(),
-                                        });
+                                        };
+                                        self.extract_props_bindings(&props_call);
+                                        self.macros.define_props = Some(props_call);
                                         self.has_define_props_call = true;
                                     }
                                 }
@@ -335,6 +369,24 @@ impl ScriptCompileContext {
                     }
                 }
             }
+            // Handle TypeScript interface declarations
+            Statement::TSInterfaceDeclaration(iface) => {
+                let name = iface.id.name.to_string();
+                // Extract the body as source text
+                let body_start = iface.body.span.start as usize;
+                let body_end = iface.body.span.end as usize;
+                let body = source[body_start..body_end].to_string();
+                self.interfaces.insert(name, body);
+            }
+            // Handle TypeScript type alias declarations
+            Statement::TSTypeAliasDeclaration(type_alias) => {
+                let name = type_alias.id.name.to_string();
+                // Extract the type annotation as source text
+                let type_start = type_alias.type_annotation.span().start as usize;
+                let type_end = type_alias.type_annotation.span().end as usize;
+                let type_body = source[type_start..type_end].to_string();
+                self.type_aliases.insert(name, type_body);
+            }
             _ => {}
         }
     }
@@ -353,8 +405,8 @@ impl ScriptCompileContext {
             "defineSlots" => self.macros.define_slots = Some(call),
             "defineModel" => self.macros.define_models.push(call),
             "withDefaults" => {
-                // Extract prop names from withDefaults
-                self.extract_props_bindings(&call);
+                // Note: Props are extracted from the inner defineProps call
+                // in the separate withDefaults handling block in process_statement
                 self.macros.with_defaults = Some(call);
             }
             _ => {}
@@ -415,17 +467,45 @@ impl ScriptCompileContext {
     /// Extract prop names from TypeScript type arguments
     fn extract_props_from_type_args(&mut self, type_args: &str) {
         let content = type_args.trim();
-        let content = if content.starts_with('{') && content.ends_with('}') {
-            &content[1..content.len() - 1]
+
+        // If it's a type reference (not an inline object type), resolve it
+        let resolved_content = if content.starts_with('{') {
+            // Inline object type - use as is (strip the braces)
+            if content.ends_with('}') {
+                content[1..content.len() - 1].to_string()
+            } else {
+                content.to_string()
+            }
         } else {
-            content
+            // Type reference - look up in interfaces or type_aliases
+            let type_name = content.trim();
+            if let Some(body) = self.interfaces.get(type_name) {
+                // Interface body includes { }, strip them
+                let body = body.trim();
+                if body.starts_with('{') && body.ends_with('}') {
+                    body[1..body.len() - 1].to_string()
+                } else {
+                    body.to_string()
+                }
+            } else if let Some(body) = self.type_aliases.get(type_name) {
+                // Type alias body might be { } or something else
+                let body = body.trim();
+                if body.starts_with('{') && body.ends_with('}') {
+                    body[1..body.len() - 1].to_string()
+                } else {
+                    body.to_string()
+                }
+            } else {
+                // Unknown type reference - can't extract props
+                return;
+            }
         };
 
         // Split by commas/semicolons/newlines (but not inside nested braces)
         let mut depth = 0;
         let mut current = String::new();
 
-        for c in content.chars() {
+        for c in resolved_content.chars() {
             match c {
                 '{' | '<' | '(' | '[' => {
                     depth += 1;
@@ -724,5 +804,74 @@ function increment() { count.value++ }
 
         // Check default value
         assert!(destructure.bindings.get("bar").unwrap().default.is_some());
+    }
+
+    #[test]
+    fn test_define_props_with_interface_reference() {
+        let content = r#"
+interface Props {
+    msg: string
+    count?: number
+}
+const props = defineProps<Props>()
+"#;
+        let mut ctx = ScriptCompileContext::new(content);
+        ctx.analyze();
+
+        // Check interface was captured
+        assert!(ctx.interfaces.contains_key("Props"));
+
+        // Check props were extracted from interface
+        assert!(ctx.has_define_props_call);
+        assert_eq!(ctx.bindings.bindings.get("msg"), Some(&BindingType::Props));
+        assert_eq!(
+            ctx.bindings.bindings.get("count"),
+            Some(&BindingType::Props)
+        );
+    }
+
+    #[test]
+    fn test_define_props_with_type_alias_reference() {
+        let content = r#"
+type Props = {
+    foo: string
+    bar: number
+}
+const props = defineProps<Props>()
+"#;
+        let mut ctx = ScriptCompileContext::new(content);
+        ctx.analyze();
+
+        // Check type alias was captured
+        assert!(ctx.type_aliases.contains_key("Props"));
+
+        // Check props were extracted from type alias
+        assert!(ctx.has_define_props_call);
+        assert_eq!(ctx.bindings.bindings.get("foo"), Some(&BindingType::Props));
+        assert_eq!(ctx.bindings.bindings.get("bar"), Some(&BindingType::Props));
+    }
+
+    #[test]
+    fn test_with_defaults_with_interface() {
+        let content = r#"
+interface Props {
+    msg?: string
+    count?: number
+}
+const props = withDefaults(defineProps<Props>(), {
+    msg: 'hello',
+    count: 0
+})
+"#;
+        let mut ctx = ScriptCompileContext::new(content);
+        ctx.analyze();
+
+        assert!(ctx.has_define_props_call);
+        assert!(ctx.macros.with_defaults.is_some());
+        assert_eq!(ctx.bindings.bindings.get("msg"), Some(&BindingType::Props));
+        assert_eq!(
+            ctx.bindings.bindings.get("count"),
+            Some(&BindingType::Props)
+        );
     }
 }

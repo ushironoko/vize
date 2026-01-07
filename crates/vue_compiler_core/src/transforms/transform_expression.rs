@@ -62,20 +62,10 @@ static JS_GLOBALS: Lazy<FxHashSet<&'static str>> = Lazy::new(|| {
         "document",
         "navigator",
         "globalThis",
-        // Vue
+        // Vue - only $event is a true global (event handler parameter)
+        // Other Vue instance properties ($emit, $props, $slots, $attrs, etc.)
+        // should be prefixed with _ctx. in templates
         "$event",
-        "$el",
-        "$refs",
-        "$slots",
-        "$attrs",
-        "$emit",
-        "$props",
-        "$setup",
-        "$data",
-        "$options",
-        "$watch",
-        "$forceUpdate",
-        "$nextTick",
         // Internal render function parameters
         "_ctx",
         "_cache",

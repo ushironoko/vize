@@ -315,10 +315,13 @@ pub(crate) fn extract_template_parts_full(template_code: &str) -> (String, Strin
     (imports, hoisted, render_fn)
 }
 
-/// Extract imports, hoisted consts, and render body from compiled template code
-pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, String) {
+/// Extract imports, hoisted consts, preamble (component/directive resolution), and render body
+/// from compiled template code.
+/// Returns (imports, hoisted, preamble, render_body)
+pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, String, String) {
     let mut imports = String::new();
     let mut hoisted = String::new();
+    let mut preamble = String::new(); // Component/directive resolution statements
     let mut render_body = String::new();
     let mut in_render = false;
     let mut in_return = false;
@@ -377,6 +380,12 @@ pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, St
                         render_body.pop();
                     }
                 }
+            } else if trimmed.starts_with("const _component_")
+                || trimmed.starts_with("const _directive_")
+            {
+                // Component/directive resolution statements go in preamble
+                preamble.push_str(trimmed);
+                preamble.push('\n');
             }
 
             if brace_depth == 0 {
@@ -388,7 +397,7 @@ pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, St
     // Compact the render body to remove unnecessary line breaks inside function calls
     let compacted = compact_render_body(&render_body);
 
-    (imports, hoisted, compacted)
+    (imports, hoisted, preamble, compacted)
 }
 
 #[cfg(test)]
@@ -412,7 +421,7 @@ export function render(_ctx, _cache) {
   return _createVNode("div", _hoisted_1, "Hello")
 }"#;
 
-        let (imports, hoisted, render_body) = extract_template_parts(template_code);
+        let (imports, hoisted, _preamble, render_body) = extract_template_parts(template_code);
 
         assert!(imports.contains("import"));
         assert!(hoisted.contains("_hoisted_1"));
