@@ -551,10 +551,11 @@ pub fn generate_directive_prop_with_static(
                     if parts.len() == 2 {
                         ctx.push("\"on");
                         // Capitalize the first part (e.g., "update" -> "Update")
-                        let first_part = parts[0];
-                        if let Some(first) = first_part.chars().next() {
+                        // Also convert kebab-case to camelCase
+                        let first_part_camelized = camelize(parts[0]);
+                        if let Some(first) = first_part_camelized.chars().next() {
                             ctx.push(&first.to_uppercase().to_string());
-                            ctx.push(&first_part[1..]);
+                            ctx.push(&first_part_camelized[first.len_utf8()..]);
                         }
                         ctx.push(":");
                         ctx.push(parts[1]);
@@ -566,11 +567,13 @@ pub fn generate_directive_prop_with_static(
                     }
                 } else {
                     // Simple event names don't need quotes (onUpdate, onClick)
+                    // Convert kebab-case to camelCase first (e.g., "select-koma" -> "selectKoma")
+                    let camelized = camelize(event_name);
                     ctx.push("on");
-                    // Capitalize first letter
-                    if let Some(first) = event_name.chars().next() {
+                    // Capitalize first letter of camelized name
+                    if let Some(first) = camelized.chars().next() {
                         ctx.push(&first.to_uppercase().to_string());
-                        ctx.push(&event_name[1..]);
+                        ctx.push(&camelized[first.len_utf8()..]);
                     }
                     // Append event option modifiers (Capture, Once, Passive)
                     for opt_mod in &event_option_modifiers {
