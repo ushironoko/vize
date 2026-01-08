@@ -55,8 +55,7 @@ watch(() => [props.code, props.language], highlight);
   background: #16213e !important;
   border-radius: 12px;
   overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
 }
 
 .code-highlight :deep(code) {
