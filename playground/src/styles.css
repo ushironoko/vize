@@ -134,6 +134,18 @@
   cursor: pointer;
 }
 
+.github-link {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  transition: color 0.2s;
+  margin-left: 8px;
+}
+
+.github-link:hover {
+  color: var(--accent-rust);
+}
+
 /* Main */
 .main {
   display: grid;
