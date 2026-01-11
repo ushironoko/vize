@@ -1,6 +1,6 @@
 {
   "name": "@vizejs/wasm",
-  "version": "0.0.1-alpha.10",
+  "version": "0.0.1-alpha.11",
   "publishConfig": {
     "provenance": true,
     "access": "public"
