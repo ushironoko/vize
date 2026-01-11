@@ -313,7 +313,16 @@ run = """
 cd npm/vize-wasm
 cargo build --release -p vize_vitrine --no-default-features --features wasm --target wasm32-unknown-unknown
 wasm-bindgen ../../target/wasm32-unknown-unknown/release/vize_bindings.wasm --out-dir . --target web
-npm publish --access public
+VERSION=$(node -p "require('./package.json').version")
+if [[ "$VERSION" == *-alpha* ]]; then
+  npm publish --access public --tag alpha
+elif [[ "$VERSION" == *-beta* ]]; then
+  npm publish --access public --tag beta
+elif [[ "$VERSION" == *-rc* ]]; then
+  npm publish --access public --tag rc
+else
+  npm publish --access public
+fi
 """
 
 [tasks."publish:native"]
@@ -322,7 +331,16 @@ description = "Build and publish @vizejs/native to npm (current platform only)"
 run = """
 cd npm/vize-native
 pnpm build
-npm publish --access public
+VERSION=$(node -p "require('./package.json').version")
+if [[ "$VERSION" == *-alpha* ]]; then
+  npm publish --access public --tag alpha
+elif [[ "$VERSION" == *-beta* ]]; then
+  npm publish --access public --tag beta
+elif [[ "$VERSION" == *-rc* ]]; then
+  npm publish --access public --tag rc
+else
+  npm publish --access public
+fi
 """
 
 [tasks."publish:vite-plugin"]
@@ -331,7 +349,16 @@ description = "Build and publish @vizejs/vite-plugin to npm"
 run = """
 cd npm/vite-plugin-vize
 pnpm build
-npm publish --access public
+VERSION=$(node -p "require('./package.json').version")
+if [[ "$VERSION" == *-alpha* ]]; then
+  npm publish --access public --tag alpha
+elif [[ "$VERSION" == *-beta* ]]; then
+  npm publish --access public --tag beta
+elif [[ "$VERSION" == *-rc* ]]; then
+  npm publish --access public --tag rc
+else
+  npm publish --access public
+fi
 """
 
 [tasks."publish:npm"]
