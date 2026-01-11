@@ -1,0 +1,50 @@
+{
+  "name": "vize-art",
+  "displayName": "Vize Art",
+  "description": "Syntax highlighting for Vize Art files (*.art.vue)",
+  "version": "0.0.1-alpha.11",
+  "publisher": "vize",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ubugeeei/vize"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "art-vue",
+        "aliases": ["Art Vue", "art"],
+        "extensions": [".art.vue"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "art-vue",
+        "scopeName": "source.art.vue",
+        "path": "./syntaxes/art.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.js": "javascript",
+          "source.ts": "typescript",
+          "source.css": "css",
+          "source.scss": "scss",
+          "text.html.vue-html": "vue-html"
+        }
+      }
+    ]
+  },
+  "activationEvents": [
+    "onLanguage:art-vue"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  }
+}

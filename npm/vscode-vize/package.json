@@ -1,0 +1,177 @@
+{
+  "name": "vize",
+  "displayName": "Vize",
+  "description": "Vue Language Support powered by Vize - A high-performance language server for Vue SFC",
+  "version": "0.0.1-alpha.11",
+  "publisher": "vize",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ubugeeei/vize"
+  },
+  "bugs": {
+    "url": "https://github.com/ubugeeei/vize/issues"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "vue",
+    "vuejs",
+    "vue3",
+    "sfc",
+    "language-server",
+    "lsp"
+  ],
+  "activationEvents": [
+    "onLanguage:vue"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "vue",
+        "aliases": ["Vue", "vue"],
+        "extensions": [".vue"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/vue.svg",
+          "dark": "./icons/vue.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vue",
+        "scopeName": "source.vue",
+        "path": "./syntaxes/vue.tmLanguage.json",
+        "embeddedLanguages": {
+          "text.html.basic": "html",
+          "source.js": "javascript",
+          "source.ts": "typescript",
+          "source.css": "css",
+          "source.scss": "scss",
+          "source.less": "less",
+          "source.json": "json"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Vize",
+      "properties": {
+        "vize.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the Vize language server"
+        },
+        "vize.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the vize language server executable. Leave empty to use bundled server."
+        },
+        "vize.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Vize language server"
+        },
+        "vize.diagnostics.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable diagnostics"
+        },
+        "vize.completion.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable auto-completion"
+        },
+        "vize.hover.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable hover information"
+        },
+        "vize.codeLens.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable code lens"
+        },
+        "vize.formatting.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable document formatting"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "vize.restartServer",
+        "title": "Restart Language Server",
+        "category": "Vize"
+      },
+      {
+        "command": "vize.showOutput",
+        "title": "Show Output Channel",
+        "category": "Vize"
+      },
+      {
+        "command": "vize.findReferences",
+        "title": "Find All References",
+        "category": "Vize"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "vize.restartServer",
+          "when": "editorLangId == vue"
+        },
+        {
+          "command": "vize.showOutput",
+          "when": "editorLangId == vue"
+        }
+      ]
+    },
+    "semanticTokenTypes": [
+      {
+        "id": "vueDirective",
+        "superType": "keyword",
+        "description": "Vue directive (v-if, v-for, etc.)"
+      },
+      {
+        "id": "vueComponent",
+        "superType": "class",
+        "description": "Vue component"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "vue",
+        "description": "Vue-specific"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run build",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "lint": "eslint src --ext ts",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^3.3.2",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

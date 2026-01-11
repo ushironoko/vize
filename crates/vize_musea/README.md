@@ -12,14 +12,41 @@
 
 ## Features
 
-- Component gallery for Vue components
-- Interactive documentation
-- Component playground
-- Visual regression testing support
+- **Component Gallery** - Browse Vue components visually
+- **Art Files** - Document components with `*.art.vue`
+- **Variants** - Showcase component states
+- **Design Tokens** - Centralized design system (Palette)
 
-## Status
+## Usage
 
-This crate is currently under development.
+### Art File Parser
+
+```rust
+use vize_musea::art::{parse_art, ArtDescriptor};
+
+let art = parse_art(source)?;
+println!("Title: {}", art.title);
+for variant in art.variants {
+    println!("  - {}", variant.name);
+}
+```
+
+### Design Tokens (Palette)
+
+```rust
+use vize_musea::palette::{Palette, Token};
+
+let palette = Palette::from_file("palette.toml")?;
+let color = palette.get("colors.primary")?;
+```
+
+### Docs Generator
+
+```rust
+use vize_musea::docs::generate_docs;
+
+let markdown = generate_docs(&art)?;
+```
 
 ## License
 

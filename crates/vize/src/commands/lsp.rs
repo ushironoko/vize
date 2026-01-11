@@ -5,7 +5,7 @@ use clap::Args;
 #[derive(Args)]
 pub struct LspArgs {
     /// Use stdio for communication (default)
-    #[arg(long)]
+    #[arg(long, default_value = "true")]
     pub stdio: bool,
 
     /// TCP port for socket communication
@@ -18,11 +18,19 @@ pub struct LspArgs {
 }
 
 pub fn run(args: LspArgs) {
-    eprintln!("vize lsp: Starting Language Server...");
-    eprintln!("  stdio: {}", args.stdio);
-    eprintln!("  port: {:?}", args.port);
-    eprintln!("  debug: {}", args.debug);
+    // Create tokio runtime for async LSP server
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
-    // Call vize_maestro
-    vize_maestro::serve();
+    runtime.block_on(async {
+        let result = if let Some(port) = args.port {
+            vize_maestro::serve_tcp(port).await
+        } else {
+            vize_maestro::serve().await
+        };
+
+        if let Err(e) = result {
+            eprintln!("LSP server error: {}", e);
+            std::process::exit(1);
+        }
+    });
 }

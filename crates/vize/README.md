@@ -23,26 +23,36 @@
 - TypeScript/JSX transpilation options
 - `.gitignore` aware file discovery
 
-## Usage
+## Installation
 
 ```bash
-# Compile all .vue files in current directory
-vize
+cargo install vize
+```
 
-# Compile specific files
-vize src/**/*.vue
+## Commands
 
-# Output to custom directory
-vize -o ./build
+### LSP Server
 
-# Enable SSR mode
-vize --ssr
+```bash
+vize lsp              # stdio mode (for VS Code)
+vize lsp --port 9527  # TCP mode (for debugging)
+```
 
-# Show compilation profile
-vize --profile
+### Lint
 
-# Set thread count
-vize -j 4
+```bash
+vize lint src/**/*.vue
+vize lint --fix src/
+```
+
+### Compile
+
+```bash
+vize src/**/*.vue     # Compile all .vue files
+vize -o ./build       # Output to custom directory
+vize --ssr            # Enable SSR mode
+vize --profile        # Show compilation profile
+vize -j 4             # Set thread count
 ```
 
 ## Part of the Vize Art Collection

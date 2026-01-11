@@ -201,14 +201,6 @@ export default defineConfig({
 });
 ```
 
-## Compiler Coverage
-
-| Category | Coverage |
-|----------|----------|
-| SFC (`<script setup>`, macros, CSS) | 93% (13/14) |
-| Template (directives, components) | 100% (22/22) |
-| Vapor mode | 92% (11/12) |
-
 ## Performance
 
 Compiling **15,000 SFC files** (36.9 MB):

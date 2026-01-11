@@ -9,10 +9,13 @@ import { createFilter, generateOutput } from './utils.js';
 
 export type { VizeOptions, CompiledModule };
 
+// Re-export config utilities from vizejs
+export { defineConfig, loadConfig } from 'vizejs';
+export type { VizeConfig, LoadConfigOptions } from 'vizejs';
+
 const VIRTUAL_PREFIX = '\0vize:';
 
 export function vize(options: VizeOptions = {}): Plugin {
-  const filter = createFilter(options.include, options.exclude);
   const cache = new Map<string, CompiledModule>();
   // Map from virtual ID to real file path
   const virtualToReal = new Map<string, string>();
@@ -20,13 +23,10 @@ export function vize(options: VizeOptions = {}): Plugin {
   let isProduction: boolean;
   let root: string;
   let server: ViteDevServer | null = null;
-
-  const scanPatterns = options.scanPatterns ?? ['**/*.vue'];
-  const ignorePatterns = options.ignorePatterns ?? [
-    'node_modules/**',
-    'dist/**',
-    '.git/**',
-  ];
+  let filter: (id: string) => boolean;
+  let scanPatterns: string[];
+  let ignorePatterns: string[];
+  let mergedOptions: VizeOptions;
 
   async function compileAll(): Promise<void> {
     const startTime = performance.now();
@@ -44,8 +44,8 @@ export function vize(options: VizeOptions = {}): Plugin {
     for (const file of files) {
       try {
         compileFile(file, cache, {
-          sourceMap: options.sourceMap ?? !isProduction,
-          ssr: options.ssr ?? false,
+          sourceMap: mergedOptions.sourceMap ?? !isProduction,
+          ssr: mergedOptions.ssr ?? false,
         });
         successCount++;
       } catch (e) {
@@ -80,9 +80,45 @@ export function vize(options: VizeOptions = {}): Plugin {
     name: 'vite-plugin-vize',
     enforce: 'pre',
 
-    configResolved(resolvedConfig: ResolvedConfig) {
-      isProduction = options.isProduction ?? resolvedConfig.isProduction;
+    async configResolved(resolvedConfig: ResolvedConfig) {
       root = options.root ?? resolvedConfig.root;
+      isProduction = options.isProduction ?? resolvedConfig.isProduction;
+
+      // Load config file if enabled
+      let fileConfig: import('vizejs').VizeConfig | null = null;
+      if (options.configMode !== false) {
+        const { loadConfig } = await import('vizejs');
+        fileConfig = await loadConfig(root, {
+          mode: options.configMode ?? 'root',
+          configFile: options.configFile,
+        });
+        if (fileConfig) {
+          console.log('[vize] Loaded config from vize.config file');
+        }
+      }
+
+      // Merge options: plugin options > config file > defaults
+      const viteConfig = fileConfig?.vite ?? {};
+      const compilerConfig = fileConfig?.compiler ?? {};
+
+      mergedOptions = {
+        ...options,
+        ssr: options.ssr ?? compilerConfig.ssr ?? false,
+        sourceMap: options.sourceMap ?? compilerConfig.sourceMap,
+        vapor: options.vapor ?? compilerConfig.vapor ?? false,
+        include: options.include ?? viteConfig.include,
+        exclude: options.exclude ?? viteConfig.exclude,
+        scanPatterns: options.scanPatterns ?? viteConfig.scanPatterns,
+        ignorePatterns: options.ignorePatterns ?? viteConfig.ignorePatterns,
+      };
+
+      filter = createFilter(mergedOptions.include, mergedOptions.exclude);
+      scanPatterns = mergedOptions.scanPatterns ?? ['**/*.vue'];
+      ignorePatterns = mergedOptions.ignorePatterns ?? [
+        'node_modules/**',
+        'dist/**',
+        '.git/**',
+      ];
     },
 
     configureServer(devServer: ViteDevServer) {
@@ -96,6 +132,21 @@ export function vize(options: VizeOptions = {}): Plugin {
     resolveId(id: string, importer?: string) {
       if (id.includes('?vue&type=style')) {
         return id;
+      }
+
+      // If importer is a virtual module, resolve relative imports against the real path
+      if (importer?.startsWith(VIRTUAL_PREFIX)) {
+        const realImporter = virtualToReal.get(importer) ?? importer.slice(VIRTUAL_PREFIX.length);
+        // For non-vue files, resolve relative to the real importer and let Vite handle the rest
+        if (!id.endsWith('.vue') && (id.startsWith('./') || id.startsWith('../'))) {
+          const resolved = path.resolve(path.dirname(realImporter), id);
+          // Check if file exists with common extensions
+          for (const ext of ['', '.ts', '.tsx', '.js', '.jsx', '.json']) {
+            if (fs.existsSync(resolved + ext)) {
+              return resolved + ext;
+            }
+          }
+        }
       }
 
       if (id.endsWith('.vue')) {
@@ -148,8 +199,8 @@ export function vize(options: VizeOptions = {}): Plugin {
         try {
           const source = await read();
           compileFile(file, cache, {
-            sourceMap: options.sourceMap ?? !isProduction,
-            ssr: options.ssr ?? false,
+            sourceMap: mergedOptions.sourceMap ?? !isProduction,
+            ssr: mergedOptions.ssr ?? false,
           }, source);
           console.log(`[vize] Re-compiled: ${path.relative(root, file)}`);
         } catch (e) {

@@ -24,17 +24,37 @@ Similarly, `vize_patina` provides:
 - **Quality assurance** - Ensures Vue SFC code meets standards
 - **Best practices** - Enforces consistent coding conventions
 
-## Status
+## Features
 
-This crate is currently a **work in progress** (WIP).
+- **Fast** - Written in Rust, runs in parallel
+- **Configurable** - Enable/disable rules, set severity
+- **Fixable** - Auto-fix support for many rules
+- **Vue 3 focused** - Composition API, `<script setup>` support
 
-## Planned Features
+## Usage
 
-- Vue template linting rules
-- Script/TypeScript linting integration
-- CSS/SCSS/Less linting
-- Custom rule configuration
-- ESLint-compatible output
+```rust
+use vize_patina::{Linter, LintConfig, RuleSet};
+use vize_atelier_sfc::parse_sfc;
+
+let sfc = parse_sfc(source, Default::default())?;
+let config = LintConfig::default();
+let linter = Linter::new(config);
+
+let diagnostics = linter.lint(&sfc);
+for diag in diagnostics {
+    println!("{}: {}", diag.rule_id, diag.message);
+}
+```
+
+## Rule Categories
+
+| Category | Description |
+|----------|-------------|
+| `art` | Art template syntax rules |
+| `musea` | Design token validation |
+| `essential` | Prevent errors (Vue 3) |
+| `strongly-recommended` | Improve readability |
 
 ## Part of the Vize Art Collection
 

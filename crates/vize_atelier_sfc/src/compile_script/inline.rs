@@ -108,6 +108,8 @@ pub fn compile_script_setup_inline(
     let mut ts_interface_brace_depth: i32 = 0;
     let mut in_ts_type = false;
     let mut ts_type_depth: i32 = 0; // Track angle brackets and parens for complex types
+                                    // Track template literals (backtick strings) to skip content inside them
+    let mut in_template_literal = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -267,7 +269,42 @@ pub fn compile_script_setup_inline(
             continue;
         }
 
-        // Handle imports
+        // Track template literals (backtick strings) - count unescaped backticks
+        // We need to track this to avoid treating code inside template literals as real imports
+        let backtick_count = line
+            .chars()
+            .fold((0, false), |(count, escaped), c| {
+                if escaped {
+                    (count, false)
+                } else if c == '\\' {
+                    (count, true)
+                } else if c == '`' {
+                    (count + 1, false)
+                } else {
+                    (count, false)
+                }
+            })
+            .0;
+
+        // Track if we were in template literal before this line
+        let was_in_template_literal = in_template_literal;
+
+        // Toggle template literal state for each unescaped backtick
+        if backtick_count % 2 == 1 {
+            in_template_literal = !in_template_literal;
+        }
+
+        // Skip import/macro detection for content inside template literals
+        // but still add the content to setup_lines
+        if was_in_template_literal {
+            // This line is inside (or closes) a template literal
+            if !trimmed.is_empty() && !is_macro_call_line(trimmed) {
+                setup_lines.push(line.to_string());
+            }
+            continue;
+        }
+
+        // Handle imports (only when NOT inside template literal)
         if trimmed.starts_with("import ") {
             in_import = true;
             import_buffer.clear();

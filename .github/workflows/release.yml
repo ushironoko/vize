@@ -189,14 +189,10 @@ jobs:
         working-directory: npm/vite-plugin-vize
         run: pnpm publish --access public --no-git-checks
 
-  # Publish crates to crates.io (using Trusted Publishing)
+  # Publish crates to crates.io
   release-crates:
     name: Release crates to crates.io
     runs-on: ubuntu-latest
-    environment: crates-io
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -206,12 +202,9 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Generate OIDC token
-        run: |
-          OIDC_TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=crates.io" -H "User-Agent: actions/oidc-client" -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" | jq -r '.value')
-          echo "CARGO_REGISTRY_TOKEN=crates.io:oidc:${OIDC_TOKEN}" >> $GITHUB_ENV
-
       - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           # Publish in dependency order with delays for index updates
           echo "Publishing vize_carton..."

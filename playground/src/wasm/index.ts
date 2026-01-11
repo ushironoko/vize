@@ -84,6 +84,91 @@ export interface CssCompileResult {
   warnings: string[];
 }
 
+// Musea types
+export interface ArtParseOptions {
+  filename?: string;
+}
+
+export interface ArtMetadata {
+  title: string;
+  description?: string;
+  component?: string;
+  category?: string;
+  tags: string[];
+  status: 'draft' | 'ready' | 'deprecated';
+  order?: number;
+}
+
+export interface ArtVariant {
+  name: string;
+  template: string;
+  isDefault: boolean;
+  skipVrt: boolean;
+  args?: Record<string, unknown>;
+}
+
+export interface ArtDescriptor {
+  filename: string;
+  metadata: ArtMetadata;
+  variants: ArtVariant[];
+  hasScriptSetup: boolean;
+  hasScript: boolean;
+  styleCount: number;
+}
+
+export interface CsfOutput {
+  code: string;
+  filename: string;
+}
+
+// Patina (Linter) types
+export interface LintOptions {
+  filename?: string;
+}
+
+export interface LintDiagnostic {
+  rule: string;
+  severity: 'error' | 'warning';
+  message: string;
+  location: {
+    start: { line: number; column: number; offset: number };
+    end: { line: number; column: number; offset: number };
+  };
+  help?: string;
+}
+
+export interface LintResult {
+  filename: string;
+  errorCount: number;
+  warningCount: number;
+  diagnostics: LintDiagnostic[];
+}
+
+export interface LintRule {
+  name: string;
+  description: string;
+  category: string;
+  fixable: boolean;
+  defaultSeverity: 'error' | 'warning';
+}
+
+// Glyph (Formatter) types
+export interface FormatOptions {
+  printWidth?: number;
+  tabWidth?: number;
+  useTabs?: boolean;
+  semi?: boolean;
+  singleQuote?: boolean;
+  bracketSpacing?: boolean;
+  bracketSameLine?: boolean;
+  singleAttributePerLine?: boolean;
+}
+
+export interface FormatResult {
+  code: string;
+  changed: boolean;
+}
+
 export interface WasmModule {
   compile: (template: string, options: CompilerOptions) => CompileResult;
   compileVapor: (template: string, options: CompilerOptions) => CompileResult;
@@ -91,6 +176,17 @@ export interface WasmModule {
   parseTemplate: (template: string, options: CompilerOptions) => object;
   parseSfc: (source: string, options: CompilerOptions) => SfcDescriptor;
   compileSfc: (source: string, options: CompilerOptions) => SfcCompileResult;
+  // Musea functions
+  parseArt: (source: string, options: ArtParseOptions) => ArtDescriptor;
+  artToCsf: (source: string, options: ArtParseOptions) => CsfOutput;
+  // Patina (Linter) functions
+  lintTemplate: (source: string, options: LintOptions) => LintResult;
+  lintSfc: (source: string, options: LintOptions) => LintResult;
+  getLintRules: () => LintRule[];
+  // Glyph (Formatter) functions
+  formatSfc: (source: string, options: FormatOptions) => FormatResult;
+  formatTemplate: (source: string, options: FormatOptions) => FormatResult;
+  formatScript: (source: string, options: FormatOptions) => FormatResult;
   Compiler: new () => {
     compile: (template: string, options: CompilerOptions) => CompileResult;
     compileVapor: (template: string, options: CompilerOptions) => CompileResult;
@@ -119,7 +215,31 @@ export async function loadWasm(): Promise<WasmModule> {
       // Try to load the actual WASM module
       const wasm = await import('./vize_bindings.js');
       await wasm.default();
-      wasmModule = wasm as unknown as WasmModule;
+
+      // Get mock module to fill in any missing functions
+      const mock = createMockModule();
+
+      // Merge WASM module with mock fallbacks for missing functions
+      wasmModule = {
+        compile: wasm.compile || mock.compile,
+        compileVapor: wasm.compileVapor || mock.compileVapor,
+        compileCss: wasm.compileCss || mock.compileCss,
+        parseTemplate: wasm.parseTemplate || mock.parseTemplate,
+        parseSfc: wasm.parseSfc || mock.parseSfc,
+        compileSfc: wasm.compileSfc || mock.compileSfc,
+        // Musea functions
+        parseArt: wasm.parseArt || mock.parseArt,
+        artToCsf: wasm.artToCsf || mock.artToCsf,
+        // Patina (Linter) functions - may not be in WASM yet
+        lintTemplate: wasm.lintTemplate || mock.lintTemplate,
+        lintSfc: wasm.lintSfc || mock.lintSfc,
+        getLintRules: wasm.getLintRules || mock.getLintRules,
+        // Glyph (Formatter) functions - may not be in WASM yet
+        formatSfc: wasm.formatSfc || mock.formatSfc,
+        formatTemplate: wasm.formatTemplate || mock.formatTemplate,
+        formatScript: wasm.formatScript || mock.formatScript,
+        Compiler: wasm.Compiler || mock.Compiler,
+      };
       usingMock = false;
       return wasmModule;
     } catch (e) {
@@ -369,6 +489,811 @@ function createMockModule(): WasmModule {
     }
   }
 
+  const mockParseArt = (source: string, options: ArtParseOptions): ArtDescriptor => {
+    // Simple mock parsing for Art files
+    const titleMatch = source.match(/title="([^"]+)"/);
+    const descMatch = source.match(/description="([^"]+)"/);
+    const componentMatch = source.match(/component="([^"]+)"/);
+    const categoryMatch = source.match(/category="([^"]+)"/);
+
+    // Extract variants
+    const variantRegex = /<variant\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/variant>/g;
+    const variants: ArtVariant[] = [];
+    let match;
+    while ((match = variantRegex.exec(source)) !== null) {
+      const [, name, attrs, template] = match;
+      variants.push({
+        name,
+        template: template.trim(),
+        isDefault: attrs.includes('default'),
+        skipVrt: attrs.includes('skip-vrt'),
+      });
+    }
+
+    return {
+      filename: options.filename || 'anonymous.art.vue',
+      metadata: {
+        title: titleMatch?.[1] || 'Untitled',
+        description: descMatch?.[1],
+        component: componentMatch?.[1],
+        category: categoryMatch?.[1],
+        tags: [],
+        status: 'ready',
+      },
+      variants,
+      hasScriptSetup: source.includes('<script setup'),
+      hasScript: source.includes('<script') && !source.includes('<script setup'),
+      styleCount: (source.match(/<style/g) || []).length,
+    };
+  };
+
+  const mockArtToCsf = (source: string, options: ArtParseOptions): CsfOutput => {
+    const art = mockParseArt(source, options);
+    const componentPath = art.metadata.component || './Component.vue';
+
+    let code = `import type { Meta, StoryObj } from '@storybook/vue3';\n`;
+    code += `import Component from '${componentPath}';\n\n`;
+    code += `const meta: Meta<typeof Component> = {\n`;
+    code += `  title: '${art.metadata.title}',\n`;
+    code += `  component: Component,\n`;
+    code += `  tags: ['autodocs'],\n`;
+    code += `};\n\n`;
+    code += `export default meta;\n`;
+    code += `type Story = StoryObj<typeof meta>;\n\n`;
+
+    for (const variant of art.variants) {
+      const exportName = variant.name.replace(/\s+/g, '');
+      code += `export const ${exportName}: Story = {\n`;
+      code += `  name: '${variant.name}',\n`;
+      code += `  render: (args) => ({\n`;
+      code += `    components: { Component },\n`;
+      code += `    setup() { return { args }; },\n`;
+      code += `    template: \`${variant.template.replace(/`/g, '\\`')}\`,\n`;
+      code += `  }),\n`;
+      code += `};\n\n`;
+    }
+
+    const baseName = (options.filename || 'Component').replace('.art.vue', '');
+    return {
+      code,
+      filename: `${baseName}.stories.ts`,
+    };
+  };
+
+  // Mock lint functions
+  const mockLintTemplate = (source: string, options: LintOptions): LintResult => {
+    const diagnostics: LintDiagnostic[] = [];
+    const filename = options.filename || 'anonymous.vue';
+
+    // Simple mock lint rules
+    // Check for v-for without :key
+    const vForMatch = source.match(/v-for="[^"]+"/g);
+    const keyMatch = source.match(/:key="[^"]+"/g);
+    if (vForMatch && (!keyMatch || keyMatch.length < vForMatch.length)) {
+      const match = source.match(/v-for="[^"]+"/);
+      if (match) {
+        diagnostics.push({
+          rule: 'vue/require-v-for-key',
+          severity: 'error',
+          message: 'Elements in iteration expect to have \'v-bind:key\' directive',
+          location: {
+            start: { line: 1, column: match.index || 0, offset: match.index || 0 },
+            end: { line: 1, column: (match.index || 0) + match[0].length, offset: (match.index || 0) + match[0].length },
+          },
+          help: 'Add a unique :key attribute to the element with v-for',
+        });
+      }
+    }
+
+    // Check for v-if with v-for on same element
+    const vIfWithVFor = source.match(/<[^>]*v-for="[^"]*"[^>]*v-if="[^"]*"/);
+    if (vIfWithVFor) {
+      diagnostics.push({
+        rule: 'vue/no-use-v-if-with-v-for',
+        severity: 'warning',
+        message: 'This v-if should be moved to a wrapper element',
+        location: {
+          start: { line: 1, column: vIfWithVFor.index || 0, offset: vIfWithVFor.index || 0 },
+          end: { line: 1, column: (vIfWithVFor.index || 0) + vIfWithVFor[0].length, offset: (vIfWithVFor.index || 0) + vIfWithVFor[0].length },
+        },
+        help: 'Move v-if to a <template> wrapper or use computed property to filter items',
+      });
+    }
+
+    return {
+      filename,
+      errorCount: diagnostics.filter(d => d.severity === 'error').length,
+      warningCount: diagnostics.filter(d => d.severity === 'warning').length,
+      diagnostics,
+    };
+  };
+
+  const mockLintSfc = (source: string, options: LintOptions): LintResult => {
+    // Extract template from SFC and lint it
+    const templateMatch = source.match(/<template>([\s\S]*?)<\/template>/);
+    if (templateMatch) {
+      return mockLintTemplate(templateMatch[1], options);
+    }
+    return {
+      filename: options.filename || 'anonymous.vue',
+      errorCount: 0,
+      warningCount: 0,
+      diagnostics: [],
+    };
+  };
+
+  const mockGetLintRules = (): LintRule[] => {
+    return [
+      // Essential rules - Error prevention
+      {
+        name: 'vue/require-v-for-key',
+        description: 'Require v-bind:key with v-for directives. Keys help Vue identify which items have changed, been added, or removed for efficient DOM updates.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-for',
+        description: 'Enforce valid v-for directives. The v-for directive requires a specific syntax: "item in items" or "(item, index) in items".',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-if',
+        description: 'Enforce valid v-if directives. The directive must have a value that evaluates to a boolean.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-else',
+        description: 'Enforce valid v-else directives. The v-else directive must be preceded by v-if or v-else-if on a sibling element.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-else-if',
+        description: 'Enforce valid v-else-if directives. Must be preceded by v-if or v-else-if and must have a value.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-model',
+        description: 'Enforce valid v-model directives. The v-model directive requires a value that is a valid left-hand side expression.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-on',
+        description: 'Enforce valid v-on directives. Event handlers must have valid syntax and reference existing methods or expressions.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-bind',
+        description: 'Enforce valid v-bind directives. Dynamic bindings must have valid JavaScript expressions as values.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/valid-v-slot',
+        description: 'Enforce valid v-slot directives. Slot directives must be used on template elements or component elements.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-dupe-keys',
+        description: 'Disallow duplicate keys in v-for. Duplicate keys can cause rendering bugs and performance issues.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-dupe-v-else-if',
+        description: 'Disallow duplicate conditions in v-if / v-else-if chains. Duplicate conditions are likely a copy-paste error.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-duplicate-attributes',
+        description: 'Disallow duplicate attributes on elements. Duplicate attributes override each other unexpectedly.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-parsing-error',
+        description: 'Disallow parsing errors in <template>. Template syntax errors prevent the component from rendering.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-reserved-keys',
+        description: 'Disallow overwriting reserved keys like $data, $props, $el, $options, $parent, $root, $children, $slots, $refs, $attrs, $listeners, $watch.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-template-key',
+        description: 'Disallow key attribute on <template>. The key attribute should be placed on real elements inside the template.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-textarea-mustache',
+        description: 'Disallow mustache interpolations inside <textarea>. Use v-model instead for two-way binding.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/require-component-is',
+        description: 'Require v-bind:is on <component> elements. Dynamic components need the is attribute to specify which component to render.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/require-valid-default-prop',
+        description: 'Enforce props with default values to have valid types. Object and Array defaults must be returned from a factory function.',
+        category: 'Essential',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+
+      // Strongly Recommended rules - Improving readability
+      {
+        name: 'vue/no-use-v-if-with-v-for',
+        description: 'Disallow using v-if on the same element as v-for. When used together, v-for has higher priority, causing v-if to run on each iteration. Use computed properties to filter instead.',
+        category: 'Strongly Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-unused-vars',
+        description: 'Disallow unused variable definitions in v-for directives. Unused iteration variables indicate dead code or incomplete implementation.',
+        category: 'Strongly Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-unused-components',
+        description: 'Disallow registering components that are not used in the template. Unused component registrations increase bundle size.',
+        category: 'Strongly Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/attribute-hyphenation',
+        description: 'Enforce attribute naming style: always use hyphenated names (kebab-case) in templates for props.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/component-definition-name-casing',
+        description: 'Enforce specific casing for component definition names. Consistent naming improves searchability.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/html-closing-bracket-newline',
+        description: 'Require or disallow a line break before tag\'s closing bracket. Improves readability for multi-line elements.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/html-closing-bracket-spacing',
+        description: 'Enforce consistent spacing before tag\'s closing bracket. No space for normal tags, one space for self-closing.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/html-indent',
+        description: 'Enforce consistent indentation in <template>. Default is 2 spaces.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/html-quotes',
+        description: 'Enforce quotes style of HTML attributes. Default is double quotes.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/html-self-closing',
+        description: 'Enforce self-closing style for elements without content.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/max-attributes-per-line',
+        description: 'Enforce the maximum number of attributes per line. Improves readability of complex elements.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/multiline-html-element-content-newline',
+        description: 'Require a line break before and after the contents of a multiline element.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/mustache-interpolation-spacing',
+        description: 'Enforce unified spacing in mustache interpolations. Default is one space: {{ value }}.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-multi-spaces',
+        description: 'Disallow multiple spaces between attributes. Use single spaces for consistency.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-spaces-around-equal-signs-in-attribute',
+        description: 'Disallow spaces around equal signs in attributes. Write attr="value" not attr = "value".',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/prop-name-casing',
+        description: 'Enforce camelCase for prop names in JavaScript and kebab-case in templates.',
+        category: 'Strongly Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/require-default-prop',
+        description: 'Require default value for non-required props. Makes component behavior predictable.',
+        category: 'Strongly Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/require-prop-types',
+        description: 'Require type definitions in props. Type definitions improve documentation and runtime validation.',
+        category: 'Strongly Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/singleline-html-element-content-newline',
+        description: 'Require a line break before and after single-line element contents when the element has attributes.',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/v-bind-style',
+        description: 'Enforce v-bind directive style: shorthand (:attr) or longhand (v-bind:attr).',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/v-on-style',
+        description: 'Enforce v-on directive style: shorthand (@event) or longhand (v-on:event).',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/v-slot-style',
+        description: 'Enforce v-slot directive style: shorthand (#slot) or longhand (v-slot:slot).',
+        category: 'Strongly Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+
+      // Recommended rules - Minimizing arbitrary choices
+      {
+        name: 'vue/attributes-order',
+        description: 'Enforce order of attributes: DEFINITION, LIST_RENDERING, CONDITIONALS, RENDER_MODIFIERS, GLOBAL, UNIQUE, TWO_WAY_BINDING, OTHER_DIRECTIVES, OTHER_ATTR, EVENTS, CONTENT.',
+        category: 'Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/component-tags-order',
+        description: 'Enforce order of component top-level elements: <script>, <template>, <style> or <template>, <script>, <style>.',
+        category: 'Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-lone-template',
+        description: 'Disallow unnecessary <template> elements. <template> without directives adds no value.',
+        category: 'Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-v-html',
+        description: 'Disallow use of v-html to prevent XSS attacks. Use alternatives like sanitization libraries.',
+        category: 'Recommended',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/order-in-components',
+        description: 'Enforce order of properties in components: name, components, props, data, computed, watch, lifecycle hooks, methods.',
+        category: 'Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/this-in-template',
+        description: 'Disallow usage of "this" in template. Template expressions have implicit access to component instance.',
+        category: 'Recommended',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+
+      // Vue 3 specific rules
+      {
+        name: 'vue/no-deprecated-v-on-native-modifier',
+        description: 'Disallow using deprecated .native modifier (Vue 3). Use emits option instead.',
+        category: 'Essential (Vue 3)',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-deprecated-slot-attribute',
+        description: 'Disallow deprecated slot attribute (Vue 3). Use v-slot directive instead.',
+        category: 'Essential (Vue 3)',
+        fixable: true,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-deprecated-slot-scope-attribute',
+        description: 'Disallow deprecated slot-scope attribute (Vue 3). Use v-slot directive instead.',
+        category: 'Essential (Vue 3)',
+        fixable: true,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/require-slots-as-functions',
+        description: 'Enforce using $slots as functions in Vue 3. $slots.default() instead of $slots.default.',
+        category: 'Essential (Vue 3)',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-deprecated-v-bind-sync',
+        description: 'Disallow deprecated .sync modifier (Vue 3). Use v-model with argument instead.',
+        category: 'Essential (Vue 3)',
+        fixable: true,
+        defaultSeverity: 'error',
+      },
+
+      // Script setup specific rules
+      {
+        name: 'vue/define-macros-order',
+        description: 'Enforce order of defineEmits and defineProps compiler macros in <script setup>.',
+        category: 'Script Setup',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/define-props-declaration',
+        description: 'Enforce declaration style of defineProps: runtime or type-based.',
+        category: 'Script Setup',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/define-emits-declaration',
+        description: 'Enforce declaration style of defineEmits: runtime or type-based.',
+        category: 'Script Setup',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vue/no-ref-as-operand',
+        description: 'Disallow use of ref objects as operands. Use .value to access reactive value.',
+        category: 'Script Setup',
+        fixable: true,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vue/no-setup-props-destructure',
+        description: 'Disallow destructuring props in setup (loses reactivity). Use toRefs() instead.',
+        category: 'Script Setup',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+    ];
+  };
+
+  // Mock format functions
+  const mockFormatSfc = (source: string, options: FormatOptions): FormatResult => {
+    const tabWidth = options.tabWidth || 2;
+    const useTabs = options.useTabs || false;
+    const indent = useTabs ? '\t' : ' '.repeat(tabWidth);
+    const semi = options.semi !== false;
+    const singleQuote = options.singleQuote || false;
+    const bracketSpacing = options.bracketSpacing !== false;
+    const singleAttributePerLine = options.singleAttributePerLine || false;
+
+    let formatted = source.replace(/\r\n/g, '\n');
+
+    // Split into SFC blocks for individual formatting
+    const templateMatch = formatted.match(/(<template[^>]*>)([\s\S]*?)(<\/template>)/);
+    const scriptMatch = formatted.match(/(<script[^>]*>)([\s\S]*?)(<\/script>)/);
+    const styleMatch = formatted.match(/(<style[^>]*>)([\s\S]*?)(<\/style>)/);
+
+    // Format template block
+    if (templateMatch) {
+      const [fullMatch, openTag, content, closeTag] = templateMatch;
+      const formattedTemplate = formatTemplateContent(content, indent, singleAttributePerLine);
+      formatted = formatted.replace(fullMatch, `${openTag}\n${formattedTemplate}\n${closeTag}`);
+    }
+
+    // Format script block
+    if (scriptMatch) {
+      const [fullMatch, openTag, content, closeTag] = scriptMatch;
+      const formattedScript = formatScriptContent(content, indent, semi, singleQuote, bracketSpacing);
+      formatted = formatted.replace(fullMatch, `${openTag}\n${formattedScript}\n${closeTag}`);
+    }
+
+    // Format style block
+    if (styleMatch) {
+      const [fullMatch, openTag, content, closeTag] = styleMatch;
+      const formattedStyle = formatStyleContent(content, indent);
+      formatted = formatted.replace(fullMatch, `${openTag}\n${formattedStyle}\n${closeTag}`);
+    }
+
+    // Ensure consistent newlines between blocks
+    formatted = formatted.replace(/(<\/(?:template|script|style)>)\n*(<(?:template|script|style))/g, '$1\n\n$2');
+
+    return {
+      code: formatted.trim() + '\n',
+      changed: formatted.trim() + '\n' !== source,
+    };
+  };
+
+  // Helper to format template content
+  function formatTemplateContent(content: string, indent: string, singleAttributePerLine: boolean): string {
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let depth = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Decrease indent for closing tags
+      if (trimmed.startsWith('</') || trimmed.startsWith('/>')) {
+        depth = Math.max(0, depth - 1);
+      }
+
+      // Handle self-closing decrements
+      if (trimmed.match(/^<[^/][^>]*\/>$/)) {
+        result.push(indent.repeat(depth) + trimmed);
+        continue;
+      }
+
+      // Handle multiple attributes per line when singleAttributePerLine is true
+      if (singleAttributePerLine && trimmed.match(/<\w+\s+[^>]*>/)) {
+        const tagMatch = trimmed.match(/^(<\w+)(\s+[^>]+)(\/?>)$/);
+        if (tagMatch) {
+          const [, tagStart, attrs, tagEnd] = tagMatch;
+          const attrList = attrs.trim().split(/\s+(?=[@:a-zA-Z])/);
+          if (attrList.length > 1) {
+            result.push(indent.repeat(depth) + tagStart);
+            for (const attr of attrList) {
+              result.push(indent.repeat(depth + 1) + attr.trim());
+            }
+            result.push(indent.repeat(depth) + tagEnd);
+            if (!trimmed.endsWith('/>') && !trimmed.startsWith('</')) {
+              depth++;
+            }
+            continue;
+          }
+        }
+      }
+
+      result.push(indent.repeat(depth) + trimmed);
+
+      // Increase indent after opening tags (not self-closing)
+      if (trimmed.match(/^<[^/][^>]*[^/]>$/) && !trimmed.startsWith('<!')) {
+        const tagMatch = trimmed.match(/<(\w+)/);
+        if (tagMatch) {
+          const tag = tagMatch[1].toLowerCase();
+          const voidTags = ['br', 'hr', 'img', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed'];
+          if (!voidTags.includes(tag)) {
+            depth++;
+          }
+        }
+      }
+    }
+
+    return result.join('\n');
+  }
+
+  // Helper to format script content
+  function formatScriptContent(content: string, indent: string, semi: boolean, singleQuote: boolean, bracketSpacing: boolean): string {
+    let formatted = content;
+
+    // Normalize indentation
+    const lines = formatted.split('\n');
+    const result: string[] = [];
+    let depth = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        result.push('');
+        continue;
+      }
+
+      // Track braces for indentation
+      const openBraces = (trimmed.match(/[{([\[]/g) || []).length;
+      const closeBraces = (trimmed.match(/[})\]]/g) || []).length;
+
+      // Decrease indent for closing braces at start
+      if (trimmed.match(/^[}\])]/) || trimmed.match(/^<\/|^\)/)) {
+        depth = Math.max(0, depth - 1);
+      }
+
+      result.push(indent.repeat(depth) + trimmed);
+
+      // Adjust depth based on braces
+      depth += openBraces - closeBraces;
+      depth = Math.max(0, depth);
+    }
+
+    formatted = result.join('\n');
+
+    // Handle semicolons
+    if (!semi) {
+      formatted = formatted.replace(/;(\s*\n)/g, '$1');
+    }
+
+    // Handle quotes
+    if (singleQuote) {
+      formatted = formatted.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, "'$1'");
+    }
+
+    // Handle bracket spacing in objects
+    if (bracketSpacing) {
+      formatted = formatted.replace(/\{(\S)/g, '{ $1');
+      formatted = formatted.replace(/(\S)\}/g, '$1 }');
+    } else {
+      formatted = formatted.replace(/\{\s+/g, '{');
+      formatted = formatted.replace(/\s+\}/g, '}');
+    }
+
+    return formatted;
+  }
+
+  // Helper to format style content
+  function formatStyleContent(content: string, indent: string): string {
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let depth = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Decrease indent for closing braces
+      if (trimmed.startsWith('}')) {
+        depth = Math.max(0, depth - 1);
+      }
+
+      result.push(indent.repeat(depth) + trimmed);
+
+      // Increase indent after opening braces
+      if (trimmed.endsWith('{')) {
+        depth++;
+      }
+    }
+
+    return result.join('\n');
+  }
+
+  const mockFormatTemplate = (source: string, options: FormatOptions): FormatResult => {
+    const tabWidth = options.tabWidth || 2;
+    const useTabs = options.useTabs || false;
+    const indent = useTabs ? '\t' : ' '.repeat(tabWidth);
+
+    // Basic template formatting
+    let formatted = source.replace(/\r\n/g, '\n');
+
+    // Normalize indentation
+    const lines = formatted.split('\n');
+    const formattedLines: string[] = [];
+    let depth = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        formattedLines.push('');
+        continue;
+      }
+
+      // Decrease indent for closing tags
+      if (trimmed.startsWith('</')) {
+        depth = Math.max(0, depth - 1);
+      }
+
+      formattedLines.push(indent.repeat(depth) + trimmed);
+
+      // Increase indent after opening tags (not self-closing)
+      if (trimmed.startsWith('<') && !trimmed.startsWith('</') && !trimmed.endsWith('/>') && !trimmed.startsWith('<!')) {
+        const tagMatch = trimmed.match(/<(\w+)/);
+        if (tagMatch) {
+          const tag = tagMatch[1].toLowerCase();
+          // Skip void elements
+          const voidTags = ['br', 'hr', 'img', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param', 'source', 'track', 'wbr'];
+          if (!voidTags.includes(tag)) {
+            depth++;
+          }
+        }
+      }
+    }
+
+    formatted = formattedLines.join('\n');
+
+    return {
+      code: formatted,
+      changed: formatted !== source,
+    };
+  };
+
+  const mockFormatScript = (source: string, options: FormatOptions): FormatResult => {
+    const tabWidth = options.tabWidth || 2;
+    const useTabs = options.useTabs || false;
+    const indent = useTabs ? '\t' : ' '.repeat(tabWidth);
+    const semi = options.semi !== false;
+    const singleQuote = options.singleQuote || false;
+
+    let formatted = source.replace(/\r\n/g, '\n');
+
+    // Basic formatting
+    if (singleQuote) {
+      // Convert double quotes to single quotes (simplified)
+      formatted = formatted.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, "'$1'");
+    }
+
+    // Handle semicolons
+    if (!semi) {
+      formatted = formatted.replace(/;(\s*\n)/g, '$1');
+    }
+
+    // Normalize indentation
+    formatted = formatted.replace(/\t/g, indent);
+
+    return {
+      code: formatted,
+      changed: formatted !== source,
+    };
+  };
+
   return {
     compile: mockCompile,
     compileVapor: (template: string, options: CompilerOptions) =>
@@ -377,6 +1302,14 @@ function createMockModule(): WasmModule {
     parseTemplate: (template: string) => buildMockAst(template),
     parseSfc: mockParseSfc,
     compileSfc: mockCompileSfc,
+    parseArt: mockParseArt,
+    artToCsf: mockArtToCsf,
+    lintTemplate: mockLintTemplate,
+    lintSfc: mockLintSfc,
+    getLintRules: mockGetLintRules,
+    formatSfc: mockFormatSfc,
+    formatTemplate: mockFormatTemplate,
+    formatScript: mockFormatScript,
     Compiler: MockCompiler,
   };
 }

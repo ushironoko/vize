@@ -24,17 +24,37 @@ Similarly, `vize_canon` provides:
 - **Error detection** - Identifies type mismatches and inconsistencies
 - **Code correctness** - Ensures your Vue components follow type contracts
 
-## Status
+## Features
 
-This crate is currently a **work in progress** (WIP).
+- **Template type checking** - Validate expressions in `{{ }}`
+- **Directive validation** - Type-check `v-bind`, `v-on`, etc.
+- **Props inference** - Infer component prop types
+- **Emit validation** - Check event handler types
 
-## Planned Features
+## Usage
 
-- TypeScript type inference for Vue components
-- Props type validation
-- Emit type checking
-- Template expression type validation
-- Integration with Vue's type system
+```rust
+use vize_canon::{TypeChecker, TypeContext};
+
+let checker = TypeChecker::new();
+let ctx = TypeContext::from_sfc(&descriptor);
+
+// Check template for type errors
+let diagnostics = checker.check_template(&ctx);
+
+// Get type at position
+if let Some(info) = checker.get_type_at(&ctx, offset) {
+    println!("Type: {}", info.display());
+}
+```
+
+## Error Codes
+
+| Code | Description |
+|------|-------------|
+| 2304 | Cannot find name |
+| 2339 | Property does not exist |
+| 2345 | Argument type mismatch |
 
 ## Part of the Vize Art Collection
 

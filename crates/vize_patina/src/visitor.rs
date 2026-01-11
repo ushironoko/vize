@@ -1,0 +1,266 @@
+//! AST visitor for lint rule execution.
+//!
+//! High-performance visitor with minimal allocations.
+
+use crate::context::{ElementContext, LintContext};
+use crate::rule::Rule;
+use vize_carton::CompactString;
+use vize_relief::ast::{ElementNode, ExpressionNode, PropNode, RootNode, TemplateChildNode};
+
+/// Visit the AST and run all rules
+pub struct LintVisitor<'a, 'ctx, 'rules> {
+    ctx: &'ctx mut LintContext<'a>,
+    rules: &'rules [Box<dyn Rule>],
+}
+
+impl<'a, 'ctx, 'rules> LintVisitor<'a, 'ctx, 'rules> {
+    /// Create a new visitor
+    #[inline]
+    pub fn new(ctx: &'ctx mut LintContext<'a>, rules: &'rules [Box<dyn Rule>]) -> Self {
+        Self { ctx, rules }
+    }
+
+    /// Visit the root node and traverse the AST
+    #[inline]
+    pub fn visit_root(&mut self, root: &RootNode<'a>) {
+        // Run template-level checks
+        for rule in self.rules.iter() {
+            self.ctx.current_rule = rule.meta().name;
+            rule.run_on_template(self.ctx, root);
+        }
+
+        // Visit children
+        for child in root.children.iter() {
+            self.visit_child(child);
+        }
+    }
+
+    #[inline]
+    fn visit_child(&mut self, node: &TemplateChildNode<'a>) {
+        match node {
+            TemplateChildNode::Element(el) => self.visit_element(el),
+            TemplateChildNode::Interpolation(interp) => {
+                for rule in self.rules.iter() {
+                    self.ctx.current_rule = rule.meta().name;
+                    rule.check_interpolation(self.ctx, interp);
+                }
+            }
+            TemplateChildNode::If(if_node) => self.visit_if(if_node),
+            TemplateChildNode::For(for_node) => self.visit_for(for_node),
+            TemplateChildNode::Text(_) | TemplateChildNode::Comment(_) => {}
+            _ => {}
+        }
+    }
+
+    fn visit_element(&mut self, el: &ElementNode<'a>) {
+        // Check for v-for and v-if directives using iterators (no allocation)
+        let has_v_for = el
+            .props
+            .iter()
+            .any(|p| matches!(p, PropNode::Directive(d) if d.name.as_str() == "for"));
+        let has_v_if = el
+            .props
+            .iter()
+            .any(|p| matches!(p, PropNode::Directive(d) if d.name.as_str() == "if" || d.name.as_str() == "else-if"));
+
+        // Extract v-for variables (only allocates if v-for exists)
+        let v_for_vars = if has_v_for {
+            self.extract_v_for_vars(el)
+        } else {
+            Vec::new()
+        };
+
+        // Build element context with CompactString tag (efficient for small strings)
+        let elem_ctx = ElementContext {
+            tag: CompactString::from(el.tag.as_str()),
+            has_v_for,
+            has_v_if,
+            v_for_vars,
+        };
+
+        self.ctx.push_element(elem_ctx);
+
+        // Enter element - run rules
+        for rule in self.rules.iter() {
+            self.ctx.current_rule = rule.meta().name;
+            rule.enter_element(self.ctx, el);
+        }
+
+        // Check directives
+        for prop in el.props.iter() {
+            if let PropNode::Directive(dir) = prop {
+                for rule in self.rules.iter() {
+                    self.ctx.current_rule = rule.meta().name;
+                    rule.check_directive(self.ctx, el, dir);
+                }
+            }
+        }
+
+        // Visit children
+        for child in el.children.iter() {
+            self.visit_child(child);
+        }
+
+        // Exit element - run rules
+        for rule in self.rules.iter() {
+            self.ctx.current_rule = rule.meta().name;
+            rule.exit_element(self.ctx, el);
+        }
+
+        self.ctx.pop_element();
+    }
+
+    #[inline]
+    fn visit_if(&mut self, if_node: &vize_relief::ast::IfNode<'a>) {
+        // Run if checks
+        for rule in self.rules.iter() {
+            self.ctx.current_rule = rule.meta().name;
+            rule.check_if(self.ctx, if_node);
+        }
+
+        // Visit branches
+        for branch in if_node.branches.iter() {
+            for child in branch.children.iter() {
+                self.visit_child(child);
+            }
+        }
+    }
+
+    #[inline]
+    fn visit_for(&mut self, for_node: &vize_relief::ast::ForNode<'a>) {
+        // Run for checks
+        for rule in self.rules.iter() {
+            self.ctx.current_rule = rule.meta().name;
+            rule.check_for(self.ctx, for_node);
+        }
+
+        // Visit children
+        for child in for_node.children.iter() {
+            self.visit_child(child);
+        }
+    }
+
+    /// Extract variable names from v-for directive on an element
+    #[inline]
+    fn extract_v_for_vars(&self, el: &ElementNode<'a>) -> Vec<CompactString> {
+        for prop in el.props.iter() {
+            if let PropNode::Directive(dir) = prop {
+                if dir.name.as_str() == "for" {
+                    if let Some(exp) = &dir.exp {
+                        return parse_v_for_variables(exp);
+                    }
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+
+/// Parse v-for expression to extract variable names.
+///
+/// Uses CompactString for efficient small string storage.
+///
+/// Handles formats like:
+/// - `item in items`
+/// - `(item, index) in items`
+/// - `(value, key, index) in object`
+#[inline]
+pub fn parse_v_for_variables(exp: &ExpressionNode) -> Vec<CompactString> {
+    let content = match exp {
+        ExpressionNode::Simple(s) => s.content.as_str(),
+        ExpressionNode::Compound(_) => return Vec::new(),
+    };
+
+    // Split on " in " or " of " - use byte search for speed
+    let bytes = content.as_bytes();
+    let (alias_part, _) = if let Some(idx) = find_pattern(bytes, b" in ") {
+        (&content[..idx], &content[idx + 4..])
+    } else if let Some(idx) = find_pattern(bytes, b" of ") {
+        (&content[..idx], &content[idx + 4..])
+    } else {
+        return Vec::new();
+    };
+
+    let alias_str = alias_part.trim();
+
+    // Handle destructuring: (item, index) or (value, key, index)
+    if alias_str.starts_with('(') && alias_str.ends_with(')') {
+        let inner = &alias_str[1..alias_str.len() - 1];
+        // Pre-allocate with estimated capacity
+        let mut vars = Vec::with_capacity(3);
+        for s in inner.split(',') {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                vars.push(CompactString::from(trimmed));
+            }
+        }
+        vars
+    } else {
+        // Single variable - avoid allocation if possible
+        vec![CompactString::from(alias_str)]
+    }
+}
+
+/// Fast byte pattern search
+#[inline]
+fn find_pattern(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vize_carton::Bump;
+    use vize_relief::ast::SimpleExpressionNode;
+
+    fn make_simple_exp<'a>(allocator: &'a Bump, content: &str) -> ExpressionNode<'a> {
+        ExpressionNode::Simple(vize_carton::Box::new_in(
+            SimpleExpressionNode::new(
+                vize_carton::String::from(content),
+                false,
+                vize_relief::ast::SourceLocation::STUB,
+            ),
+            allocator,
+        ))
+    }
+
+    #[test]
+    fn test_parse_v_for_simple() {
+        let allocator = Bump::new();
+        let exp = make_simple_exp(&allocator, "item in items");
+        let vars = parse_v_for_variables(&exp);
+        assert_eq!(vars, vec![CompactString::from("item")]);
+    }
+
+    #[test]
+    fn test_parse_v_for_with_index() {
+        let allocator = Bump::new();
+        let exp = make_simple_exp(&allocator, "(item, index) in items");
+        let vars = parse_v_for_variables(&exp);
+        assert_eq!(
+            vars,
+            vec![CompactString::from("item"), CompactString::from("index")]
+        );
+    }
+
+    #[test]
+    fn test_parse_v_for_object() {
+        let allocator = Bump::new();
+        let exp = make_simple_exp(&allocator, "(value, key, index) in object");
+        let vars = parse_v_for_variables(&exp);
+        assert_eq!(
+            vars,
+            vec![
+                CompactString::from("value"),
+                CompactString::from("key"),
+                CompactString::from("index"),
+            ]
+        );
+    }
+}

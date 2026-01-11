@@ -2,3 +2,4 @@ packages:
   - 'playground'
   - 'npm/*'
   - 'npm/vite-plugin-vize/example'
+  - 'examples/vite-musea'

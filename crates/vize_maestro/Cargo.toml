@@ -6,3 +6,38 @@ license.workspace = true
 description = "Maestro - Language Server Protocol implementation for Vize Vue templates"
 
 [dependencies]
+# LSP Framework
+tower-lsp = "0.20"
+# lsp-types is re-exported by tower-lsp, use that version
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Text Processing
+ropey = "1.6"
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Utilities
+rustc-hash.workspace = true
+dashmap = "6"
+parking_lot = "0.12"
+
+# Internal crates
+vize_carton.workspace = true
+vize_relief.workspace = true
+vize_armature.workspace = true
+vize_atelier_sfc.workspace = true
+vize_patina.workspace = true
+vize_canon.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+tempfile = "3"

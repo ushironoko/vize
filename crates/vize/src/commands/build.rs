@@ -123,7 +123,7 @@ pub fn run(args: BuildArgs) {
 
     if args.profile {
         eprintln!(
-            "Found {} files in {:.2}s. Compiling using {} threads...",
+            "Found {} files in {:.4}s. Compiling using {} threads...",
             files.len(),
             collect_elapsed.as_secs_f64(),
             rayon::current_num_threads()
@@ -211,16 +211,16 @@ pub fn run(args: BuildArgs) {
     if args.profile {
         eprintln!();
         eprintln!("Timing breakdown:");
-        eprintln!("  File collection: {:.2}s", collect_elapsed.as_secs_f64());
-        eprintln!("  Compilation:     {:.2}s", compile_elapsed.as_secs_f64());
-        eprintln!("  I/O operations:  {:.2}s", io_elapsed.as_secs_f64());
-        eprintln!("  Total:           {:.2}s", total_elapsed.as_secs_f64());
+        eprintln!("  File collection: {:.4}s", collect_elapsed.as_secs_f64());
+        eprintln!("  Compilation:     {:.4}s", compile_elapsed.as_secs_f64());
+        eprintln!("  I/O operations:  {:.4}s", io_elapsed.as_secs_f64());
+        eprintln!("  Total:           {:.4}s", total_elapsed.as_secs_f64());
         eprintln!();
     }
 
     if failed > 0 {
         eprintln!(
-            "✗ {} file(s) failed, {} compiled in {:.2}s",
+            "✗ {} file(s) failed, {} compiled in {:.4}s",
             failed,
             success,
             total_elapsed.as_secs_f64()
@@ -228,7 +228,7 @@ pub fn run(args: BuildArgs) {
     } else {
         let file_word = if success == 1 { "file" } else { "files" };
         eprintln!(
-            "✓ {} {} compiled in {:.2}s",
+            "✓ {} {} compiled in {:.4}s",
             success,
             file_word,
             total_elapsed.as_secs_f64()

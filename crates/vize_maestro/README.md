@@ -12,18 +12,57 @@
 
 ## Features
 
-- LSP server implementation for Vue SFC files
-- Code completion and IntelliSense
-- Go to definition and references
-- Hover information
-- Diagnostics and error reporting
-- Code actions and quick fixes
-- Rename refactoring
-- Document symbols and outline
+- **Diagnostics** - Parse errors, lint warnings, type errors
+- **Completion** - Vue directives, components, Composition API
+- **Hover** - Type information, documentation
+- **Go to Definition** - Template to script navigation
+- **Find References** - Cross-SFC reference search
+- **Rename** - Safe identifier renaming
+- **Semantic Tokens** - Vue-specific syntax highlighting
+- **Code Lens** - Reference counts
+- **Code Actions** - Quick fixes, refactoring
 
-## Status
+## Usage
 
-This crate is currently under development.
+### As Library
+
+```rust
+use vize_maestro::{serve, serve_tcp};
+
+#[tokio::main]
+async fn main() {
+    // stdio mode (for VS Code)
+    serve().await.unwrap();
+
+    // or TCP mode (for debugging)
+    // serve_tcp(9527).await.unwrap();
+}
+```
+
+### With CLI
+
+```bash
+vize lsp              # stdio mode
+vize lsp --port 9527  # TCP mode
+```
+
+## Architecture
+
+```
+LSP Client (VS Code)
+       ↓
+   tower-lsp
+       ↓
+  MaestroServer
+       ↓
+  ┌────┴────┐
+  ↓         ↓
+DocumentStore  VirtualCodeGenerator
+       ↓              ↓
+   IdeContext ← VirtualDocuments
+       ↓
+ IDE Services (Hover, Completion, Definition, ...)
+```
 
 ## License
 

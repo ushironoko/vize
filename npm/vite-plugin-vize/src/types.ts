@@ -71,6 +71,20 @@ export interface VizeOptions {
    * @default ['node_modules/**', 'dist/**', '.git/**']
    */
   ignorePatterns?: string[];
+
+  /**
+   * Config file search mode
+   * - 'root': Search only in the project root directory
+   * - 'auto': Search from cwd upward until finding a config file
+   * - false: Disable config file loading
+   * @default 'root'
+   */
+  configMode?: 'root' | 'auto' | false;
+
+  /**
+   * Custom config file path (overrides automatic search)
+   */
+  configFile?: string;
 }
 
 export interface CompiledModule {

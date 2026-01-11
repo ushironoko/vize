@@ -1,51 +1,17 @@
 {
-  "name": "@vizejs/wasm",
-  "version": "0.0.1-alpha.11",
-  "publishConfig": {
-    "provenance": true,
-    "access": "public"
-  },
-  "description": "Vue compiler implemented in Rust - WASM bindings",
+  "name": "vize_vitrine",
   "type": "module",
-  "main": "index.js",
-  "module": "index.js",
-  "types": "index.d.ts",
-  "files": [
-    "index.js",
-    "index.d.ts",
-    "vize_bindings.js",
-    "vize_bindings.d.ts",
-    "vize_bindings_bg.wasm",
-    "vize_bindings_bg.wasm.d.ts"
-  ],
-  "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "import": "./index.js",
-      "default": "./index.js"
-    },
-    "./vize_bindings": {
-      "types": "./vize_bindings.d.ts",
-      "import": "./vize_bindings.js",
-      "default": "./vize_bindings.js"
-    }
-  },
-  "scripts": {
-    "build": "cargo build --release -p vize_vitrine --no-default-features --features wasm --target wasm32-unknown-unknown && wasm-bindgen ../../target/wasm32-unknown-unknown/release/vize_bindings.wasm --out-dir . --target web",
-    "build:debug": "cargo build -p vize_vitrine --no-default-features --features wasm --target wasm32-unknown-unknown && wasm-bindgen ../../target/wasm32-unknown-unknown/debug/vize_bindings.wasm --out-dir . --target web"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ubugeeei/vize"
-  },
-  "keywords": [
-    "vue",
-    "compiler",
-    "rust",
-    "wasm",
-    "webassembly",
-    "vize"
-  ],
+  "description": "Vitrine - The display case for Vize (Node.js/WASM bindings)",
+  "version": "0.0.1-alpha.11",
   "license": "MIT",
-  "sideEffects": false
+  "files": [
+    "vize_bindings_bg.wasm",
+    "vize_bindings.js",
+    "vize_bindings.d.ts"
+  ],
+  "main": "vize_bindings.js",
+  "types": "vize_bindings.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
 }

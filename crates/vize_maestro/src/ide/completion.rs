@@ -1,0 +1,773 @@
+//! Completion provider for Vue SFC files.
+//!
+//! Provides context-aware completions for:
+//! - Template expressions and directives
+//! - Script bindings and imports
+//! - CSS properties and Vue-specific selectors
+
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
+    Documentation, InsertTextFormat, MarkupContent, MarkupKind,
+};
+
+use super::IdeContext;
+use crate::virtual_code::BlockType;
+
+/// Completion service for providing context-aware completions.
+pub struct CompletionService;
+
+impl CompletionService {
+    /// Get completions for the given context.
+    pub fn complete(ctx: &IdeContext) -> Option<CompletionResponse> {
+        // Check if this is an Art file
+        if ctx.uri.path().ends_with(".art.vue") {
+            return Self::complete_art(ctx);
+        }
+
+        let items = match ctx.block_type? {
+            BlockType::Template => Self::complete_template(ctx),
+            BlockType::Script => Self::complete_script(ctx, false),
+            BlockType::ScriptSetup => Self::complete_script(ctx, true),
+            BlockType::Style(index) => Self::complete_style(ctx, index),
+        };
+
+        if items.is_empty() {
+            None
+        } else {
+            Some(CompletionResponse::Array(items))
+        }
+    }
+
+    /// Get completions for Art files (*.art.vue).
+    fn complete_art(ctx: &IdeContext) -> Option<CompletionResponse> {
+        let mut items = Vec::new();
+
+        // Get the content and determine context
+        let content = &ctx.content;
+        let offset = ctx.offset;
+
+        // Determine if we're inside <art>, <variant>, or at root level
+        let before_cursor = &content[..offset.min(content.len())];
+
+        if is_inside_art_tag(before_cursor) {
+            // Inside <art> opening tag - suggest attributes
+            items.extend(Self::art_attribute_completions());
+        } else if is_inside_variant_tag(before_cursor) {
+            // Inside <variant> opening tag - suggest attributes
+            items.extend(Self::variant_attribute_completions());
+        } else if should_suggest_art_block(before_cursor) {
+            // At root level - suggest <art> block
+            items.extend(Self::art_block_completions());
+        } else if should_suggest_variant_block(before_cursor) {
+            // Inside <art> content - suggest <variant> block
+            items.extend(Self::variant_block_completions());
+        }
+
+        // Also add script and style block completions
+        items.extend(Self::art_script_completions());
+
+        if items.is_empty() {
+            None
+        } else {
+            Some(CompletionResponse::Array(items))
+        }
+    }
+
+    /// Art block completions at root level.
+    fn art_block_completions() -> Vec<CompletionItem> {
+        vec![
+            CompletionItem {
+                label: "art".to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some("Create Art block".to_string()),
+                insert_text: Some(
+                    "<art title=\"$1\" component=\"$2\">\n\t<variant name=\"$3\" default>\n\t\t$0\n\t</variant>\n</art>".to_string()
+                ),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: "**Art Block**\n\nDefines a component gallery entry with metadata and variants.\n\n```vue\n<art title=\"Button\" component=\"./Button.vue\">\n  <variant name=\"Primary\" default>\n    <Button>Click</Button>\n  </variant>\n</art>\n```".to_string(),
+                })),
+                ..Default::default()
+            },
+        ]
+    }
+
+    /// Art attribute completions inside <art> tag.
+    fn art_attribute_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::attr_item("title", "Component title (required)", "title=\"$1\""),
+            Self::attr_item("component", "Path to component file", "component=\"$1\""),
+            Self::attr_item("description", "Component description", "description=\"$1\""),
+            Self::attr_item(
+                "category",
+                "Component category (e.g., atoms, molecules)",
+                "category=\"$1\"",
+            ),
+            Self::attr_item("tags", "Comma-separated tags", "tags=\"$1\""),
+            Self::attr_item(
+                "status",
+                "Component status (ready, draft, deprecated)",
+                "status=\"$1\"",
+            ),
+            Self::attr_item("order", "Display order in gallery", "order=\"$1\""),
+        ]
+    }
+
+    /// Variant block completions inside <art>.
+    fn variant_block_completions() -> Vec<CompletionItem> {
+        vec![
+            CompletionItem {
+                label: "variant".to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some("Create variant block".to_string()),
+                insert_text: Some(
+                    "<variant name=\"$1\">\n\t$0\n</variant>".to_string()
+                ),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: "**Variant Block**\n\nDefines a component variation with specific props.\n\n```vue\n<variant name=\"Primary\" default>\n  <Button variant=\"primary\">Click</Button>\n</variant>\n```".to_string(),
+                })),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "variant with args".to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some("Create variant with args".to_string()),
+                insert_text: Some(
+                    "<variant name=\"$1\" args='{\"$2\": $3}'>\n\t$0\n</variant>".to_string()
+                ),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+        ]
+    }
+
+    /// Variant attribute completions inside <variant> tag.
+    fn variant_attribute_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::attr_item("name", "Variant name (required)", "name=\"$1\""),
+            Self::attr_item("default", "Mark as default variant", "default"),
+            Self::attr_item("args", "Props as JSON", "args='{\"$1\": $2}'"),
+            Self::attr_item(
+                "viewport",
+                "Viewport dimensions (WxH or WxH@scale)",
+                "viewport=\"$1\"",
+            ),
+            Self::attr_item("skip-vrt", "Skip visual regression test", "skip-vrt"),
+        ]
+    }
+
+    /// Create an attribute completion item.
+    fn attr_item(label: &str, description: &str, snippet: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some(description.to_string()),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            ..Default::default()
+        }
+    }
+
+    /// Script block completions for Art files.
+    fn art_script_completions() -> Vec<CompletionItem> {
+        vec![
+            CompletionItem {
+                label: "script setup".to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some("Add script setup block".to_string()),
+                insert_text: Some(
+                    "<script setup lang=\"ts\">\nimport $1 from '$2'\n</script>".to_string(),
+                ),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "style".to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some("Add style block".to_string()),
+                insert_text: Some("<style scoped>\n$0\n</style>".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+        ]
+    }
+
+    /// Get completions for template context.
+    fn complete_template(ctx: &IdeContext) -> Vec<CompletionItem> {
+        let mut items = Vec::new();
+
+        // Add Vue directives
+        items.extend(Self::directive_completions());
+
+        // Add built-in components
+        items.extend(Self::builtin_component_completions());
+
+        // Add script setup bindings
+        if let Some(ref virtual_docs) = ctx.virtual_docs {
+            if let Some(ref script_setup) = virtual_docs.script_setup {
+                let bindings =
+                    crate::virtual_code::extract_simple_bindings(&script_setup.content, true);
+                for binding in bindings {
+                    items.push(CompletionItem {
+                        label: binding.clone(),
+                        kind: Some(CompletionItemKind::VARIABLE),
+                        label_details: Some(CompletionItemLabelDetails {
+                            detail: Some(" (script setup)".to_string()),
+                            description: None,
+                        }),
+                        detail: Some("Binding from <script setup>".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        // Add common template snippets
+        items.extend(Self::template_snippets());
+
+        items
+    }
+
+    /// Get completions for script context.
+    fn complete_script(_ctx: &IdeContext, is_setup: bool) -> Vec<CompletionItem> {
+        let mut items = Vec::new();
+
+        // Add Vue Composition API
+        items.extend(Self::composition_api_completions());
+
+        // Add Vue macros (script setup only)
+        if is_setup {
+            items.extend(Self::macro_completions());
+        }
+
+        // Add common imports
+        items.extend(Self::import_completions());
+
+        items
+    }
+
+    /// Get completions for style context.
+    fn complete_style(_ctx: &IdeContext, _index: usize) -> Vec<CompletionItem> {
+        let mut items = Vec::new();
+
+        // Add Vue CSS features
+        items.extend(Self::vue_css_completions());
+
+        items
+    }
+
+    /// Vue directive completions.
+    fn directive_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::directive_item("v-if", "Conditional rendering", "v-if=\"$1\""),
+            Self::directive_item("v-else-if", "Else-if block", "v-else-if=\"$1\""),
+            Self::directive_item("v-else", "Else block", "v-else"),
+            Self::directive_item("v-for", "List rendering", "v-for=\"$1 in $2\" :key=\"$3\""),
+            Self::directive_item("v-on", "Event listener", "v-on:$1=\"$2\""),
+            Self::directive_item("v-bind", "Attribute binding", "v-bind:$1=\"$2\""),
+            Self::directive_item("v-model", "Two-way binding", "v-model=\"$1\""),
+            Self::directive_item("v-slot", "Named slot", "v-slot:$1"),
+            Self::directive_item("v-show", "Toggle visibility", "v-show=\"$1\""),
+            Self::directive_item("v-pre", "Skip compilation", "v-pre"),
+            Self::directive_item("v-once", "Render once", "v-once"),
+            Self::directive_item("v-memo", "Memoize subtree", "v-memo=\"[$1]\""),
+            Self::directive_item("v-cloak", "Hide until compiled", "v-cloak"),
+            Self::directive_item("v-text", "Set text content", "v-text=\"$1\""),
+            Self::directive_item("v-html", "Set innerHTML", "v-html=\"$1\""),
+            // Shorthand completions
+            Self::directive_item("@", "Event shorthand", "@$1=\"$2\""),
+            Self::directive_item(":", "Bind shorthand", ":$1=\"$2\""),
+            Self::directive_item("#", "Slot shorthand", "#$1"),
+        ]
+    }
+
+    /// Create a directive completion item.
+    fn directive_item(label: &str, description: &str, snippet: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some(description.to_string()),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "**{}**\n\n{}\n\n[Vue Documentation](https://vuejs.org/api/built-in-directives.html)",
+                    label, description
+                ),
+            })),
+            ..Default::default()
+        }
+    }
+
+    /// Built-in Vue component completions.
+    fn builtin_component_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::component_item("Transition", "Animate enter/leave", "<Transition name=\"$1\">\n\t$0\n</Transition>"),
+            Self::component_item("TransitionGroup", "Animate list", "<TransitionGroup name=\"$1\" tag=\"$2\">\n\t$0\n</TransitionGroup>"),
+            Self::component_item("KeepAlive", "Cache components", "<KeepAlive>\n\t$0\n</KeepAlive>"),
+            Self::component_item("Teleport", "Teleport content", "<Teleport to=\"$1\">\n\t$0\n</Teleport>"),
+            Self::component_item("Suspense", "Async dependencies", "<Suspense>\n\t<template #default>\n\t\t$0\n\t</template>\n\t<template #fallback>\n\t\tLoading...\n\t</template>\n</Suspense>"),
+            Self::component_item("component", "Dynamic component", "<component :is=\"$1\" />"),
+            Self::component_item("slot", "Slot outlet", "<slot name=\"$1\">$0</slot>"),
+            Self::component_item("template", "Template fragment", "<template #$1>\n\t$0\n</template>"),
+        ]
+    }
+
+    /// Create a component completion item.
+    fn component_item(label: &str, description: &str, snippet: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::CLASS),
+            detail: Some(format!("Vue built-in: {}", description)),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "**<{}>**\n\n{}\n\n[Vue Documentation](https://vuejs.org/api/built-in-components.html)",
+                    label, description
+                ),
+            })),
+            ..Default::default()
+        }
+    }
+
+    /// Template snippet completions.
+    fn template_snippets() -> Vec<CompletionItem> {
+        vec![
+            Self::snippet_item(
+                "vfor",
+                "v-for loop",
+                "<$1 v-for=\"$2 in $3\" :key=\"$4\">\n\t$0\n</$1>",
+            ),
+            Self::snippet_item("vif", "v-if block", "<$1 v-if=\"$2\">\n\t$0\n</$1>"),
+            Self::snippet_item("vshow", "v-show block", "<$1 v-show=\"$2\">\n\t$0\n</$1>"),
+            Self::snippet_item(
+                "vmodel",
+                "v-model input",
+                "<input v-model=\"$1\" type=\"$2\" />",
+            ),
+            Self::snippet_item("von", "v-on handler", "<$1 @$2=\"$3\">$0</$1>"),
+            Self::snippet_item("vbind", "v-bind attribute", "<$1 :$2=\"$3\">$0</$1>"),
+        ]
+    }
+
+    /// Create a snippet completion item.
+    fn snippet_item(label: &str, description: &str, snippet: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::SNIPPET),
+            detail: Some(description.to_string()),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            ..Default::default()
+        }
+    }
+
+    /// Vue Composition API completions.
+    fn composition_api_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::api_item(
+                "ref",
+                "function ref<T>(value: T): Ref<T>",
+                "Create a reactive reference",
+            ),
+            Self::api_item(
+                "reactive",
+                "function reactive<T>(target: T): T",
+                "Create a reactive object",
+            ),
+            Self::api_item(
+                "computed",
+                "function computed<T>(getter: () => T): ComputedRef<T>",
+                "Create a computed property",
+            ),
+            Self::api_item(
+                "watch",
+                "function watch(source, callback, options?)",
+                "Watch reactive sources",
+            ),
+            Self::api_item(
+                "watchEffect",
+                "function watchEffect(effect: () => void)",
+                "Run effect with auto-tracking",
+            ),
+            Self::api_item(
+                "onMounted",
+                "function onMounted(callback: () => void)",
+                "Lifecycle: after mount",
+            ),
+            Self::api_item(
+                "onUnmounted",
+                "function onUnmounted(callback: () => void)",
+                "Lifecycle: after unmount",
+            ),
+            Self::api_item(
+                "onBeforeMount",
+                "function onBeforeMount(callback: () => void)",
+                "Lifecycle: before mount",
+            ),
+            Self::api_item(
+                "onBeforeUnmount",
+                "function onBeforeUnmount(callback: () => void)",
+                "Lifecycle: before unmount",
+            ),
+            Self::api_item(
+                "onUpdated",
+                "function onUpdated(callback: () => void)",
+                "Lifecycle: after update",
+            ),
+            Self::api_item(
+                "onBeforeUpdate",
+                "function onBeforeUpdate(callback: () => void)",
+                "Lifecycle: before update",
+            ),
+            Self::api_item(
+                "toRef",
+                "function toRef<T>(object: T, key: K): Ref<T[K]>",
+                "Create ref from reactive property",
+            ),
+            Self::api_item(
+                "toRefs",
+                "function toRefs<T>(object: T): ToRefs<T>",
+                "Convert reactive to refs",
+            ),
+            Self::api_item(
+                "unref",
+                "function unref<T>(ref: T | Ref<T>): T",
+                "Unwrap a ref",
+            ),
+            Self::api_item(
+                "isRef",
+                "function isRef(r): r is Ref",
+                "Check if value is ref",
+            ),
+            Self::api_item(
+                "shallowRef",
+                "function shallowRef<T>(value: T): ShallowRef<T>",
+                "Shallow reactive reference",
+            ),
+            Self::api_item(
+                "shallowReactive",
+                "function shallowReactive<T>(target: T): T",
+                "Shallow reactive object",
+            ),
+            Self::api_item(
+                "readonly",
+                "function readonly<T>(target: T): DeepReadonly<T>",
+                "Create readonly proxy",
+            ),
+            Self::api_item(
+                "nextTick",
+                "function nextTick(callback?): Promise<void>",
+                "Wait for next DOM update",
+            ),
+            Self::api_item(
+                "provide",
+                "function provide<T>(key, value: T)",
+                "Provide value to descendants",
+            ),
+            Self::api_item(
+                "inject",
+                "function inject<T>(key, defaultValue?): T",
+                "Inject value from ancestor",
+            ),
+        ]
+    }
+
+    /// Create an API completion item.
+    fn api_item(label: &str, signature: &str, description: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(signature.to_string()),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "```typescript\n{}\n```\n\n{}\n\n[Vue Documentation](https://vuejs.org/api/)",
+                    signature, description
+                ),
+            })),
+            ..Default::default()
+        }
+    }
+
+    /// Vue macro completions (script setup only).
+    fn macro_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::macro_item(
+                "defineProps",
+                "defineProps<T>()",
+                "Declare component props",
+                "defineProps<{\n\t$1\n}>()",
+            ),
+            Self::macro_item(
+                "defineEmits",
+                "defineEmits<T>()",
+                "Declare component emits",
+                "defineEmits<{\n\t$1\n}>()",
+            ),
+            Self::macro_item(
+                "defineExpose",
+                "defineExpose(exposed)",
+                "Expose properties via refs",
+                "defineExpose({\n\t$1\n})",
+            ),
+            Self::macro_item(
+                "defineOptions",
+                "defineOptions(options)",
+                "Declare component options",
+                "defineOptions({\n\tname: '$1',\n})",
+            ),
+            Self::macro_item(
+                "defineSlots",
+                "defineSlots<T>()",
+                "Declare typed slots",
+                "defineSlots<{\n\t$1\n}>()",
+            ),
+            Self::macro_item(
+                "defineModel",
+                "defineModel<T>(name?, options?)",
+                "Declare two-way binding prop",
+                "defineModel<$1>()",
+            ),
+            Self::macro_item(
+                "withDefaults",
+                "withDefaults(props, defaults)",
+                "Set prop defaults",
+                "withDefaults(defineProps<{\n\t$1\n}>(), {\n\t$2\n})",
+            ),
+        ]
+    }
+
+    /// Create a macro completion item.
+    fn macro_item(
+        label: &str,
+        signature: &str,
+        description: &str,
+        snippet: &str,
+    ) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(format!("Macro: {}", signature)),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "```typescript\n{}\n```\n\n{}\n\n*Compiler macro - only usable in `<script setup>`*",
+                    signature, description
+                ),
+            })),
+            ..Default::default()
+        }
+    }
+
+    /// Common import completions.
+    fn import_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::import_item("import vue", "Import from Vue", "import { $1 } from 'vue'"),
+            Self::import_item(
+                "import ref",
+                "Import ref from Vue",
+                "import { ref } from 'vue'",
+            ),
+            Self::import_item(
+                "import reactive",
+                "Import reactive from Vue",
+                "import { reactive } from 'vue'",
+            ),
+            Self::import_item(
+                "import computed",
+                "Import computed from Vue",
+                "import { computed } from 'vue'",
+            ),
+            Self::import_item(
+                "import watch",
+                "Import watch from Vue",
+                "import { watch, watchEffect } from 'vue'",
+            ),
+            Self::import_item(
+                "import lifecycle",
+                "Import lifecycle hooks",
+                "import { onMounted, onUnmounted } from 'vue'",
+            ),
+        ]
+    }
+
+    /// Create an import completion item.
+    fn import_item(label: &str, description: &str, snippet: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::MODULE),
+            detail: Some(description.to_string()),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            ..Default::default()
+        }
+    }
+
+    /// Vue CSS feature completions.
+    fn vue_css_completions() -> Vec<CompletionItem> {
+        vec![
+            Self::css_item("v-bind", "v-bind()", "Dynamic CSS value", "v-bind($1)"),
+            Self::css_item(
+                ":deep",
+                ":deep()",
+                "Deep selector in scoped CSS",
+                ":deep($1)",
+            ),
+            Self::css_item(
+                ":slotted",
+                ":slotted()",
+                "Slotted content selector",
+                ":slotted($1)",
+            ),
+            Self::css_item(":global", ":global()", "Global selector", ":global($1)"),
+        ]
+    }
+
+    /// Create a CSS completion item.
+    fn css_item(label: &str, signature: &str, description: &str, snippet: &str) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(format!("Vue CSS: {}", signature)),
+            insert_text: Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!(
+                    "**{}**\n\n{}\n\n[Vue SFC CSS Features](https://vuejs.org/api/sfc-css-features.html)",
+                    signature, description
+                ),
+            })),
+            ..Default::default()
+        }
+    }
+}
+
+/// Completion trigger characters for Vue SFC.
+pub const TRIGGER_CHARACTERS: &[char] = &[
+    '<',  // HTML tags
+    '.',  // Object property access
+    ':',  // v-bind shorthand
+    '@',  // v-on shorthand
+    '#',  // v-slot shorthand
+    '"',  // Attribute values
+    '\'', // Attribute values
+    '/',  // Closing tags
+    ' ',  // Space for attribute completion
+];
+
+/// Get trigger characters as strings.
+pub fn trigger_characters() -> Vec<String> {
+    TRIGGER_CHARACTERS.iter().map(|c| c.to_string()).collect()
+}
+
+// =============================================================================
+// Art file context detection helpers
+// =============================================================================
+
+/// Check if cursor is inside <art ...> opening tag.
+fn is_inside_art_tag(before: &str) -> bool {
+    // Find last <art and check if we're before the closing >
+    if let Some(art_start) = before.rfind("<art") {
+        let after_art = &before[art_start..];
+        // Check if there's no closing > yet
+        !after_art.contains('>')
+    } else {
+        false
+    }
+}
+
+/// Check if cursor is inside <variant ...> opening tag.
+fn is_inside_variant_tag(before: &str) -> bool {
+    // Find last <variant and check if we're before the closing >
+    if let Some(variant_start) = before.rfind("<variant") {
+        let after_variant = &before[variant_start..];
+        // Check if there's no closing > yet
+        !after_variant.contains('>')
+    } else {
+        false
+    }
+}
+
+/// Check if we should suggest <art> block at root level.
+fn should_suggest_art_block(before: &str) -> bool {
+    // Suggest art block if there's no <art> yet and we're at the start or after whitespace
+    !before.contains("<art")
+        && (before.trim().is_empty() || before.ends_with('\n') || before.ends_with('<'))
+}
+
+/// Check if we should suggest <variant> block inside <art>.
+fn should_suggest_variant_block(before: &str) -> bool {
+    // We're inside <art> if we found <art> but not </art> yet
+    if let Some(art_start) = before.rfind("<art") {
+        let after_art = &before[art_start..];
+        // Check if we're past the opening tag and haven't closed yet
+        after_art.contains('>') && !after_art.contains("</art>")
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_directive_completions() {
+        let items = CompletionService::directive_completions();
+        assert!(!items.is_empty());
+
+        // Check v-if is present
+        let v_if = items.iter().find(|i| i.label == "v-if");
+        assert!(v_if.is_some());
+        assert_eq!(v_if.unwrap().kind, Some(CompletionItemKind::KEYWORD));
+    }
+
+    #[test]
+    fn test_composition_api_completions() {
+        let items = CompletionService::composition_api_completions();
+        assert!(!items.is_empty());
+
+        // Check ref is present
+        let ref_item = items.iter().find(|i| i.label == "ref");
+        assert!(ref_item.is_some());
+        assert_eq!(ref_item.unwrap().kind, Some(CompletionItemKind::FUNCTION));
+    }
+
+    #[test]
+    fn test_macro_completions() {
+        let items = CompletionService::macro_completions();
+        assert!(!items.is_empty());
+
+        // Check defineProps is present
+        let define_props = items.iter().find(|i| i.label == "defineProps");
+        assert!(define_props.is_some());
+    }
+
+    #[test]
+    fn test_vue_css_completions() {
+        let items = CompletionService::vue_css_completions();
+        assert_eq!(items.len(), 4);
+
+        // Check :deep is present
+        let deep = items.iter().find(|i| i.label == ":deep");
+        assert!(deep.is_some());
+    }
+
+    #[test]
+    fn test_trigger_characters() {
+        let chars = trigger_characters();
+        assert!(chars.contains(&"<".to_string()));
+        assert!(chars.contains(&":".to_string()));
+        assert!(chars.contains(&"@".to_string()));
+    }
+}

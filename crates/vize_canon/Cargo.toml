@@ -6,3 +6,7 @@ license.workspace = true
 description = "Canon - The standard of correctness for Vize type checking"
 
 [dependencies]
+rustc-hash.workspace = true
+
+[dev-dependencies]
+

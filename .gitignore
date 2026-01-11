@@ -3,13 +3,19 @@ target/
 
 # Node.js
 node_modules/
-pnpm-lock.yaml
 
-# WASM build output
+# npm package build outputs
+npm/*/dist/
 npm/vite-plugin-vize/wasm/
 
 # Native (NAPI) build output
 *.node
+npm/vize-native/index.js
+npm/vize-native/index.d.ts
+
+# Examples build output
+examples/*/dist/
+examples/*/.vite/
 
 # IDE
 .idea/
@@ -24,3 +30,15 @@ npm/vite-plugin-vize/wasm/
 # Benchmark input/output files
 bench/__in__/
 bench/__out__/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Vize local data (snapshots, cache, etc.)
+.vize/

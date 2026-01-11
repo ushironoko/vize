@@ -34,6 +34,11 @@ vize_atelier_dom = { path = "crates/vize_atelier_dom", version = "0.0.1-alpha.11
 vize_atelier_vapor = { path = "crates/vize_atelier_vapor", version = "0.0.1-alpha.11" }
 vize_atelier_sfc = { path = "crates/vize_atelier_sfc", version = "0.0.1-alpha.11", default-features = false }
 vize_vitrine = { path = "crates/vize_vitrine", version = "0.0.1-alpha.11" }
+vize_musea = { path = "crates/vize_musea", version = "0.0.1-alpha.11" }
+vize_patina = { path = "crates/vize_patina", version = "0.0.1-alpha.11" }
+vize_glyph = { path = "crates/vize_glyph", version = "0.0.1-alpha.11" }
+vize_maestro = { path = "crates/vize_maestro", version = "0.0.1-alpha.11" }
+vize_canon = { path = "crates/vize_canon", version = "0.0.1-alpha.11" }
 
 # OXC dependencies
 oxc_parser = "0.45"

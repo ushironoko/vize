@@ -2,6 +2,9 @@
 import { ref, computed, watch, onMounted, shallowRef } from 'vue';
 import MonacoEditor from './components/MonacoEditor.vue';
 import CodeHighlight from './components/CodeHighlight.vue';
+import MuseaPlayground from './components/MuseaPlayground.vue';
+import PatinaPlayground from './components/PatinaPlayground.vue';
+import GlyphPlayground from './components/GlyphPlayground.vue';
 import { PRESETS, type PresetKey, type InputMode } from './presets';
 import { loadWasm, isWasmLoaded, isUsingMock, type CompilerOptions, type CompileResult, type SfcCompileResult, type CssCompileResult, type CssCompileOptions } from './wasm/index';
 import * as prettier from 'prettier/standalone';
@@ -10,6 +13,10 @@ import * as parserEstree from 'prettier/plugins/estree';
 import * as parserTypescript from 'prettier/plugins/typescript';
 import * as parserCss from 'prettier/plugins/postcss';
 import ts from 'typescript';
+
+// Main tab for switching between Atelier, Musea, Patina, and Glyph
+type MainTab = 'atelier' | 'musea' | 'patina' | 'glyph';
+const mainTab = ref<MainTab>('atelier');
 
 // Convert Map objects to plain objects recursively (for serde_wasm_bindgen output)
 function mapToObject(value: unknown): unknown {
@@ -221,7 +228,7 @@ function copyFullOutput() {
   if (!output.value) return;
   const fullOutput = `
 === COMPILER OUTPUT ===
-Compile Time: ${compileTime?.value?.toFixed(2) ?? 'N/A'}ms
+Compile Time: ${compileTime?.value?.toFixed(4) ?? 'N/A'}ms
 
 === CODE ===
 ${output.value.code}
@@ -290,21 +297,56 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="options">
-        <label class="option">
-          <span>Preset:</span>
-          <select :value="selectedPreset" @change="handlePresetChange(($event.target as HTMLSelectElement).value as PresetKey)">
-            <option v-for="(preset, key) in PRESETS" :key="key" :value="key">{{ preset.name }}</option>
-          </select>
-        </label>
+      <div class="main-tabs">
+        <button
+          :class="['main-tab', { active: mainTab === 'atelier' }]"
+          @click="mainTab = 'atelier'"
+        >
+          <span class="tab-name">Atelier</span>
+          <span class="tab-desc">compiler</span>
+        </button>
+        <button
+          :class="['main-tab', { active: mainTab === 'musea' }]"
+          @click="mainTab = 'musea'"
+        >
+          <span class="tab-name">Musea</span>
+          <span class="tab-desc">story</span>
+        </button>
+        <button
+          :class="['main-tab', { active: mainTab === 'patina' }]"
+          @click="mainTab = 'patina'"
+        >
+          <span class="tab-name">Patina</span>
+          <span class="tab-desc">linter</span>
+        </button>
+        <!-- Glyph tab hidden for now
+        <button
+          :class="['main-tab', { active: mainTab === 'glyph' }]"
+          @click="mainTab = 'glyph'"
+        >
+          <span class="tab-name">Glyph</span>
+          <span class="tab-desc">formatter</span>
+        </button>
+        -->
+      </div>
 
-        <label class="option">
-          <span>Input:</span>
-          <select v-model="inputMode">
-            <option value="template">Template</option>
-            <option value="sfc">SFC</option>
-          </select>
-        </label>
+      <div class="options">
+        <template v-if="mainTab === 'atelier'">
+          <label class="option">
+            <span>Preset:</span>
+            <select :value="selectedPreset" @change="handlePresetChange(($event.target as HTMLSelectElement).value as PresetKey)">
+              <option v-for="(preset, key) in PRESETS" :key="key" :value="key">{{ preset.name }}</option>
+            </select>
+          </label>
+
+          <label class="option">
+            <span>Input:</span>
+            <select v-model="inputMode">
+              <option value="template">Template</option>
+              <option value="sfc">SFC</option>
+            </select>
+          </label>
+        </template>
 
         <a href="https://github.com/ubugeeei/vize" target="_blank" rel="noopener noreferrer" class="github-link">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
@@ -315,6 +357,24 @@ onMounted(async () => {
     </header>
 
     <main class="main">
+      <!-- Musea View -->
+      <template v-if="mainTab === 'musea'">
+        <MuseaPlayground :compiler="compiler" />
+      </template>
+
+      <!-- Patina View -->
+      <template v-else-if="mainTab === 'patina'">
+        <PatinaPlayground :compiler="compiler" />
+      </template>
+
+      <!-- Glyph View - hidden for now
+      <template v-else-if="mainTab === 'glyph'">
+        <GlyphPlayground :compiler="compiler" />
+      </template>
+      -->
+
+      <!-- Atelier View -->
+      <template v-else>
       <div class="panel input-panel">
         <div class="panel-header">
           <h2>{{ inputMode === 'sfc' ? 'SFC (.vue)' : 'Template' }}</h2>
@@ -332,7 +392,7 @@ onMounted(async () => {
         <div class="panel-header">
           <h2>
             Output
-            <span v-if="compileTime !== null" class="compile-time">{{ compileTime.toFixed(2) }}ms</span>
+            <span v-if="compileTime !== null" class="compile-time">{{ compileTime.toFixed(4) }}ms</span>
           </h2>
           <div class="panel-actions">
             <button @click="copyFullOutput" class="btn-ghost">Copy All Output</button>
@@ -503,6 +563,7 @@ onMounted(async () => {
           </template>
         </div>
       </div>
+      </template>
     </main>
 
     <footer class="footer">

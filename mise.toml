@@ -3,6 +3,9 @@ node = "24"
 pnpm = "10"
 rust = "latest"
 
+[env]
+_.path = ["~/.cargo/bin"]
+
 # =============================================================================
 # Setup
 # =============================================================================
@@ -48,7 +51,7 @@ run = "pnpm -C npm/vite-plugin-vize build"
 [tasks."build:cli"]
 alias = "bc"
 description = "Build CLI binary (vize)"
-run = "cargo build --release -p vize_compiler_cli"
+run = "cargo build --release -p vize"
 
 # =============================================================================
 # CLI (vize - Vue Compiler)
@@ -66,7 +69,7 @@ run = "cargo build --release -p vize_compiler_cli"
 
 [tasks.cli]
 description = "Install vize CLI to cargo bin (accessible from PATH)"
-run = "cargo install --path crates/vize_compiler_cli --force"
+run = "cargo install --path crates/vize --force"
 
 [tasks."cli:help"]
 description = "Show vize CLI help"
@@ -183,7 +186,7 @@ run = "cargo bench -p vize_atelier_sfc"
 alias = "d"
 description = "Start playground dev server (using Vize compiler)"
 depends = ["build:vite-plugin"]
-run = "pnpm -C playground dev"
+run = "CI=true pnpm -C playground dev"
 
 [tasks.example]
 alias = "e"

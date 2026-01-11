@@ -26,6 +26,9 @@ ignore = "0.4"
 # Multithreading
 rayon = "1.10"
 
+# Async runtime (for LSP)
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
 # Serialization (for JSON output)
 serde = { workspace = true }
 serde_json = { workspace = true }

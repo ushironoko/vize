@@ -28,6 +28,6 @@ pub fn run(args: CheckArgs) {
     eprintln!("  strict: {}", args.strict);
     eprintln!("  format: {}", args.format);
 
-    // Call vize_canon
-    vize_canon::check();
+    // TODO: Implement type checking
+    eprintln!("Type checking is not yet implemented.");
 }

@@ -6,3 +6,20 @@ license.workspace = true
 description = "Musea - Component gallery and documentation for Vize Vue components"
 
 [dependencies]
+vize_carton.workspace = true
+vize_relief.workspace = true
+vize_atelier_sfc.workspace = true
+
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+rustc-hash.workspace = true
+memchr.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "art_parse"
+harness = false

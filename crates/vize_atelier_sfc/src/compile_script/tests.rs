@@ -1,7 +1,7 @@
 //! Tests for script compilation.
 
 #[cfg(test)]
-mod tests {
+mod compile_script_tests {
     use crate::compile_script::compile_script;
     use crate::compile_script::function_mode::compile_script_setup;
     use crate::compile_script::props::{

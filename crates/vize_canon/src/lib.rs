@@ -10,12 +10,73 @@
 //! achieve harmonious proportions, `vize_canon` enforces type correctness
 //! as the standard for Vue SFC code.
 //!
-//! ## Status
+//! ## Architecture
 //!
-//! This crate is currently a work in progress (WIP).
+//! ```text
+//! +----------------------------------------------------------+
+//! |                      vize_canon                           |
+//! +----------------------------------------------------------+
+//! |                                                           |
+//! |  +-------------------+     +------------------------+     |
+//! |  | TypeChecker       |     | TypeContext            |     |
+//! |  | - check_template  |<--->| - bindings: HashMap    |     |
+//! |  | - get_type_at     |     | - imports: Vec<Import> |     |
+//! |  | - get_completions |     | - props: Vec<Prop>     |     |
+//! |  +-------------------+     +------------------------+     |
+//! |           |                                               |
+//! |           v                                               |
+//! |  +-------------------+     +------------------------+     |
+//! |  | TypeDiagnostic    |     | TypeInfo               |     |
+//! |  | - error/warning   |     | - display: String      |     |
+//! |  | - location        |     | - kind: TypeKind       |     |
+//! |  +-------------------+     +------------------------+     |
+//! |                                                           |
+//! +----------------------------------------------------------+
+//! ```
 
-#![allow(unused)]
+mod checker;
+mod context;
+mod diagnostic;
+mod types;
 
-pub fn check() {
-    todo!("TypeScript type checking for Vue SFC")
+pub use checker::TypeChecker;
+pub use context::{Binding, BindingKind, Import, Prop, TypeContext};
+pub use diagnostic::{TypeDiagnostic, TypeSeverity};
+pub use types::{CompletionItem, CompletionKind, TypeInfo, TypeKind};
+
+/// Check result from the type checker.
+#[derive(Debug, Clone, Default)]
+pub struct CheckResult {
+    /// Type diagnostics (errors and warnings).
+    pub diagnostics: Vec<TypeDiagnostic>,
+    /// Error count.
+    pub error_count: usize,
+    /// Warning count.
+    pub warning_count: usize,
+}
+
+impl CheckResult {
+    /// Create a new empty check result.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check if there are errors.
+    pub fn has_errors(&self) -> bool {
+        self.error_count > 0
+    }
+
+    /// Check if there are any diagnostics.
+    pub fn has_diagnostics(&self) -> bool {
+        !self.diagnostics.is_empty()
+    }
+
+    /// Add a diagnostic.
+    pub fn add_diagnostic(&mut self, diagnostic: TypeDiagnostic) {
+        match diagnostic.severity {
+            TypeSeverity::Error => self.error_count += 1,
+            TypeSeverity::Warning => self.warning_count += 1,
+        }
+        self.diagnostics.push(diagnostic);
+    }
 }
