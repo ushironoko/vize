@@ -33,7 +33,7 @@ export default defineConfig(async () => {
   const vuePlugin = await getVuePlugin();
 
   return {
-    base: process.env.CI ? "/vize/" : "/",
+    base: process.env.CI ? "/play/" : "/",
     plugins: [vuePlugin, wasm(), topLevelAwait()],
     server: {
       headers: {
