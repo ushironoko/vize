@@ -24,7 +24,7 @@ const vizeTheme: ThemeRegistration = {
     { scope: ['string', 'string.quoted'], settings: { foreground: '#d0d4dc' } },
     { scope: ['constant.numeric', 'constant.language'], settings: { foreground: '#f08060' } },
     { scope: ['variable', 'variable.other'], settings: { foreground: '#f0f2f5' } },
-    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: '#6b7280' } },
+    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: '#4b5563' } },
     { scope: ['punctuation', 'meta.brace'], settings: { foreground: '#9ca3b0' } },
     { scope: ['entity.name.type', 'support.type'], settings: { foreground: '#d0d4dc' } },
     { scope: ['meta.property-name', 'support.type.property-name'], settings: { foreground: '#e07048' } },
