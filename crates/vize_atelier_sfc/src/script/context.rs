@@ -57,11 +57,11 @@ pub struct ScriptCompileContext {
 
     /// TypeScript interface definitions (name -> body)
     /// Used to resolve type references in defineProps<InterfaceName>()
-    pub interfaces: rustc_hash::FxHashMap<String, String>,
+    pub interfaces: vize_carton::FxHashMap<String, String>,
 
     /// TypeScript type alias definitions (name -> body)
     /// Used to resolve type references in defineProps<TypeName>()
-    pub type_aliases: rustc_hash::FxHashMap<String, String>,
+    pub type_aliases: vize_carton::FxHashMap<String, String>,
 }
 
 impl ScriptCompileContext {
@@ -80,8 +80,8 @@ impl ScriptCompileContext {
             emits_runtime_decl: None,
             emits_type_decl: None,
             emit_decl_id: None,
-            interfaces: rustc_hash::FxHashMap::default(),
-            type_aliases: rustc_hash::FxHashMap::default(),
+            interfaces: vize_carton::FxHashMap::default(),
+            type_aliases: vize_carton::FxHashMap::default(),
         }
     }
 

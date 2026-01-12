@@ -2,8 +2,7 @@
 //!
 //! Transforms the template AST into Vapor IR for code generation.
 
-use rustc_hash::FxHashMap;
-use vize_carton::{Box, Bump, String, Vec};
+use vize_carton::{Box, Bump, FxHashMap, String, Vec};
 
 use crate::ir::*;
 use vize_atelier_core::{

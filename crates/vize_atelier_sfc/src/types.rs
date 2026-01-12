@@ -2,9 +2,9 @@
 //!
 //! Zero-copy design using borrowed strings for maximum parsing performance.
 
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use vize_carton::FxHashMap;
 
 // Re-export from vize_relief to avoid duplication
 pub use vize_atelier_core::options::{BindingMetadata, BindingType};

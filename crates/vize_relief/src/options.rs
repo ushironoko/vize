@@ -1,6 +1,6 @@
 //! Compiler options.
 
-use vize_carton::String;
+use vize_carton::{FxHashMap, String};
 
 /// Parse mode for the tokenizer
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -132,12 +132,12 @@ impl Default for TransformOptions {
 #[serde(rename_all = "camelCase")]
 pub struct BindingMetadata {
     /// Setup bindings with their types
-    pub bindings: rustc_hash::FxHashMap<std::string::String, BindingType>,
+    pub bindings: FxHashMap<std::string::String, BindingType>,
 
     /// Props aliases (local name -> prop key)
     /// For destructured props with aliases like: const { foo: bar } = defineProps()
     /// This maps "bar" -> "foo"
-    pub props_aliases: rustc_hash::FxHashMap<std::string::String, std::string::String>,
+    pub props_aliases: FxHashMap<std::string::String, std::string::String>,
 
     /// Whether these bindings are from script setup
     /// If false, components/directives won't be resolved from these bindings

@@ -3,7 +3,7 @@
 //! Provides efficient lookup and tracking of symbols across
 //! the entire compilation unit.
 
-use rustc_hash::FxHashMap;
+use vize_carton::{bitflags, FxHashMap};
 use vize_relief::BindingType;
 
 use crate::{ScopeBinding, ScopeId};
@@ -76,7 +76,7 @@ impl Symbol {
     }
 }
 
-bitflags::bitflags! {
+bitflags! {
     /// Flags for symbol properties
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SymbolFlags: u8 {
@@ -183,7 +183,7 @@ impl SymbolTable {
 impl From<&ScopeBinding> for SymbolFlags {
     fn from(binding: &ScopeBinding) -> Self {
         let mut flags = SymbolFlags::empty();
-        if binding.is_mutated {
+        if binding.is_mutated() {
             flags |= SymbolFlags::MUTATED;
         }
         if matches!(

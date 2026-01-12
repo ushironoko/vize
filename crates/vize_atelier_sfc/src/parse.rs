@@ -5,8 +5,8 @@
 
 use crate::types::*;
 use memchr::memchr;
-use rustc_hash::FxHashMap;
 use std::borrow::Cow;
+use vize_carton::FxHashMap;
 
 // Static closing tags for fast comparison (avoid format!)
 const CLOSING_TEMPLATE: &[u8] = b"</template>";

@@ -3,6 +3,7 @@
 use super::helpers::camelize;
 use crate::ast::*;
 use crate::options::{BindingMetadata, BindingType};
+use vize_carton::is_builtin_directive;
 
 /// Check if an interpolation references only constant bindings (LiteralConst or SetupConst)
 /// These bindings never change at runtime, so no TEXT patch flag is needed.
@@ -48,28 +49,6 @@ fn is_const_handler(expr: &ExpressionNode<'_>, bindings: Option<&BindingMetadata
         }
         ExpressionNode::Compound(_) => false, // Compound expressions are dynamic
     }
-}
-
-/// Check if a directive is a built-in directive (not custom)
-fn is_builtin_directive(name: &str) -> bool {
-    matches!(
-        name,
-        "bind"
-            | "on"
-            | "if"
-            | "else"
-            | "else-if"
-            | "for"
-            | "show"
-            | "model"
-            | "slot"
-            | "cloak"
-            | "pre"
-            | "memo"
-            | "once"
-            | "text"
-            | "html"
-    )
 }
 
 /// Calculate patch flag and dynamic props for an element

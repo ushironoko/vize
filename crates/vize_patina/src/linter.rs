@@ -6,10 +6,9 @@ use crate::context::LintContext;
 use crate::diagnostic::{LintDiagnostic, LintSummary};
 use crate::rule::RuleRegistry;
 use crate::visitor::LintVisitor;
-use rustc_hash::FxHashSet;
 use vize_armature::Parser;
 use vize_carton::i18n::Locale;
-use vize_carton::Allocator;
+use vize_carton::{Allocator, FxHashSet};
 
 /// Lint result for a single file
 #[derive(Debug, Clone)]

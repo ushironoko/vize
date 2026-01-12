@@ -12,6 +12,7 @@ native = ["dep:lightningcss"]
 
 [dependencies]
 vize_carton = { workspace = true }
+vize_croquis = { workspace = true }
 vize_atelier_core = { workspace = true }
 vize_atelier_dom = { workspace = true }
 vize_atelier_vapor = { workspace = true }
@@ -25,7 +26,6 @@ oxc_semantic = { workspace = true }
 oxc_transformer = { workspace = true }
 oxc_codegen = { workspace = true }
 
-rustc-hash = { workspace = true }
 memchr = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -2,6 +2,7 @@
 
 use crate::ast::*;
 use crate::transforms::v_model::{get_vmodel_helper, parse_model_modifiers};
+use vize_carton::is_builtin_directive;
 
 use super::children::generate_children;
 use super::context::CodegenContext;
@@ -34,28 +35,6 @@ pub fn has_vshow_directive(el: &ElementNode<'_>) -> bool {
             false
         }
     })
-}
-
-/// Check if a directive is a built-in directive (not custom)
-pub fn is_builtin_directive(name: &str) -> bool {
-    matches!(
-        name,
-        "bind"
-            | "on"
-            | "if"
-            | "else"
-            | "else-if"
-            | "for"
-            | "show"
-            | "model"
-            | "slot"
-            | "cloak"
-            | "pre"
-            | "memo"
-            | "once"
-            | "text"
-            | "html"
-    )
 }
 
 /// Check if element has custom directives

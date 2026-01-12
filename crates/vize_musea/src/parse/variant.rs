@@ -5,8 +5,7 @@
 use super::{calculate_location_fast, extract_attr, has_attr};
 use crate::types::{ArtParseError, ArtVariant, ViewportConfig};
 use memchr::{memchr, memmem};
-use rustc_hash::FxHashMap;
-use vize_carton::Bump;
+use vize_carton::{Bump, FxHashMap};
 
 /// Parse all `<variant>` blocks from art content.
 /// Uses arena allocation for the variants vector.

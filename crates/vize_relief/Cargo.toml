@@ -9,6 +9,5 @@ description = "Relief - The sculptured AST surface for Vize Vue templates"
 [dependencies]
 vize_carton = { workspace = true }
 
-rustc-hash = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

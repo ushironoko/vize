@@ -3,7 +3,7 @@
 //! The TypeContext holds all the type information extracted from
 //! the script block that is available in the template.
 
-use rustc_hash::FxHashMap;
+use vize_carton::FxHashMap;
 
 use crate::types::TypeInfo;
 

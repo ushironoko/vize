@@ -49,6 +49,10 @@
     <td>Parser & tokenizer</td>
   </tr>
   <tr>
+    <td><img src="./crates/vize_croquis/logo.png" width="32" align="center" /> <a href="./crates/vize_croquis">vize_croquis</a></td>
+    <td>Semantic analysis layer</td>
+  </tr>
+  <tr>
     <td><img src="./crates/vize_atelier_core/logo.png" width="32" align="center" /> <a href="./crates/vize_atelier_core">vize_atelier_core</a></td>
     <td>Transforms & code generation</td>
   </tr>
@@ -103,6 +107,7 @@ Vize crates are named after **art and sculpture terminology**, reflecting how ea
 | **Carton** | /kɑːˈtɒn/ | Artist's portfolio case — stores and organizes tools |
 | **Relief** | /rɪˈliːf/ | Sculptural technique projecting from a surface — AST structure |
 | **Armature** | /ˈɑːrmətʃər/ | Internal skeleton supporting a sculpture — parsing framework |
+| **Croquis** | /kʁɔ.ki/ | Quick sketch capturing essence — semantic analysis |
 | **Atelier** | /ˌætəlˈjeɪ/ | Artist's workshop — compiler workspaces |
 | **Vitrine** | /vɪˈtriːn/ | Glass display case — bindings exposing the compiler |
 | **Canon** | /ˈkænən/ | Standard of ideal proportions — type checking |

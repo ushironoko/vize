@@ -55,6 +55,15 @@ pub use bumpalo::Bump;
 pub use compact_str::CompactString;
 pub use compact_str::CompactString as String;
 
+// Re-export smallvec for stack-optimized collections
+pub use smallvec::{smallvec, SmallVec};
+
+// Re-export bitflags for flag types
+pub use bitflags::bitflags;
+
+// Re-export rustc-hash for fast hash maps/sets
+pub use rustc_hash::{FxHashMap, FxHashSet};
+
 // Re-export shared utilities
 pub use dom_tag_config::*;
 pub use flags::*;

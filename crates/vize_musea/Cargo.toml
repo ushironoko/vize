@@ -13,7 +13,6 @@ vize_atelier_sfc.workspace = true
 
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-rustc-hash.workspace = true
 memchr.workspace = true
 thiserror.workspace = true
 

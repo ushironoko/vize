@@ -31,7 +31,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 # Utilities
-rustc-hash.workspace = true
 memchr.workspace = true
 
 [dev-dependencies]

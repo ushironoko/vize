@@ -12,7 +12,6 @@ vize_atelier_core = { workspace = true }
 
 serde = { workspace = true }
 thiserror = { workspace = true }
-rustc-hash = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

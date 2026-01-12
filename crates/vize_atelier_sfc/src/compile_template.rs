@@ -39,7 +39,7 @@ pub(crate) fn compile_template_block(
 
     // Pass binding metadata from script setup to template compiler
     if let Some(script_bindings) = bindings {
-        let mut binding_map = rustc_hash::FxHashMap::default();
+        let mut binding_map = vize_carton::FxHashMap::default();
         for (name, binding_type) in &script_bindings.bindings {
             let type_str = match binding_type {
                 BindingType::Data => "data",

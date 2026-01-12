@@ -5,6 +5,7 @@ import CodeHighlight from './components/CodeHighlight.vue';
 import MuseaPlayground from './components/MuseaPlayground.vue';
 import PatinaPlayground from './components/PatinaPlayground.vue';
 import GlyphPlayground from './components/GlyphPlayground.vue';
+import CroquisPlayground from './components/CroquisPlayground.vue';
 import { PRESETS, type PresetKey, type InputMode } from './presets';
 import { loadWasm, isWasmLoaded, isUsingMock, type CompilerOptions, type CompileResult, type SfcCompileResult, type CssCompileResult, type CssCompileOptions } from './wasm/index';
 import * as prettier from 'prettier/standalone';
@@ -14,9 +15,9 @@ import * as parserTypescript from 'prettier/plugins/typescript';
 import * as parserCss from 'prettier/plugins/postcss';
 import ts from 'typescript';
 
-// Main tab for switching between Atelier, Musea, Patina, and Glyph
-type MainTab = 'atelier' | 'musea' | 'patina' | 'glyph';
-const validTabs: MainTab[] = ['atelier', 'musea', 'patina', 'glyph'];
+// Main tab for switching between Atelier, Musea, Patina, Glyph, and Croquis
+type MainTab = 'atelier' | 'musea' | 'patina' | 'glyph' | 'croquis';
+const validTabs: MainTab[] = ['atelier', 'musea', 'patina', 'glyph', 'croquis'];
 
 function getInitialTab(): MainTab {
   const params = new URLSearchParams(window.location.search);
@@ -457,11 +458,8 @@ async function compile() {
           // Detect TypeScript from script lang
           const scriptLang = result.descriptor.scriptSetup?.lang || result.descriptor.script?.lang;
           const usesTs = scriptLang === 'ts' || scriptLang === 'tsx';
-          console.log('scriptLang:', scriptLang, 'usesTs:', usesTs);
-          console.log('raw code:', result.script.code);
           // Format code with appropriate parser
           formattedCode.value = await formatCode(result.script.code, usesTs ? 'typescript' : 'babel');
-          console.log('formattedCode:', formattedCode.value);
           // Also generate JS version for TypeScript
           if (usesTs) {
             const jsCode = transpileToJs(result.script.code);
@@ -607,6 +605,13 @@ onMounted(async () => {
           <span class="tab-name">Musea</span>
           <span class="tab-desc">story</span>
         </button>
+        <button
+          :class="['main-tab', { active: mainTab === 'croquis' }]"
+          @click="mainTab = 'croquis'"
+        >
+          <span class="tab-name">Croquis</span>
+          <span class="tab-desc">analyzer</span>
+        </button>
         <!-- Glyph tab hidden for now
         <button
           :class="['main-tab', { active: mainTab === 'glyph' }]"
@@ -653,6 +658,11 @@ onMounted(async () => {
       <!-- Patina View -->
       <template v-else-if="mainTab === 'patina'">
         <PatinaPlayground :compiler="compiler" />
+      </template>
+
+      <!-- Croquis View -->
+      <template v-else-if="mainTab === 'croquis'">
+        <CroquisPlayground :compiler="compiler" />
       </template>
 
       <!-- Glyph View - hidden for now

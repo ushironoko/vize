@@ -8,6 +8,7 @@ description = "Atelier Core - The core workshop for Vize Vue template parsing an
 
 [dependencies]
 vize_carton = { workspace = true }
+vize_croquis = { workspace = true }
 vize_relief = { workspace = true }
 vize_armature = { workspace = true }
 
@@ -30,8 +31,6 @@ oxc_transformer = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-rustc-hash = { workspace = true }
-once_cell = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

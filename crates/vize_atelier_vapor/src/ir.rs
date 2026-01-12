@@ -1,9 +1,8 @@
 //! Vapor Intermediate Representation (IR) types.
 
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vize_atelier_core::{Namespace, RootNode, SimpleExpressionNode, TemplateChildNode};
-use vize_carton::{Box, Bump, String, Vec};
+use vize_carton::{Box, Bump, FxHashMap, String, Vec};
 
 /// IR node type discriminant
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

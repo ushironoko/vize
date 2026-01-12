@@ -3,10 +3,9 @@
 //! Uses arena allocation for high-performance memory management.
 
 use crate::diagnostic::{LintDiagnostic, Severity};
-use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use vize_carton::i18n::{t, t_fmt, Locale};
-use vize_carton::{Allocator, CompactString};
+use vize_carton::{Allocator, CompactString, FxHashMap, FxHashSet};
 use vize_relief::ast::SourceLocation;
 
 /// Represents a disabled range for a specific rule or all rules

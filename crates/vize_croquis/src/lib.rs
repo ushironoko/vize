@@ -31,11 +31,23 @@
 //! vize_atelier_core (Transform)
 //! ```
 
+// Core modules
 mod scope;
 mod symbol;
 
+// Analysis modules
+pub mod builtins;
+pub mod css;
+pub mod display;
+pub mod hoist;
+pub mod macros;
+pub mod optimization;
+pub mod provide;
+pub mod reactivity;
+
+// Re-export core types
 pub use scope::*;
 pub use symbol::*;
 
-/// Re-export common types
+// Re-export common types
 pub use vize_relief::BindingType;

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use vize_atelier_core::options::CodegenMode;
-use vize_carton::String;
+use vize_carton::{FxHashMap, String};
 
 /// DOM compiler options
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +75,7 @@ impl Default for DomCompilerOptions {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BindingMetadataMap {
-    pub bindings: rustc_hash::FxHashMap<String, String>,
+    pub bindings: FxHashMap<String, String>,
 }
 
 /// DOM-specific element checks

@@ -70,7 +70,7 @@ pub fn compile_template_with_options<'a>(
     // Convert BindingMetadataMap to BindingMetadata if present
     let binding_metadata = options.binding_metadata.as_ref().map(|map| {
         use vize_atelier_core::options::{BindingMetadata, BindingType};
-        let mut bindings = rustc_hash::FxHashMap::default();
+        let mut bindings = vize_carton::FxHashMap::default();
         for (name, type_str) in &map.bindings {
             let binding_type = match type_str.as_str() {
                 "setup-let" => BindingType::SetupLet,
@@ -89,7 +89,7 @@ pub fn compile_template_with_options<'a>(
         }
         BindingMetadata {
             bindings,
-            props_aliases: rustc_hash::FxHashMap::default(),
+            props_aliases: vize_carton::FxHashMap::default(),
             is_script_setup: true,
         }
     });
@@ -110,7 +110,7 @@ pub fn compile_template_with_options<'a>(
     // Codegen - recompute binding_metadata for codegen (since transform consumed it)
     let codegen_binding_metadata = options.binding_metadata.as_ref().map(|map| {
         use vize_atelier_core::options::{BindingMetadata, BindingType};
-        let mut bindings = rustc_hash::FxHashMap::default();
+        let mut bindings = vize_carton::FxHashMap::default();
         for (name, type_str) in &map.bindings {
             let binding_type = match type_str.as_str() {
                 "setup-let" => BindingType::SetupLet,
@@ -129,7 +129,7 @@ pub fn compile_template_with_options<'a>(
         }
         BindingMetadata {
             bindings,
-            props_aliases: rustc_hash::FxHashMap::default(),
+            props_aliases: vize_carton::FxHashMap::default(),
             is_script_setup: true,
         }
     });

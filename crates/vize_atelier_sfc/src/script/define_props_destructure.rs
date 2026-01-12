@@ -11,7 +11,7 @@ use oxc_ast::ast::{
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
-use rustc_hash::FxHashMap;
+use vize_carton::FxHashMap;
 
 use crate::types::BindingType;
 

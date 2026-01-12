@@ -186,6 +186,144 @@ export interface FormatResult {
   changed: boolean;
 }
 
+// Analysis (Croquis) types
+export interface AnalysisOptions {
+  filename?: string;
+}
+
+// Binding source (where it comes from)
+export type BindingSource =
+  | 'props'
+  | 'emits'
+  | 'model'
+  | 'slots'
+  | 'ref'
+  | 'reactive'
+  | 'computed'
+  | 'import'
+  | 'local'
+  | 'function'
+  | 'class'
+  | 'templateRef'
+  | 'unknown';
+
+// Binding metadata
+export interface BindingMetadata {
+  fromMacro?: string;
+  isExported: boolean;
+  isImported: boolean;
+  isComponent: boolean;
+  isDirective: boolean;
+  needsValue: boolean;
+  usedInTemplate: boolean;
+  usedInScript: boolean;
+  scopeDepth: number;
+}
+
+export interface BindingDisplay {
+  name: string;
+  kind: string;
+  source: BindingSource;
+  metadata: BindingMetadata;
+  typeAnnotation?: string;
+  start: number;
+  end: number;
+  isUsed: boolean;
+  isMutated: boolean;
+  referenceCount: number;
+}
+
+// Scope kind
+export type ScopeKind =
+  | 'module'
+  | 'function'
+  | 'arrowFunction'
+  | 'block'
+  | 'vFor'
+  | 'vSlot'
+  | 'class'
+  | 'staticBlock'
+  | 'catch'
+  | 'setup';
+
+export interface ScopeDisplay {
+  id: number;
+  parentId?: number;
+  kind: ScopeKind;
+  kindStr: string;
+  start: number;
+  end: number;
+  bindings: string[];
+  children: number[];
+  depth: number;
+}
+
+export interface MacroDisplay {
+  name: string;
+  start: number;
+  end: number;
+  type_args?: string;
+  args?: string;
+  binding?: string;
+}
+
+export interface PropDisplay {
+  name: string;
+  type_annotation?: string;
+  required: boolean;
+  has_default: boolean;
+}
+
+export interface EmitDisplay {
+  name: string;
+  payload_type?: string;
+}
+
+export interface CssDisplay {
+  selector_count: number;
+  unused_selectors: Array<{ text: string; start: number; end: number }>;
+  v_bind_count: number;
+  is_scoped: boolean;
+}
+
+export interface AnalysisStats {
+  binding_count: number;
+  unused_binding_count: number;
+  scope_count: number;
+  macro_count: number;
+  error_count: number;
+  warning_count: number;
+}
+
+export interface AnalysisDiagnostic {
+  severity: 'error' | 'warning' | 'info' | 'hint';
+  message: string;
+  start: number;
+  end: number;
+  code?: string;
+  related: Array<{ message: string; start: number; end: number }>;
+}
+
+export interface AnalysisSummary {
+  component_name?: string;
+  is_setup: boolean;
+  bindings: BindingDisplay[];
+  scopes: ScopeDisplay[];
+  macros: MacroDisplay[];
+  props: PropDisplay[];
+  emits: EmitDisplay[];
+  css?: CssDisplay;
+  diagnostics: AnalysisDiagnostic[];
+  stats: AnalysisStats;
+}
+
+export interface AnalysisResult {
+  summary: AnalysisSummary;
+  diagnostics: AnalysisDiagnostic[];
+  /** VIR (Vize Intermediate Representation) text format */
+  vir?: string;
+}
+
 export interface WasmModule {
   compile: (template: string, options: CompilerOptions) => CompileResult;
   compileVapor: (template: string, options: CompilerOptions) => CompileResult;
@@ -193,6 +331,8 @@ export interface WasmModule {
   parseTemplate: (template: string, options: CompilerOptions) => object;
   parseSfc: (source: string, options: CompilerOptions) => SfcDescriptor;
   compileSfc: (source: string, options: CompilerOptions) => SfcCompileResult;
+  // Analysis functions
+  analyzeSfc: (source: string, options: AnalysisOptions) => AnalysisResult;
   // Musea functions
   parseArt: (source: string, options: ArtParseOptions) => ArtDescriptor;
   artToCsf: (source: string, options: ArtParseOptions) => CsfOutput;
@@ -212,6 +352,7 @@ export interface WasmModule {
     parse: (template: string, options: CompilerOptions) => object;
     parseSfc: (source: string, options: CompilerOptions) => SfcDescriptor;
     compileSfc: (source: string, options: CompilerOptions) => SfcCompileResult;
+    analyzeSfc: (source: string, options: AnalysisOptions) => AnalysisResult;
   };
 }
 
@@ -245,6 +386,8 @@ export async function loadWasm(): Promise<WasmModule> {
         parseTemplate: wasm.parseTemplate || mock.parseTemplate,
         parseSfc: wasm.parseSfc || mock.parseSfc,
         compileSfc: wasm.compileSfc || mock.compileSfc,
+        // Analysis functions
+        analyzeSfc: wasm.analyzeSfc || mock.analyzeSfc,
         // Musea functions
         parseArt: wasm.parseArt || mock.parseArt,
         artToCsf: wasm.artToCsf || mock.artToCsf,
@@ -487,6 +630,79 @@ function createMockModule(): WasmModule {
     };
   };
 
+  // Mock analyze function - defined inline to avoid hoisting issues
+  const inlineMockAnalyzeSfc = (source: string, options: AnalysisOptions): AnalysisResult => {
+    const hasScriptSetup = source.includes('<script setup');
+    const hasDefineProps = source.includes('defineProps');
+    const hasDefineEmits = source.includes('defineEmits');
+    const hasScoped = source.includes('<style scoped');
+
+    const bindings: BindingDisplay[] = [];
+    const macros: MacroDisplay[] = [];
+
+    // Extract ref bindings
+    const refMatches = source.matchAll(/const\s+(\w+)\s*=\s*ref\(/g);
+    for (const match of refMatches) {
+      bindings.push({
+        name: match[1],
+        kind: 'SetupRef',
+        source: 'ref' as BindingSource,
+        metadata: {
+          isExported: false,
+          isImported: false,
+          isComponent: false,
+          isDirective: false,
+          needsValue: true,
+          usedInTemplate: true,
+          usedInScript: true,
+          scopeDepth: 0,
+        },
+        start: match.index || 0,
+        end: (match.index || 0) + match[0].length,
+        isUsed: true,
+        isMutated: true,
+        referenceCount: 1,
+      });
+    }
+
+    if (hasDefineProps) {
+      const propsMatch = source.match(/defineProps[^)]+\)/);
+      if (propsMatch) {
+        macros.push({
+          name: 'defineProps',
+          start: propsMatch.index || 0,
+          end: (propsMatch.index || 0) + propsMatch[0].length,
+        });
+      }
+    }
+
+    if (hasDefineEmits) {
+      const emitsMatch = source.match(/defineEmits[^)]+\)/);
+      if (emitsMatch) {
+        macros.push({
+          name: 'defineEmits',
+          start: emitsMatch.index || 0,
+          end: (emitsMatch.index || 0) + emitsMatch[0].length,
+        });
+      }
+    }
+
+    return {
+      summary: {
+        is_setup: hasScriptSetup,
+        bindings,
+        scopes: [{ kind: 'module', start: 0, end: source.length, bindings: bindings.map(b => b.name), nested_count: 1 }],
+        macros,
+        props: [],
+        emits: [],
+        css: hasScoped ? { selector_count: 0, unused_selectors: [], v_bind_count: 0, is_scoped: true } : undefined,
+        diagnostics: [],
+        stats: { binding_count: bindings.length, unused_binding_count: 0, scope_count: 1, macro_count: macros.length, error_count: 0, warning_count: 0 },
+      },
+      diagnostics: [],
+    };
+  };
+
   class MockCompiler {
     compile(template: string, options: CompilerOptions): CompileResult {
       return mockCompile(template, options);
@@ -505,6 +721,9 @@ function createMockModule(): WasmModule {
     }
     compileSfc(source: string, options: CompilerOptions): SfcCompileResult {
       return mockCompileSfc(source, options);
+    }
+    analyzeSfc(source: string, options: AnalysisOptions): AnalysisResult {
+      return inlineMockAnalyzeSfc(source, options);
     }
   }
 
@@ -1512,6 +1731,103 @@ function createMockModule(): WasmModule {
     ];
   };
 
+  const mockAnalyzeSfc = (source: string, _options: AnalysisOptions): AnalysisResult => {
+    // Parse the SFC to extract information
+    const hasScriptSetup = source.includes('<script setup');
+    const hasDefineProps = source.includes('defineProps');
+    const hasDefineEmits = source.includes('defineEmits');
+    const hasRef = source.includes('ref(');
+    const hasScoped = source.includes('<style scoped');
+
+    const bindings: BindingDisplay[] = [];
+    const macros: MacroDisplay[] = [];
+    const props: PropDisplay[] = [];
+
+    // Extract ref bindings
+    const refMatches2 = source.matchAll(/const\s+(\w+)\s*=\s*ref\(/g);
+    for (const match of refMatches2) {
+      bindings.push({
+        name: match[1],
+        kind: 'SetupRef',
+        source: 'ref' as BindingSource,
+        metadata: {
+          isExported: false,
+          isImported: false,
+          isComponent: false,
+          isDirective: false,
+          needsValue: true,
+          usedInTemplate: true,
+          usedInScript: true,
+          scopeDepth: 0,
+        },
+        start: match.index || 0,
+        end: (match.index || 0) + match[0].length,
+        isUsed: true,
+        isMutated: true,
+        referenceCount: 1,
+      });
+    }
+
+    // Extract defineProps
+    if (hasDefineProps) {
+      const propsMatch = source.match(/defineProps[^)]+\)/);
+      if (propsMatch) {
+        macros.push({
+          name: 'defineProps',
+          start: propsMatch.index || 0,
+          end: (propsMatch.index || 0) + propsMatch[0].length,
+        });
+      }
+    }
+
+    // Extract defineEmits
+    if (hasDefineEmits) {
+      const emitsMatch = source.match(/defineEmits[^)]+\)/);
+      if (emitsMatch) {
+        macros.push({
+          name: 'defineEmits',
+          start: emitsMatch.index || 0,
+          end: (emitsMatch.index || 0) + emitsMatch[0].length,
+        });
+      }
+    }
+
+    const summary: AnalysisSummary = {
+      is_setup: hasScriptSetup,
+      bindings,
+      scopes: [{
+        kind: 'module',
+        start: 0,
+        end: source.length,
+        bindings: bindings.map(b => b.name),
+        nested_count: 1,
+      }],
+      macros,
+      props,
+      emits: [],
+      css: hasScoped ? {
+        selector_count: (source.match(/[.#\w][\w-]*\s*\{/g) || []).length,
+        unused_selectors: [],
+        v_bind_count: (source.match(/v-bind\(/g) || []).length,
+        is_scoped: true,
+      } : undefined,
+      diagnostics: [],
+      stats: {
+        binding_count: bindings.length,
+        unused_binding_count: 0,
+        scope_count: 1,
+        macro_count: macros.length,
+        error_count: 0,
+        warning_count: 0,
+      },
+    };
+
+    return {
+      summary,
+      diagnostics: [],
+    };
+  };
+
   return {
     compile: mockCompile,
     compileVapor: (template: string, options: CompilerOptions) =>
@@ -1520,6 +1836,7 @@ function createMockModule(): WasmModule {
     parseTemplate: (template: string) => buildMockAst(template),
     parseSfc: mockParseSfc,
     compileSfc: mockCompileSfc,
+    analyzeSfc: mockAnalyzeSfc,
     parseArt: mockParseArt,
     artToCsf: mockArtToCsf,
     lintTemplate: mockLintTemplate,

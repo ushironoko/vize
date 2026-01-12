@@ -27,7 +27,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 # Utilities
-rustc-hash.workspace = true
 dashmap = "6"
 parking_lot = "0.12"
 

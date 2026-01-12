@@ -18,7 +18,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void;
+  'update:modelValue': [string]
 }>();
 
 const containerRef = ref<HTMLDivElement | null>(null);

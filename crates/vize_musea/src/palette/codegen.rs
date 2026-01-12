@@ -3,7 +3,7 @@
 use super::inference::infer_control_from_values;
 use super::{Palette, PaletteOptions, PaletteOutput, PropControl};
 use crate::types::ArtDescriptor;
-use rustc_hash::FxHashMap;
+use vize_carton::FxHashMap;
 
 /// Generate palette configuration from an Art descriptor.
 ///

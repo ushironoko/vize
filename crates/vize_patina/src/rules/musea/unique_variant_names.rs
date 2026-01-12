@@ -2,7 +2,7 @@
 //!
 //! Require unique variant names within an art file.
 
-use rustc_hash::FxHashSet;
+use vize_carton::FxHashSet;
 
 use super::{MuseaLintResult, MuseaRule, MuseaRuleMeta};
 use crate::diagnostic::{LintDiagnostic, Severity};

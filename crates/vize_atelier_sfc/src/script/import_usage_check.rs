@@ -5,13 +5,12 @@
 //!   when not using inline mode.
 //! - Check whether the built-in properties such as $attrs, $slots, $emit are used in the template
 
-use rustc_hash::FxHashSet;
 use vize_atelier_core::ast::{
     DirectiveNode, ElementNode, ExpressionNode, PropNode, RootNode, SimpleExpressionNode,
     TemplateChildNode,
 };
 use vize_carton::{
-    camelize, capitalize, is_builtin_directive, is_native_tag, is_simple_identifier,
+    camelize, capitalize, is_builtin_directive, is_native_tag, is_simple_identifier, FxHashSet,
 };
 
 /// Result of template analysis

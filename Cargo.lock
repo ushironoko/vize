@@ -2883,7 +2883,6 @@ dependencies = [
  "compact_str",
  "insta",
  "memoffset",
- "once_cell",
  "oxc_allocator",
  "oxc_ast",
  "oxc_codegen",
@@ -2893,12 +2892,12 @@ dependencies = [
  "oxc_span",
  "oxc_syntax",
  "oxc_transformer",
- "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
  "vize_armature",
  "vize_carton",
+ "vize_croquis",
  "vize_relief",
 ]
 
@@ -2908,7 +2907,6 @@ version = "0.0.1-alpha.31"
 dependencies = [
  "insta",
  "phf",
- "rustc-hash",
  "serde",
  "thiserror 2.0.17",
  "vize_atelier_core",
@@ -2931,7 +2929,6 @@ dependencies = [
  "oxc_span",
  "oxc_transformer",
  "regex",
- "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -2940,6 +2937,7 @@ dependencies = [
  "vize_atelier_dom",
  "vize_atelier_vapor",
  "vize_carton",
+ "vize_croquis",
 ]
 
 [[package]]
@@ -2947,7 +2945,6 @@ name = "vize_atelier_vapor"
 version = "0.0.1-alpha.31"
 dependencies = [
  "insta",
- "rustc-hash",
  "serde",
  "thiserror 2.0.17",
  "vize_atelier_core",
@@ -2958,7 +2955,7 @@ dependencies = [
 name = "vize_canon"
 version = "0.0.1-alpha.31"
 dependencies = [
- "rustc-hash",
+ "vize_carton",
 ]
 
 [[package]]
@@ -2973,14 +2970,13 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "smallvec",
 ]
 
 [[package]]
 name = "vize_croquis"
 version = "0.0.1-alpha.31"
 dependencies = [
- "bitflags 2.10.0",
- "rustc-hash",
  "vize_carton",
  "vize_relief",
 ]
@@ -3011,7 +3007,6 @@ dependencies = [
  "insta",
  "parking_lot",
  "ropey",
- "rustc-hash",
  "serde",
  "serde_json",
  "tempfile",
@@ -3034,7 +3029,6 @@ dependencies = [
  "criterion",
  "insta",
  "memchr",
- "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -3057,7 +3051,6 @@ dependencies = [
  "oxc_parser",
  "oxc_span",
  "oxc_syntax",
- "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -3070,7 +3063,6 @@ dependencies = [
 name = "vize_relief"
 version = "0.0.1-alpha.31"
 dependencies = [
- "rustc-hash",
  "serde",
  "thiserror 2.0.17",
  "vize_carton",

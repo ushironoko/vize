@@ -2,34 +2,12 @@
 //!
 //! This module provides the transform context, traversal, and base transform traits.
 
-use rustc_hash::FxHashSet;
-use vize_carton::{Box, Bump, String, Vec};
+use vize_carton::{is_builtin_directive, Box, Bump, CompactString, FxHashSet, String, Vec};
+use vize_croquis::{BindingType, ScopeBinding, ScopeChain, ScopeKind, VForScopeData};
 
 use crate::ast::*;
 use crate::errors::{CompilerError, ErrorCode};
 use crate::options::TransformOptions;
-
-/// Check if a directive is a built-in directive (not custom)
-fn is_builtin_directive_name(name: &str) -> bool {
-    matches!(
-        name,
-        "bind"
-            | "on"
-            | "if"
-            | "else"
-            | "else-if"
-            | "for"
-            | "show"
-            | "model"
-            | "slot"
-            | "cloak"
-            | "pre"
-            | "memo"
-            | "once"
-            | "text"
-            | "html"
-    )
-}
 
 /// Transform function for nodes - returns optional exit function(s)
 pub type NodeTransform<'a> =
@@ -89,8 +67,8 @@ pub struct TransformContext<'a> {
     pub cached: Vec<'a, Option<Box<'a, CacheExpression<'a>>>>,
     /// Temp variable count
     pub temps: u32,
-    /// Identifiers in scope
-    pub identifiers: FxHashSet<String>,
+    /// Scope chain for tracking variable visibility
+    pub scope_chain: ScopeChain,
     /// Scoped slots
     pub scoped_slots: u32,
     /// Whether in v-once
@@ -153,7 +131,7 @@ impl<'a> TransformContext<'a> {
             hoists: Vec::new_in(allocator),
             cached: Vec::new_in(allocator),
             temps: 0,
-            identifiers: FxHashSet::default(),
+            scope_chain: ScopeChain::new(),
             scoped_slots: 0,
             in_v_once: false,
             in_ssr: ssr,
@@ -193,19 +171,45 @@ impl<'a> TransformContext<'a> {
         }
     }
 
-    /// Add an identifier to scope
-    pub fn add_identifier(&mut self, id: impl Into<String>) {
-        self.identifiers.insert(id.into());
+    /// Add an identifier to current scope
+    pub fn add_identifier(&mut self, id: impl Into<CompactString>) {
+        self.scope_chain
+            .add_binding(id.into(), ScopeBinding::new(BindingType::SetupConst, 0));
     }
 
-    /// Remove an identifier from scope
-    pub fn remove_identifier(&mut self, id: &str) {
-        self.identifiers.remove(id);
+    /// Enter a new scope
+    pub fn enter_scope(&mut self, kind: ScopeKind) {
+        self.scope_chain.enter_scope(kind);
+    }
+
+    /// Exit the current scope
+    pub fn exit_scope(&mut self) {
+        self.scope_chain.exit_scope();
+    }
+
+    /// Enter a v-for scope with the given aliases
+    pub fn enter_v_for_scope(
+        &mut self,
+        value_alias: Option<&str>,
+        key_alias: Option<&str>,
+        index_alias: Option<&str>,
+        source: &str,
+    ) {
+        self.scope_chain.enter_v_for_scope(
+            VForScopeData {
+                value_alias: CompactString::new(value_alias.unwrap_or("")),
+                key_alias: key_alias.map(CompactString::new),
+                index_alias: index_alias.map(CompactString::new),
+                source: CompactString::new(source),
+            },
+            0,
+            0,
+        );
     }
 
     /// Check if identifier is in scope
     pub fn is_in_scope(&self, id: &str) -> bool {
-        self.identifiers.contains(id)
+        self.scope_chain.is_defined(id)
     }
 
     /// Hoist an expression
@@ -438,33 +442,40 @@ fn traverse_node<'a>(ctx: &mut TransformContext<'a>, node: &mut TemplateChildNod
                             return;
                         }
                         TemplateChildNode::For(for_node) => {
-                            // Add loop identifiers to scope
-                            if let Some(ExpressionNode::Simple(exp)) = &for_node.value_alias {
-                                ctx.add_identifier(exp.content.clone());
-                            }
-                            if let Some(ExpressionNode::Simple(exp)) = &for_node.key_alias {
-                                ctx.add_identifier(exp.content.clone());
-                            }
-                            if let Some(ExpressionNode::Simple(exp)) = &for_node.object_index_alias
-                            {
-                                ctx.add_identifier(exp.content.clone());
-                            }
+                            // Enter v-for scope with aliases
+                            let value = for_node.value_alias.as_ref().and_then(|e| {
+                                if let ExpressionNode::Simple(exp) = e {
+                                    Some(exp.content.as_str())
+                                } else {
+                                    None
+                                }
+                            });
+                            let key = for_node.key_alias.as_ref().and_then(|e| {
+                                if let ExpressionNode::Simple(exp) = e {
+                                    Some(exp.content.as_str())
+                                } else {
+                                    None
+                                }
+                            });
+                            let index = for_node.object_index_alias.as_ref().and_then(|e| {
+                                if let ExpressionNode::Simple(exp) = e {
+                                    Some(exp.content.as_str())
+                                } else {
+                                    None
+                                }
+                            });
+                            let source = match &for_node.source {
+                                ExpressionNode::Simple(exp) => exp.content.as_str(),
+                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                            };
+                            ctx.enter_v_for_scope(value, key, index, source);
 
                             // Traverse for children
                             let for_ptr = for_node.as_mut() as *mut ForNode<'a>;
                             traverse_children(ctx, ParentNode::For(for_ptr));
 
-                            // Remove identifiers from scope
-                            if let Some(ExpressionNode::Simple(exp)) = &for_node.value_alias {
-                                ctx.remove_identifier(&exp.content);
-                            }
-                            if let Some(ExpressionNode::Simple(exp)) = &for_node.key_alias {
-                                ctx.remove_identifier(&exp.content);
-                            }
-                            if let Some(ExpressionNode::Simple(exp)) = &for_node.object_index_alias
-                            {
-                                ctx.remove_identifier(&exp.content);
-                            }
+                            // Exit v-for scope
+                            ctx.exit_scope();
 
                             // Add helpers
                             ctx.helper(RuntimeHelper::RenderList);
@@ -512,31 +523,40 @@ fn traverse_node<'a>(ctx: &mut TransformContext<'a>, node: &mut TemplateChildNod
             }
         }
         TemplateChildNode::For(for_node) => {
-            // Add loop identifiers to scope
-            if let Some(ExpressionNode::Simple(exp)) = &for_node.value_alias {
-                ctx.add_identifier(exp.content.clone());
-            }
-            if let Some(ExpressionNode::Simple(exp)) = &for_node.key_alias {
-                ctx.add_identifier(exp.content.clone());
-            }
-            if let Some(ExpressionNode::Simple(exp)) = &for_node.object_index_alias {
-                ctx.add_identifier(exp.content.clone());
-            }
+            // Enter v-for scope with aliases
+            let value = for_node.value_alias.as_ref().and_then(|e| {
+                if let ExpressionNode::Simple(exp) = e {
+                    Some(exp.content.as_str())
+                } else {
+                    None
+                }
+            });
+            let key = for_node.key_alias.as_ref().and_then(|e| {
+                if let ExpressionNode::Simple(exp) = e {
+                    Some(exp.content.as_str())
+                } else {
+                    None
+                }
+            });
+            let index = for_node.object_index_alias.as_ref().and_then(|e| {
+                if let ExpressionNode::Simple(exp) = e {
+                    Some(exp.content.as_str())
+                } else {
+                    None
+                }
+            });
+            let source = match &for_node.source {
+                ExpressionNode::Simple(exp) => exp.content.as_str(),
+                ExpressionNode::Compound(c) => c.loc.source.as_str(),
+            };
+            ctx.enter_v_for_scope(value, key, index, source);
 
             // Traverse for children
             let for_ptr = for_node.as_mut() as *mut ForNode<'a>;
             traverse_children(ctx, ParentNode::For(for_ptr));
 
-            // Remove identifiers from scope
-            if let Some(ExpressionNode::Simple(exp)) = &for_node.value_alias {
-                ctx.remove_identifier(&exp.content);
-            }
-            if let Some(ExpressionNode::Simple(exp)) = &for_node.key_alias {
-                ctx.remove_identifier(&exp.content);
-            }
-            if let Some(ExpressionNode::Simple(exp)) = &for_node.object_index_alias {
-                ctx.remove_identifier(&exp.content);
-            }
+            // Exit v-for scope
+            ctx.exit_scope();
 
             // Add helpers
             ctx.helper(RuntimeHelper::RenderList);
@@ -1175,7 +1195,7 @@ fn process_element_props<'a>(ctx: &mut TransformContext<'a>, el: &mut Box<'a, El
                 // No need to add to ctx.directives (which would use resolveDirective)
                 "show" => {}
                 // Handle custom directives - register them for resolveDirective
-                _ if !is_builtin_directive_name(&dir.name) => {
+                _ if !is_builtin_directive(&dir.name) => {
                     ctx.helper(RuntimeHelper::WithDirectives);
                     ctx.helper(RuntimeHelper::ResolveDirective);
                     ctx.add_directive(dir.name.clone());

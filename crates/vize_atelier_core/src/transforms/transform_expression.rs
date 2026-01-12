@@ -3,7 +3,6 @@
 //! Transforms expressions by prefixing identifiers with `_ctx.` for proper
 //! context binding in the compiled render function (script setup mode).
 
-use once_cell::sync::Lazy;
 use oxc_allocator::Allocator as OxcAllocator;
 use oxc_ast::ast as oxc_ast_types;
 use oxc_ast::Visit;
@@ -12,72 +11,11 @@ use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_transformer::{TransformOptions, Transformer};
-use rustc_hash::FxHashSet;
-use vize_carton::{Box, Bump, String};
+use vize_carton::{Box, Bump, FxHashSet, String};
+use vize_croquis::builtins::is_global_allowed;
 
 use crate::ast::{CompoundExpressionNode, ConstantType, ExpressionNode, SimpleExpressionNode};
 use crate::transform::TransformContext;
-
-/// JavaScript global objects and functions that should NOT be prefixed with _ctx.
-static JS_GLOBALS: Lazy<FxHashSet<&'static str>> = Lazy::new(|| {
-    [
-        // ES globals
-        "Infinity",
-        "undefined",
-        "NaN",
-        // Global objects
-        "Array",
-        "Boolean",
-        "Date",
-        "Error",
-        "Function",
-        "JSON",
-        "Math",
-        "Number",
-        "Object",
-        "Promise",
-        "Proxy",
-        "Reflect",
-        "RegExp",
-        "Set",
-        "String",
-        "Symbol",
-        "Map",
-        "WeakMap",
-        "WeakSet",
-        "BigInt",
-        // Global functions
-        "parseInt",
-        "parseFloat",
-        "isNaN",
-        "isFinite",
-        "decodeURI",
-        "decodeURIComponent",
-        "encodeURI",
-        "encodeURIComponent",
-        // Special
-        "arguments",
-        "console",
-        "window",
-        "document",
-        "navigator",
-        "globalThis",
-        // Vue - only $event is a true global (event handler parameter)
-        // Other Vue instance properties ($emit, $props, $slots, $attrs, etc.)
-        // should be prefixed with _ctx. in templates
-        "$event",
-        // Internal render function parameters
-        "_ctx",
-        "_cache",
-        // Common helpers
-        "require",
-        "import",
-        "exports",
-        "module",
-    ]
-    .into_iter()
-    .collect()
-});
 
 /// Process expression with identifier prefixing and TypeScript stripping
 pub fn process_expression<'a>(
@@ -371,7 +309,7 @@ fn collect_identifiers_for_prefix(
         Expression::Identifier(id) => {
             let name = id.name.as_str();
             // Skip JS globals and local variables
-            if !JS_GLOBALS.contains(name) && !local_vars.contains(name) {
+            if !is_global_allowed(name) && !local_vars.contains(name) {
                 // Adjust position: subtract 1 for the opening parenthesis we added
                 let start = id.span.start as usize - 1;
                 let end = id.span.end as usize - 1;
@@ -668,7 +606,7 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
 /// Returns: None = no prefix, Some("_ctx.") = context prefix, Some("__props.") = props prefix
 fn get_identifier_prefix(name: &str, ctx: &TransformContext<'_>) -> Option<&'static str> {
     // Don't prefix globals
-    if JS_GLOBALS.contains(name) {
+    if is_global_allowed(name) {
         return None;
     }
 
@@ -904,12 +842,12 @@ mod tests {
 
     #[test]
     fn test_js_globals() {
-        assert!(JS_GLOBALS.contains("Array"));
-        assert!(JS_GLOBALS.contains("Object"));
-        assert!(JS_GLOBALS.contains("console"));
-        assert!(JS_GLOBALS.contains("Math"));
-        assert!(JS_GLOBALS.contains("$event"));
-        assert!(!JS_GLOBALS.contains("myVar"));
+        assert!(is_global_allowed("Array"));
+        assert!(is_global_allowed("Object"));
+        assert!(is_global_allowed("console"));
+        assert!(is_global_allowed("Math"));
+        assert!(is_global_allowed("$event"));
+        assert!(!is_global_allowed("myVar"));
     }
 
     #[test]

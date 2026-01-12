@@ -2,8 +2,8 @@
 
 use super::{CatalogOutput, DocOptions};
 use crate::types::{ArtDescriptor, ArtStatus};
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use vize_carton::FxHashMap;
 
 /// Entry in a component catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]

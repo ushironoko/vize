@@ -3,20 +3,12 @@
 //! This module provides utilities for detecting Vue compiler macro calls
 //! in script setup code.
 
+use vize_croquis::macros::BUILTIN_MACROS;
+
 /// Check if a line is a compiler macro call
 pub fn is_macro_call_line(line: &str) -> bool {
-    let macros = [
-        "defineProps",
-        "defineEmits",
-        "defineExpose",
-        "defineOptions",
-        "defineSlots",
-        "defineModel",
-        "withDefaults",
-    ];
-
     // Check if line contains a macro that is being called (not just imported)
-    for macro_name in macros {
+    for macro_name in BUILTIN_MACROS {
         if line.contains(macro_name) && line.contains('(') {
             // Make sure it's not an import
             if !line.trim().starts_with("import") {
@@ -29,18 +21,8 @@ pub fn is_macro_call_line(line: &str) -> bool {
 
 /// Check if a line starts a multi-line paren-based macro call (e.g., defineExpose({)
 pub fn is_paren_macro_start(line: &str) -> bool {
-    let macros = [
-        "defineProps",
-        "defineEmits",
-        "defineExpose",
-        "defineOptions",
-        "defineSlots",
-        "defineModel",
-        "withDefaults",
-    ];
-
     // Check if line contains a macro call that isn't complete on the same line
-    for macro_name in macros {
+    for macro_name in BUILTIN_MACROS {
         if line.contains(macro_name) && !line.trim().starts_with("import") {
             // Check for unbalanced parentheses (call spans multiple lines)
             if line.contains('(') {
@@ -57,20 +39,10 @@ pub fn is_paren_macro_start(line: &str) -> bool {
 
 /// Check if a line starts a multi-line macro call (e.g., defineEmits<{ ... }>())
 pub fn is_multiline_macro_start(line: &str) -> bool {
-    let macros = [
-        "defineProps",
-        "defineEmits",
-        "defineExpose",
-        "defineOptions",
-        "defineSlots",
-        "defineModel",
-        "withDefaults",
-    ];
-
     // Check if line contains a macro with type args that spans multiple lines
     // Pattern: contains macro name, contains '<', but doesn't have matching '>' on same line
     // or has '>' but no '()' yet
-    for macro_name in macros {
+    for macro_name in BUILTIN_MACROS {
         if line.contains(macro_name) && !line.trim().starts_with("import") {
             // Check for type args that might span multiple lines
             if line.contains('<') {

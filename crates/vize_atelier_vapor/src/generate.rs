@@ -5,8 +5,8 @@
 use std::fmt::Write;
 
 use crate::ir::*;
-use rustc_hash::FxHashMap;
 use vize_atelier_core::ExpressionNode;
+use vize_carton::FxHashMap;
 
 /// Vapor code generation result
 pub struct VaporGenerateResult {

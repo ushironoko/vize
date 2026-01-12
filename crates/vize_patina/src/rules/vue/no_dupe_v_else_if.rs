@@ -24,7 +24,7 @@
 use crate::context::LintContext;
 use crate::diagnostic::Severity;
 use crate::rule::{Rule, RuleCategory, RuleMeta};
-use rustc_hash::FxHashSet;
+use vize_carton::FxHashSet;
 use vize_relief::ast::{
     ElementNode, ExpressionNode, PropNode, RootNode, SourceLocation, TemplateChildNode,
 };

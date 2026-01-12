@@ -5,9 +5,8 @@
 //!
 //! All types are designed for zero-copy parsing with arena allocation.
 
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use vize_carton::{Bump, Vec as BumpVec};
+use vize_carton::{Bump, FxHashMap, Vec as BumpVec};
 
 /// Parsed Art file descriptor.
 ///

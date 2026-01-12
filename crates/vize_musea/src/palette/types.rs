@@ -1,7 +1,7 @@
 //! Palette type definitions.
 
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use vize_carton::FxHashMap;
 
 /// Control type for a prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
