@@ -17,7 +17,11 @@ const props = defineProps<{
   compiler: WasmModule | null;
 }>();
 
-const ART_PRESET = `<art
+const ART_PRESET = `<script setup lang="ts">
+import Button from './Button.vue'
+<\/script>
+
+<art
   title="Button"
   description="A versatile button component"
   component="./Button.vue"
@@ -40,10 +44,6 @@ const ART_PRESET = `<art
     <Button variant="primary" disabled>Disabled</Button>
   </variant>
 </art>
-
-<script setup lang="ts">
-import Button from './Button.vue'
-<\/script>
 
 <style>
 :root {
