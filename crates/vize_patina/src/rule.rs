@@ -17,6 +17,8 @@ pub enum RuleCategory {
     Vapor,
     /// Musea (Art file / Storybook) specific rules
     Musea,
+    /// Accessibility (a11y) rules
+    Accessibility,
 }
 
 /// Rule metadata
@@ -176,6 +178,21 @@ impl RuleRegistry {
         registry.register(Box::new(
             crate::rules::vapor::RequireVaporAttribute::default(),
         ));
+
+        // ============================================
+        // Accessibility Rules (Warning)
+        // ============================================
+        // These rules help ensure Vue templates are accessible to all users.
+        // Based on eslint-plugin-vuejs-accessibility.
+
+        registry.register(Box::new(crate::rules::a11y::ImgAlt));
+        registry.register(Box::new(crate::rules::a11y::AnchorHasContent));
+        registry.register(Box::new(crate::rules::a11y::HeadingHasContent));
+        registry.register(Box::new(crate::rules::a11y::IframeHasTitle));
+        registry.register(Box::new(crate::rules::a11y::NoDistractingElements));
+        registry.register(Box::new(crate::rules::a11y::TabindexNoPositive));
+        registry.register(Box::new(crate::rules::a11y::ClickEventsHaveKeyEvents));
+        registry.register(Box::new(crate::rules::a11y::FormControlHasLabel));
 
         registry
     }

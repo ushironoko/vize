@@ -321,11 +321,14 @@ The [Playground](https://vizejs.dev/play/) includes a locale selector to switch 
 
 ## Credits
 
-This project is inspired by and builds upon the work of these amazing projects:
+This project is inspired by and builds upon the work of these amazing projects.
+We are deeply grateful for their pioneering work and open-source contributions.
 
 - [Volar.js](https://github.com/volarjs/volar.js) - The embedded language tooling framework
 - [vuejs/language-tools](https://github.com/vuejs/language-tools) - Official Vue.js language tools
 - [eslint-plugin-vue](https://github.com/vuejs/eslint-plugin-vue) - Official ESLint plugin for Vue.js
+- [eslint-plugin-vuejs-accessibility](https://github.com/vue-a11y/eslint-plugin-vuejs-accessibility) - Accessibility rules for Vue.js
+- [Lightning CSS](https://github.com/parcel-bundler/lightningcss) - Extremely fast CSS parser, bundler, transformer
 - [Storybook](https://github.com/storybookjs/storybook) - UI component explorer
 - [OXC](https://github.com/oxc-project/oxc) - The JavaScript Oxidation Compiler
 

@@ -953,7 +953,13 @@ onMounted(() => {
 @media (max-width: 768px) {
   .patina-playground {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: minmax(300px, 1fr) minmax(300px, 1fr);
+    height: auto;
+    min-height: 100%;
+  }
+
+  .panel {
+    min-height: 300px;
   }
 
   .input-panel {
@@ -983,6 +989,21 @@ onMounted(() => {
   .rule-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .editor-container {
+    min-height: 200px;
+  }
+
+  .rules-filters {
+    flex-direction: column;
+  }
+
+  .header-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    width: 100%;
   }
 }
 </style>

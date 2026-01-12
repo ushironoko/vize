@@ -594,18 +594,18 @@ onMounted(async () => {
           <span class="tab-desc">compiler</span>
         </button>
         <button
-          :class="['main-tab', { active: mainTab === 'musea' }]"
-          @click="mainTab = 'musea'"
-        >
-          <span class="tab-name">Musea</span>
-          <span class="tab-desc">story</span>
-        </button>
-        <button
           :class="['main-tab', { active: mainTab === 'patina' }]"
           @click="mainTab = 'patina'"
         >
           <span class="tab-name">Patina</span>
           <span class="tab-desc">linter</span>
+        </button>
+        <button
+          :class="['main-tab', { active: mainTab === 'musea' }]"
+          @click="mainTab = 'musea'"
+        >
+          <span class="tab-name">Musea</span>
+          <span class="tab-desc">story</span>
         </button>
         <!-- Glyph tab hidden for now
         <button
