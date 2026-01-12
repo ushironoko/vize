@@ -1,9 +1,15 @@
 {
-  "name": "vize_vitrine",
+  "name": "@vizejs/wasm",
   "type": "module",
-  "description": "Vitrine - The display case for Vize (Node.js/WASM bindings)",
+  "description": "Vize WASM bindings for browser environments",
   "version": "0.0.1-alpha.31",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ubugeeei/vize.git",
+    "directory": "npm/vize-wasm"
+  },
+  "homepage": "https://github.com/ubugeeei/vize",
   "files": [
     "vize_bindings_bg.wasm",
     "vize_bindings.js",
