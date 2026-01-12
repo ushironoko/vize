@@ -3,6 +3,7 @@ name = "vize_vitrine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Vitrine - The display case for Vize (Node.js/WASM bindings)"
 
 [lib]

@@ -3,6 +3,7 @@ name = "vize_atelier_dom"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Atelier DOM - The DOM compiler workshop for Vize"
 
 [dependencies]

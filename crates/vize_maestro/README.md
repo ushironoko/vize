@@ -3,7 +3,7 @@
 **Maestro** - Language Server Protocol implementation for Vize Vue templates.
 
 <p align="center">
-  <img src="./logo.svg" alt="vize_maestro logo" width="200" />
+  <img src="https://raw.githubusercontent.com/ubugeeei/vize/main/crates/vize_maestro/logo.svg" alt="vize_maestro logo" width="200" />
 </p>
 
 ## Name Origin

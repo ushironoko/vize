@@ -3,7 +3,7 @@
 **Musea** - Component gallery and documentation for Vize Vue components.
 
 <p align="center">
-  <img src="./logo.svg" alt="vize_musea logo" width="200" />
+  <img src="https://raw.githubusercontent.com/ubugeeei/vize/main/crates/vize_musea/logo.svg" alt="vize_musea logo" width="200" />
 </p>
 
 ## Name Origin

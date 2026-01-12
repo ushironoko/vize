@@ -3,6 +3,7 @@ name = "vize_canon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Canon - The standard of correctness for Vize type checking"
 
 [dependencies]

@@ -3,6 +3,7 @@ name = "vize_carton"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Carton - The artist's toolbox for Vize compiler"
 
 [dependencies]

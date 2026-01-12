@@ -3,7 +3,7 @@
 **Armature** - The structural parser framework for Vize Vue templates.
 
 <p align="center">
-  <img src="./logo.svg" alt="vize_armature logo" width="200" />
+  <img src="https://raw.githubusercontent.com/ubugeeei/vize/main/crates/vize_armature/logo.svg" alt="vize_armature logo" width="200" />
 </p>
 
 ## Name Origin

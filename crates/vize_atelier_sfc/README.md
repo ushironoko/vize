@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./logo.svg" alt="vize_atelier_sfc logo" width="120" height="120">
+  <img src="https://raw.githubusercontent.com/ubugeeei/vize/main/crates/vize_atelier_sfc/logo.svg" alt="vize_atelier_sfc logo" width="120" height="120">
 </p>
 
 <h1 align="center">vize_atelier_sfc</h1>

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./logo.svg" alt="vize_canon logo" width="120" height="120">
+  <img src="https://raw.githubusercontent.com/ubugeeei/vize/main/crates/vize_canon/logo.svg" alt="vize_canon logo" width="120" height="120">
 </p>
 
 <h1 align="center">vize_canon</h1>

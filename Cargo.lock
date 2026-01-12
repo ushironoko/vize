@@ -2850,12 +2850,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vize_armature",
+ "vize_atelier_core",
+ "vize_atelier_dom",
  "vize_atelier_sfc",
+ "vize_atelier_vapor",
  "vize_canon",
+ "vize_carton",
  "vize_glyph",
  "vize_maestro",
  "vize_musea",
  "vize_patina",
+ "vize_relief",
 ]
 
 [[package]]

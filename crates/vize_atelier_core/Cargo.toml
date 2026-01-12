@@ -3,6 +3,7 @@ name = "vize_atelier_core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Atelier Core - The core workshop for Vize Vue template parsing and transforms"
 
 [dependencies]
