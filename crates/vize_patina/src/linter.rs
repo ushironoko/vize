@@ -6,7 +6,9 @@ use crate::context::LintContext;
 use crate::diagnostic::{LintDiagnostic, LintSummary};
 use crate::rule::RuleRegistry;
 use crate::visitor::LintVisitor;
+use rustc_hash::FxHashSet;
 use vize_armature::Parser;
+use vize_carton::i18n::Locale;
 use vize_carton::Allocator;
 
 /// Lint result for a single file
@@ -46,6 +48,10 @@ pub struct Linter {
     registry: RuleRegistry,
     /// Estimated initial allocator capacity (in bytes)
     initial_capacity: usize,
+    /// Locale for i18n messages
+    locale: Locale,
+    /// Optional set of enabled rule names (if None, all rules are enabled)
+    enabled_rules: Option<FxHashSet<String>>,
 }
 
 impl Linter {
@@ -58,6 +64,8 @@ impl Linter {
         Self {
             registry: RuleRegistry::with_recommended(),
             initial_capacity: Self::DEFAULT_INITIAL_CAPACITY,
+            locale: Locale::default(),
+            enabled_rules: None,
         }
     }
 
@@ -67,6 +75,8 @@ impl Linter {
         Self {
             registry,
             initial_capacity: Self::DEFAULT_INITIAL_CAPACITY,
+            locale: Locale::default(),
+            enabled_rules: None,
         }
     }
 
@@ -75,6 +85,38 @@ impl Linter {
     pub fn with_capacity(mut self, capacity: usize) -> Self {
         self.initial_capacity = capacity;
         self
+    }
+
+    /// Set the locale for i18n messages
+    #[inline]
+    pub fn with_locale(mut self, locale: Locale) -> Self {
+        self.locale = locale;
+        self
+    }
+
+    /// Set enabled rules (if None, all rules are enabled)
+    ///
+    /// Pass a list of rule names to enable only those rules.
+    /// Rules not in the list will be skipped during linting.
+    #[inline]
+    pub fn with_enabled_rules(mut self, rules: Option<Vec<String>>) -> Self {
+        self.enabled_rules = rules.map(|r| r.into_iter().collect());
+        self
+    }
+
+    /// Get the current locale
+    #[inline]
+    pub fn locale(&self) -> Locale {
+        self.locale
+    }
+
+    /// Check if a rule is enabled
+    #[inline]
+    pub fn is_rule_enabled(&self, rule_name: &str) -> bool {
+        match &self.enabled_rules {
+            Some(set) => set.contains(rule_name),
+            None => true,
+        }
     }
 
     /// Lint a Vue template source
@@ -98,10 +140,11 @@ impl Linter {
         let parser = Parser::new(allocator.as_bump(), source);
         let (root, _parse_errors) = parser.parse();
 
-        // Create lint context
-        let mut ctx = LintContext::new(allocator, source, filename);
+        // Create lint context with locale and enabled rules filter
+        let mut ctx = LintContext::with_locale(allocator, source, filename, self.locale);
+        ctx.set_enabled_rules(self.enabled_rules.clone());
 
-        // Run visitor with all rules
+        // Run visitor with all rules (filtering happens in context)
         let mut visitor = LintVisitor::new(&mut ctx, self.registry.rules());
         visitor.visit_root(&root);
 

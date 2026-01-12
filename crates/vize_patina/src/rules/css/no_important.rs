@@ -5,9 +5,8 @@
 //! Using !important makes styles harder to override and maintain.
 //! It's often a sign of specificity wars and can lead to CSS bloat.
 
-use lightningcss::declaration::DeclarationBlock;
-use lightningcss::rules::CssRule as LCssRule;
 use lightningcss::stylesheet::StyleSheet;
+use memchr::memmem;
 
 use crate::diagnostic::{LintDiagnostic, Severity};
 
@@ -30,62 +29,54 @@ impl CssRule for NoImportant {
     fn check<'i>(
         &self,
         source: &'i str,
-        stylesheet: &StyleSheet<'i, 'i>,
+        _stylesheet: &StyleSheet<'i, 'i>,
         offset: usize,
         result: &mut CssLintResult,
     ) {
-        // Walk through all rules
-        for rule in &stylesheet.rules.0 {
-            self.check_rule(source, rule, offset, result);
+        // Use text search to find !important occurrences
+        // This provides accurate source positions for inline disable comments
+        let bytes = source.as_bytes();
+        let finder = memmem::Finder::new(b"!important");
+
+        let mut search_start = 0;
+        while let Some(pos) = finder.find(&bytes[search_start..]) {
+            let abs_pos = search_start + pos;
+
+            // Verify it's not inside a comment or string
+            if !Self::is_in_css_comment(bytes, abs_pos) {
+                result.add_diagnostic(
+                    LintDiagnostic::warn(
+                        META.name,
+                        "Avoid using !important as it makes styles harder to override",
+                        (offset + abs_pos) as u32,
+                        (offset + abs_pos + 10) as u32,
+                    )
+                    .with_help("Use more specific selectors or reorganize CSS specificity instead"),
+                );
+            }
+
+            search_start = abs_pos + 1;
         }
     }
 }
 
 impl NoImportant {
-    fn check_rule(&self, source: &str, rule: &LCssRule, offset: usize, result: &mut CssLintResult) {
-        match rule {
-            LCssRule::Style(style_rule) => {
-                self.check_declarations(source, &style_rule.declarations, offset, result);
+    /// Check if a position is inside a CSS comment
+    fn is_in_css_comment(bytes: &[u8], pos: usize) -> bool {
+        let mut in_comment = false;
+        let mut i = 0;
+        while i < pos && i + 1 < bytes.len() {
+            if !in_comment && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                in_comment = true;
+                i += 2;
+            } else if in_comment && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                in_comment = false;
+                i += 2;
+            } else {
+                i += 1;
             }
-            LCssRule::Media(media) => {
-                for rule in &media.rules.0 {
-                    self.check_rule(source, rule, offset, result);
-                }
-            }
-            LCssRule::Supports(supports) => {
-                for rule in &supports.rules.0 {
-                    self.check_rule(source, rule, offset, result);
-                }
-            }
-            LCssRule::LayerBlock(layer) => {
-                for rule in &layer.rules.0 {
-                    self.check_rule(source, rule, offset, result);
-                }
-            }
-            _ => {}
         }
-    }
-
-    fn check_declarations(
-        &self,
-        _source: &str,
-        declarations: &DeclarationBlock,
-        offset: usize,
-        result: &mut CssLintResult,
-    ) {
-        // Check important declarations
-        if !declarations.important_declarations.is_empty() {
-            // Report at offset since we don't have precise location for each declaration
-            result.add_diagnostic(
-                LintDiagnostic::warn(
-                    META.name,
-                    "Avoid using !important as it makes styles harder to override",
-                    offset as u32,
-                    (offset + 10) as u32,
-                )
-                .with_help("Use more specific selectors or reorganize CSS specificity instead"),
-            );
-        }
+        in_comment
     }
 }
 

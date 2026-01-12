@@ -222,6 +222,41 @@ impl RuleRegistry {
             crate::rules::vue::ComponentNameInTemplateCasing::default(),
         ));
 
+        // Style/SFC structure rules (opt-in)
+        registry.register(Box::new(crate::rules::vue::NoPreprocessorLang));
+        registry.register(Box::new(crate::rules::vue::NoScriptNonStandardLang));
+        registry.register(Box::new(crate::rules::vue::NoTemplateLang));
+        registry.register(Box::new(crate::rules::vue::NoSrcAttribute));
+        registry.register(Box::new(crate::rules::vue::SingleStyleBlock));
+
+        // Component registration (opt-in)
+        registry.register(Box::new(
+            crate::rules::vue::RequireComponentRegistration::default(),
+        ));
+
+        registry
+    }
+
+    /// Create registry with Nuxt-friendly rules (auto-imports enabled)
+    pub fn with_nuxt() -> Self {
+        let mut registry = Self::with_recommended();
+
+        // Opt-in rules except component registration (Nuxt auto-imports)
+        registry.register(Box::new(crate::rules::vue::NoMultiSpaces::default()));
+        registry.register(Box::new(
+            crate::rules::vue::ComponentNameInTemplateCasing::default(),
+        ));
+
+        // Style/SFC structure rules (opt-in)
+        registry.register(Box::new(crate::rules::vue::NoPreprocessorLang));
+        registry.register(Box::new(crate::rules::vue::NoScriptNonStandardLang));
+        registry.register(Box::new(crate::rules::vue::NoTemplateLang));
+        registry.register(Box::new(crate::rules::vue::NoSrcAttribute));
+        registry.register(Box::new(crate::rules::vue::SingleStyleBlock));
+
+        // Nuxt mode: skip component registration warnings (auto-imported)
+        // RequireComponentRegistration is not added here
+
         registry
     }
 }

@@ -364,6 +364,50 @@
   margin-bottom: 12px;
 }
 
+/* AST Options */
+.ast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ast-header h4 {
+  margin-bottom: 0;
+}
+
+.ast-options {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ast-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ast-option input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-rust);
+  cursor: pointer;
+}
+
+.ast-option:hover {
+  color: var(--text-primary);
+}
+
+.btn-small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 .preamble {
   margin-bottom: 24px;
 }

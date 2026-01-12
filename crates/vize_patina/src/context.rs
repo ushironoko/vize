@@ -4,6 +4,8 @@
 
 use crate::diagnostic::{LintDiagnostic, Severity};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
+use vize_carton::i18n::{t, t_fmt, Locale};
 use vize_carton::{Allocator, CompactString};
 use vize_relief::ast::SourceLocation;
 
@@ -66,6 +68,8 @@ pub struct LintContext<'a> {
     pub source: &'a str,
     /// Filename for diagnostics
     pub filename: &'a str,
+    /// Locale for i18n (default: English)
+    locale: Locale,
     /// Collected diagnostics (pre-allocated capacity)
     diagnostics: Vec<LintDiagnostic>,
     /// Current rule name (set by visitor before calling rule methods)
@@ -84,6 +88,8 @@ pub struct LintContext<'a> {
     disabled_rules: FxHashMap<CompactString, Vec<DisabledRange>>,
     /// Line offsets for fast line number lookup
     line_offsets: Vec<u32>,
+    /// Optional set of enabled rule names (if None, all rules are enabled)
+    enabled_rules: Option<FxHashSet<String>>,
 }
 
 impl<'a> LintContext<'a> {
@@ -95,10 +101,22 @@ impl<'a> LintContext<'a> {
     /// Create a new lint context with arena allocator
     #[inline]
     pub fn new(allocator: &'a Allocator, source: &'a str, filename: &'a str) -> Self {
+        Self::with_locale(allocator, source, filename, Locale::default())
+    }
+
+    /// Create a new lint context with specified locale
+    #[inline]
+    pub fn with_locale(
+        allocator: &'a Allocator,
+        source: &'a str,
+        filename: &'a str,
+        locale: Locale,
+    ) -> Self {
         Self {
             allocator,
             source,
             filename,
+            locale,
             diagnostics: Vec::with_capacity(Self::INITIAL_DIAGNOSTICS_CAPACITY),
             current_rule: "",
             element_stack: Vec::with_capacity(Self::INITIAL_STACK_CAPACITY),
@@ -108,7 +126,44 @@ impl<'a> LintContext<'a> {
             disabled_all: Vec::new(),
             disabled_rules: FxHashMap::default(),
             line_offsets: Self::compute_line_offsets(source),
+            enabled_rules: None,
         }
+    }
+
+    /// Set enabled rules filter
+    ///
+    /// If set to Some, only rules in the set will report diagnostics.
+    /// If set to None (default), all rules are enabled.
+    #[inline]
+    pub fn set_enabled_rules(&mut self, enabled: Option<FxHashSet<String>>) {
+        self.enabled_rules = enabled;
+    }
+
+    /// Check if a rule is enabled
+    #[inline]
+    pub fn is_rule_enabled(&self, rule_name: &str) -> bool {
+        match &self.enabled_rules {
+            Some(set) => set.contains(rule_name),
+            None => true,
+        }
+    }
+
+    /// Get the current locale
+    #[inline]
+    pub fn locale(&self) -> Locale {
+        self.locale
+    }
+
+    /// Translate a message key
+    #[inline]
+    pub fn t(&self, key: &str) -> Cow<'static, str> {
+        t(self.locale, key)
+    }
+
+    /// Translate a message key with variable substitution
+    #[inline]
+    pub fn t_fmt(&self, key: &str, vars: &[(&str, &str)]) -> String {
+        t_fmt(self.locale, key, vars)
     }
 
     /// Compute line offsets for fast line number lookup
@@ -146,7 +201,12 @@ impl<'a> LintContext<'a> {
     /// Report a lint diagnostic
     #[inline]
     pub fn report(&mut self, diagnostic: LintDiagnostic) {
-        // Check if this diagnostic is disabled
+        // Check if this rule is enabled
+        if !self.is_rule_enabled(diagnostic.rule_name) {
+            return;
+        }
+
+        // Check if this diagnostic is disabled via comments
         let line = self.offset_to_line(diagnostic.start);
         if self.is_disabled_at(diagnostic.rule_name, line) {
             return;

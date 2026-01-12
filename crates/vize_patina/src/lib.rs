@@ -97,6 +97,7 @@ pub use linter::{LintResult, Linter};
 pub use output::{format_results, format_summary, OutputFormat};
 pub use rule::{Rule, RuleCategory, RuleMeta, RuleRegistry};
 pub use telegraph::{Emitter, JsonEmitter, LspDiagnostic, LspEmitter, Telegraph, TextEmitter};
+pub use vize_carton::i18n::Locale;
 
 /// Lint a Vue template source with default rules
 ///

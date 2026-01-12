@@ -43,6 +43,7 @@ mod component_name_in_template_casing;
 mod no_inline_style;
 mod no_lone_template;
 mod prefer_props_shorthand;
+mod require_component_registration;
 mod scoped_event_names;
 mod sfc_element_order;
 
@@ -54,7 +55,12 @@ mod no_v_html;
 mod a11y_img_alt;
 
 // Style rules
+mod no_preprocessor_lang;
+mod no_script_non_standard_lang;
+mod no_src_attribute;
+mod no_template_lang;
 mod require_scoped_style;
+mod single_style_block;
 
 // Warning rules
 mod warn_custom_block;
@@ -94,6 +100,7 @@ pub use component_name_in_template_casing::ComponentNameInTemplateCasing;
 pub use no_inline_style::NoInlineStyle;
 pub use no_lone_template::NoLoneTemplate;
 pub use prefer_props_shorthand::PreferPropsShorthand;
+pub use require_component_registration::RequireComponentRegistration;
 pub use scoped_event_names::ScopedEventNames;
 pub use sfc_element_order::SfcElementOrder;
 
@@ -105,7 +112,12 @@ pub use no_v_html::NoVHtml;
 pub use a11y_img_alt::A11yImgAlt;
 
 // Style rules exports
+pub use no_preprocessor_lang::NoPreprocessorLang;
+pub use no_script_non_standard_lang::NoScriptNonStandardLang;
+pub use no_src_attribute::NoSrcAttribute;
+pub use no_template_lang::NoTemplateLang;
 pub use require_scoped_style::RequireScopedStyle;
+pub use single_style_block::SingleStyleBlock;
 
 // Warning rules exports
 pub use warn_custom_block::WarnCustomBlock;

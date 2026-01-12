@@ -88,6 +88,26 @@ const formattedCss = ref<string>('');
 const formattedJsCode = ref<string>('');
 const codeViewMode = ref<'ts' | 'js'>('ts');
 
+// AST display options
+const astHideLoc = ref(true);
+const astHideSource = ref(true);
+const astCollapsed = ref(false);
+
+// Helper to remove loc/source properties from AST for cleaner display
+function filterAstProperties(obj: unknown, hideLoc: boolean, hideSource: boolean): unknown {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => filterAstProperties(item, hideLoc, hideSource));
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (hideLoc && key === 'loc') continue;
+    if (hideSource && key === 'source') continue;
+    result[key] = filterAstProperties(value, hideLoc, hideSource);
+  }
+  return result;
+}
+
 // Helper to format code with Prettier
 async function formatCode(code: string, parser: 'babel' | 'typescript'): Promise<string> {
   try {
@@ -134,7 +154,12 @@ function transpileToJs(code: string): string {
 
 // Computed
 const editorLanguage = computed(() => inputMode.value === 'sfc' ? 'vue' : 'html');
-const astJson = computed(() => output.value ? JSON.stringify(mapToObject(output.value.ast), null, 2) : '{}');
+const astJson = computed(() => {
+  if (!output.value) return '{}';
+  const ast = mapToObject(output.value.ast);
+  const filtered = filterAstProperties(ast, astHideLoc.value, astHideSource.value);
+  return JSON.stringify(filtered, null, astCollapsed.value ? 0 : 2);
+});
 
 // Computed: detect TypeScript from script lang
 const isTypeScript = computed(() => {
@@ -713,7 +738,24 @@ onMounted(async () => {
 
             <!-- AST Tab -->
             <div v-else-if="activeTab === 'ast'" class="ast-output">
-              <h4>Abstract Syntax Tree</h4>
+              <div class="ast-header">
+                <h4>Abstract Syntax Tree</h4>
+                <div class="ast-options">
+                  <label class="ast-option">
+                    <input type="checkbox" v-model="astHideLoc" />
+                    <span>Hide loc</span>
+                  </label>
+                  <label class="ast-option">
+                    <input type="checkbox" v-model="astHideSource" />
+                    <span>Hide source</span>
+                  </label>
+                  <label class="ast-option">
+                    <input type="checkbox" v-model="astCollapsed" />
+                    <span>Compact</span>
+                  </label>
+                  <button @click="copyToClipboard(astJson)" class="btn-ghost btn-small">Copy</button>
+                </div>
+              </div>
               <CodeHighlight :code="astJson" language="json" show-line-numbers />
             </div>
 

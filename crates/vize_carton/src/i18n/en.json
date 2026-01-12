@@ -1,0 +1,173 @@
+{
+  "test.hello": "Hello",
+  "test.greeting": "Hello, {name}!",
+
+  "category.essential": "Essential",
+  "category.strongly_recommended": "Strongly Recommended",
+  "category.recommended": "Recommended",
+  "category.vapor": "Vapor",
+  "category.musea": "Musea",
+  "category.script": "Script",
+  "category.css": "CSS",
+  "category.a11y": "Accessibility",
+  "category.security": "Security",
+  "category.performance": "Performance",
+
+  "vue/require-v-for-key.description": "Require v-bind:key with v-for directives",
+  "vue/require-v-for-key.message": "Elements in iteration expect to have 'v-bind:key' directives. Element: <{tag}>",
+  "vue/require-v-for-key.help": "Add a `:key` attribute with a unique identifier for each item",
+
+  "vue/valid-v-for.description": "Enforce valid v-for directives",
+  "vue/valid-v-for.missing_expression": "v-for directive requires an expression",
+  "vue/valid-v-for.invalid_syntax": "v-for has invalid syntax: expected 'item in items' or '(item, index) in items'",
+  "vue/valid-v-for.help": "Use syntax: v-for=\"item in items\" or v-for=\"(item, index) in items\"",
+
+  "vue/valid-v-if.description": "Enforce valid v-if directives",
+  "vue/valid-v-if.missing_expression": "v-if directive requires an expression",
+  "vue/valid-v-if.help": "Add an expression to the v-if directive",
+
+  "vue/valid-v-else.description": "Enforce valid v-else directives",
+  "vue/valid-v-else.unexpected_expression": "v-else directives require no expression",
+  "vue/valid-v-else.missing_v_if": "v-else requires a corresponding v-if or v-else-if",
+  "vue/valid-v-else.help": "Place v-else immediately after a v-if or v-else-if element",
+
+  "vue/valid-v-bind.description": "Enforce valid v-bind directives",
+  "vue/valid-v-bind.missing_expression": "v-bind requires an expression",
+  "vue/valid-v-bind.help": "Add an expression to the v-bind directive",
+
+  "vue/valid-v-on.description": "Enforce valid v-on directives",
+  "vue/valid-v-on.missing_event": "v-on requires an event name",
+  "vue/valid-v-on.help": "Add an event name like @click or v-on:click",
+
+  "vue/valid-v-model.description": "Enforce valid v-model directives",
+  "vue/valid-v-model.missing_expression": "v-model requires an expression",
+  "vue/valid-v-model.invalid_element": "v-model cannot be used on <{tag}> element",
+  "vue/valid-v-model.help": "v-model can be used on input, textarea, select, or custom components",
+
+  "vue/valid-v-show.description": "Enforce valid v-show directives",
+  "vue/valid-v-show.missing_expression": "v-show directive requires an expression",
+  "vue/valid-v-show.on_template": "v-show cannot be used on <template> element",
+  "vue/valid-v-show.help": "Add an expression to the v-show directive",
+
+  "vue/valid-v-slot.description": "Enforce valid v-slot directives",
+  "vue/valid-v-slot.invalid_location": "v-slot can only be used on components or template elements",
+  "vue/valid-v-slot.help": "Use v-slot on a component or a template element inside a component",
+
+  "vue/no-use-v-if-with-v-for.description": "Disallow using v-if on the same element as v-for",
+  "vue/no-use-v-if-with-v-for.message_access": "Avoid using v-if with v-for on the same element. The v-if condition does not have access to v-for scope variables",
+  "vue/no-use-v-if-with-v-for.message_perf": "Avoid using v-if with v-for on the same element. Use a computed property to filter the list first",
+  "vue/no-use-v-if-with-v-for.help": "Move v-if to a wrapper element or use a computed property",
+
+  "vue/no-unused-vars.description": "Disallow unused variable definitions in v-for directives",
+  "vue/no-unused-vars.message": "Variable '{name}' is defined but never used",
+  "vue/no-unused-vars.help": "Remove the unused variable or prefix it with _ to indicate intentional non-use",
+
+  "vue/no-duplicate-attributes.description": "Disallow duplicate attributes",
+  "vue/no-duplicate-attributes.message": "Duplicate attribute '{attr}'",
+  "vue/no-duplicate-attributes.help": "Remove the duplicate attribute",
+
+  "vue/no-template-key.description": "Disallow key attribute on template element",
+  "vue/no-template-key.message": "<template> elements cannot have a key attribute",
+  "vue/no-template-key.help": "Move the key to the first child element inside template",
+
+  "vue/no-textarea-mustache.description": "Disallow mustache interpolation in textarea",
+  "vue/no-textarea-mustache.message": "Mustache interpolation inside textarea is not allowed",
+  "vue/no-textarea-mustache.help": "Use v-model instead of mustache interpolation in textarea",
+
+  "vue/no-dupe-v-else-if.description": "Disallow duplicate conditions in v-if chains",
+  "vue/no-dupe-v-else-if.message": "This condition is a duplicate of a condition in the same v-if/v-else-if chain",
+  "vue/no-dupe-v-else-if.help": "Remove or modify the duplicate condition",
+
+  "vue/no-reserved-component-names.description": "Disallow reserved component names",
+  "vue/no-reserved-component-names.message": "'{name}' is a reserved HTML element name and cannot be used as a component name",
+  "vue/no-reserved-component-names.help": "Rename the component to avoid using reserved names",
+
+  "vue/no-template-shadow.description": "Disallow variable shadowing in v-for",
+  "vue/no-template-shadow.message": "Variable '{name}' shadows a variable in an outer scope",
+  "vue/no-template-shadow.help": "Rename the variable to avoid shadowing: use a different name instead of '{name}'",
+
+  "vue/no-multi-spaces.description": "Disallow multiple consecutive spaces",
+  "vue/no-multi-spaces.message": "Multiple consecutive spaces found",
+  "vue/no-multi-spaces.help": "Replace multiple spaces with a single space",
+
+  "vue/v-bind-style.description": "Enforce v-bind directive style",
+  "vue/v-bind-style.prefer_shorthand": "Use shorthand ':' instead of 'v-bind:'",
+  "vue/v-bind-style.prefer_longform": "Use 'v-bind:' instead of shorthand ':'",
+  "vue/v-bind-style.help": "Replace with the preferred style",
+
+  "vue/v-on-style.description": "Enforce v-on directive style",
+  "vue/v-on-style.prefer_shorthand": "Use shorthand '@' instead of 'v-on:'",
+  "vue/v-on-style.prefer_longform": "Use 'v-on:' instead of shorthand '@'",
+  "vue/v-on-style.help": "Replace with the preferred style",
+
+  "vue/multi-word-component-names.description": "Require component names to be multi-word",
+  "vue/multi-word-component-names.message": "Component name \"{name}\" should be multi-word to avoid conflicts with HTML elements",
+  "vue/multi-word-component-names.help": "Rename the component to use multiple words (e.g., \"TodoItem\" instead of \"Item\")",
+
+  "vue/a11y-img-alt.description": "Require alt attribute on images for accessibility",
+  "vue/a11y-img-alt.message": "<img> elements must have an alt attribute for accessibility",
+  "vue/a11y-img-alt.help": "Add alt=\"description\" for informative images or alt=\"\" for decorative images",
+
+  "vue/no-unsafe-url.description": "Warn about potentially unsafe URL bindings",
+  "vue/no-unsafe-url.message": "Dynamic :{attr} binding may be vulnerable to XSS via javascript: protocol",
+  "vue/no-unsafe-url.help_href": "Consider using <router-link :to=\"...\"> or sanitize URLs with @braintree/sanitize-url",
+  "vue/no-unsafe-url.help_src": "Ensure URLs are sanitized before binding. Use @braintree/sanitize-url for validation",
+
+  "vue/no-v-html.description": "Disallow use of v-html to prevent XSS attacks",
+  "vue/no-v-html.message": "v-html can lead to XSS attacks. Avoid using it with user-provided content",
+  "vue/no-v-html.help": "Consider using text interpolation {{ }} or a sanitization library",
+
+  "vue/require-scoped-style.description": "Require scoped attribute on style blocks",
+  "vue/require-scoped-style.message": "Style blocks should use scoped attribute to prevent style leaking",
+  "vue/require-scoped-style.help": "Add the 'scoped' attribute to the style block",
+
+  "vapor/no-suspense.description": "Warn about Suspense in Vapor-only applications",
+  "vapor/no-suspense.message": "Suspense is not supported in Vapor-only applications",
+  "vapor/no-suspense.help": "Suspense only works when Vapor components render inside a VDOM Suspense boundary. Use createApp with vaporInteropPlugin for Suspense support",
+
+  "vapor/no-inline-template.description": "Disallow deprecated inline-template attribute",
+  "vapor/no-inline-template.message": "inline-template is deprecated and not supported in Vapor",
+  "vapor/no-inline-template.help": "Use slots instead of inline-template",
+
+  "vapor/prefer-static-class.description": "Prefer static class over dynamic binding",
+  "vapor/prefer-static-class.message": "Prefer static class attribute over dynamic :class binding for constant values",
+  "vapor/prefer-static-class.help": "Move static classes to the class attribute",
+
+  "vapor/no-vue-lifecycle-events.description": "Disallow @vue:xxx per-element lifecycle events",
+  "vapor/no-vue-lifecycle-events.message": "@vue:{event} lifecycle events are not supported in Vapor",
+  "vapor/no-vue-lifecycle-events.help": "Use component lifecycle hooks instead",
+
+  "script/no-options-api.description": "Disallow Options API patterns",
+  "script/no-options-api.message": "Options API is not supported in Vapor. Use Composition API instead",
+  "script/no-options-api.help": "Refactor to use <script setup> with Composition API",
+
+  "script/no-get-current-instance.description": "Disallow getCurrentInstance()",
+  "script/no-get-current-instance.message": "getCurrentInstance() returns null in Vapor components",
+  "script/no-get-current-instance.help": "Use provide/inject or composables instead",
+
+  "script/no-async-in-computed.description": "Disallow async functions in computed properties",
+  "script/no-async-in-computed.message": "Computed properties cannot be async. They must return a value synchronously",
+  "script/no-async-in-computed.help": "Use ref with watchEffect for async operations: `const data = ref(null); watchEffect(async () => { data.value = await fetchData() })`",
+
+  "script/no-deep-destructure-in-props.description": "Disallow deeply nested destructuring in defineProps",
+  "script/no-deep-destructure-in-props.message": "Avoid deeply nested destructuring in defineProps (max depth: {depth})",
+  "script/no-deep-destructure-in-props.help": "Use simple destructuring and access nested properties via computed or direct prop access: `const props = defineProps<...>(); const nested = computed(() => props.parent.child)`",
+
+  "musea/require-title.description": "Require title attribute in art block",
+  "musea/require-title.message": "Art component requires a title attribute",
+  "musea/require-title.help": "Add a title attribute to describe the component",
+
+  "compiler.parse_error": "Parse error: {message}",
+  "compiler.unexpected_token": "Unexpected token '{token}'",
+  "compiler.unclosed_tag": "Unclosed tag <{tag}>",
+  "compiler.invalid_directive": "Invalid directive syntax: {directive}",
+  "compiler.missing_end_tag": "Missing end tag for <{tag}>",
+
+  "cli.compiling": "Compiling {count} files...",
+  "cli.compiled": "Compiled {count} files in {time}ms",
+  "cli.error_count": "{count} error(s) found",
+  "cli.warning_count": "{count} warning(s) found",
+  "cli.slow_file_warning": "Slow compilation detected for {file} ({time}ms)",
+  "cli.suggest_split": "Consider splitting large components into smaller ones",
+  "cli.suggest_template": "Large template detected ({size} bytes). Consider extracting parts into child components"
+}

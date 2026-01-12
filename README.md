@@ -275,6 +275,50 @@ Compiling **15,000 SFC files** (36.9 MB):
 | **Single Thread** | 16.21s | 6.65s | **2.4x** |
 | **Multi Thread** | 4.13s | 498ms | **8.3x** |
 
+## Internationalization (i18n)
+
+Vize supports multi-language messages for lint diagnostics and compiler errors.
+
+### Supported Locales
+
+| Code | Language |
+|------|----------|
+| `en` | English (default) |
+| `ja` | Japanese (日本語) |
+| `zh` | Chinese (中文) |
+
+### Usage
+
+**CLI:**
+
+```bash
+vize lint --locale ja
+```
+
+**WASM:**
+
+```javascript
+import { lintSfc } from '@vizejs/wasm';
+
+const result = lintSfc(source, {
+  filename: 'App.vue',
+  locale: 'ja',
+});
+```
+
+**Rust API:**
+
+```rust
+use vize_patina::{Linter, Locale};
+
+let linter = Linter::new().with_locale(Locale::Ja);
+let result = linter.lint_template(source, "test.vue");
+```
+
+### Playground
+
+The [Playground](https://vizejs.dev/play/) includes a locale selector to switch languages for lint messages.
+
 ## Credits
 
 This project is inspired by and builds upon the work of these amazing projects:

@@ -766,14 +766,37 @@ pub fn compile_css_fn(css: &str, options: JsValue) -> Result<JsValue, JsValue> {
 /// Lint Vue SFC template
 #[wasm_bindgen(js_name = "lintTemplate")]
 pub fn lint_template_wasm(source: &str, options: JsValue) -> Result<JsValue, JsValue> {
-    use vize_patina::{Linter, LspEmitter};
+    use vize_patina::{Linter, Locale, LspEmitter};
 
     let filename: String = js_sys::Reflect::get(&options, &JsValue::from_str("filename"))
         .ok()
         .and_then(|v| v.as_string())
         .unwrap_or_else(|| "anonymous.vue".to_string());
 
-    let linter = Linter::new();
+    // Parse locale from options
+    let locale: Locale = js_sys::Reflect::get(&options, &JsValue::from_str("locale"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .and_then(|s| Locale::parse(&s))
+        .unwrap_or_default();
+
+    // Parse enabledRules from options (array of rule names)
+    let enabled_rules: Option<Vec<String>> =
+        js_sys::Reflect::get(&options, &JsValue::from_str("enabledRules"))
+            .ok()
+            .and_then(|v| {
+                if v.is_undefined() || v.is_null() {
+                    return None;
+                }
+                js_sys::Array::from(&v)
+                    .iter()
+                    .map(|item| item.as_string())
+                    .collect::<Option<Vec<String>>>()
+            });
+
+    let linter = Linter::new()
+        .with_locale(locale)
+        .with_enabled_rules(enabled_rules);
     let result = linter.lint_template(source, &filename);
 
     // Use LspEmitter for accurate line/column conversion
@@ -821,14 +844,37 @@ pub fn lint_template_wasm(source: &str, options: JsValue) -> Result<JsValue, JsV
 /// Lint Vue SFC file (full SFC including script)
 #[wasm_bindgen(js_name = "lintSfc")]
 pub fn lint_sfc_wasm(source: &str, options: JsValue) -> Result<JsValue, JsValue> {
-    use vize_patina::{Linter, LspEmitter};
+    use vize_patina::{Linter, Locale, LspEmitter};
 
     let filename: String = js_sys::Reflect::get(&options, &JsValue::from_str("filename"))
         .ok()
         .and_then(|v| v.as_string())
         .unwrap_or_else(|| "anonymous.vue".to_string());
 
-    let linter = Linter::new();
+    // Parse locale from options
+    let locale: Locale = js_sys::Reflect::get(&options, &JsValue::from_str("locale"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .and_then(|s| Locale::parse(&s))
+        .unwrap_or_default();
+
+    // Parse enabledRules from options (array of rule names)
+    let enabled_rules: Option<Vec<String>> =
+        js_sys::Reflect::get(&options, &JsValue::from_str("enabledRules"))
+            .ok()
+            .and_then(|v| {
+                if v.is_undefined() || v.is_null() {
+                    return None;
+                }
+                js_sys::Array::from(&v)
+                    .iter()
+                    .map(|item| item.as_string())
+                    .collect::<Option<Vec<String>>>()
+            });
+
+    let linter = Linter::new()
+        .with_locale(locale)
+        .with_enabled_rules(enabled_rules);
     let result = linter.lint_sfc(source, &filename);
 
     // Use LspEmitter for accurate line/column conversion
@@ -898,6 +944,24 @@ pub fn get_lint_rules_wasm() -> Result<JsValue, JsValue> {
         .collect();
 
     to_js_value(&rules)
+}
+
+/// Get available locales for i18n
+#[wasm_bindgen(js_name = "getLocales")]
+pub fn get_locales_wasm() -> Result<JsValue, JsValue> {
+    use vize_patina::Locale;
+
+    let locales: Vec<serde_json::Value> = Locale::ALL
+        .iter()
+        .map(|l| {
+            serde_json::json!({
+                "code": l.code(),
+                "name": l.display_name(),
+            })
+        })
+        .collect();
+
+    to_js_value(&locales)
 }
 
 // ============================================================================

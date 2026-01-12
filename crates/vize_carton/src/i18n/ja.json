@@ -1,0 +1,173 @@
+{
+  "test.hello": "こんにちは",
+  "test.greeting": "こんにちは、{name}さん！",
+
+  "category.essential": "必須",
+  "category.strongly_recommended": "強く推奨",
+  "category.recommended": "推奨",
+  "category.vapor": "Vapor",
+  "category.musea": "Musea",
+  "category.script": "スクリプト",
+  "category.css": "CSS",
+  "category.a11y": "アクセシビリティ",
+  "category.security": "セキュリティ",
+  "category.performance": "パフォーマンス",
+
+  "vue/require-v-for-key.description": "v-forディレクティブにv-bind:keyを必須にする",
+  "vue/require-v-for-key.message": "繰り返し要素には'v-bind:key'ディレクティブが必要です。要素: <{tag}>",
+  "vue/require-v-for-key.help": "各アイテムに一意の識別子を持つ`:key`属性を追加してください",
+
+  "vue/valid-v-for.description": "有効なv-forディレクティブを強制する",
+  "vue/valid-v-for.missing_expression": "v-forディレクティブには式が必要です",
+  "vue/valid-v-for.invalid_syntax": "v-forの構文が無効です: 'item in items' または '(item, index) in items' の形式が必要です",
+  "vue/valid-v-for.help": "構文: v-for=\"item in items\" または v-for=\"(item, index) in items\" を使用してください",
+
+  "vue/valid-v-if.description": "有効なv-ifディレクティブを強制する",
+  "vue/valid-v-if.missing_expression": "v-ifディレクティブには式が必要です",
+  "vue/valid-v-if.help": "v-ifディレクティブに式を追加してください",
+
+  "vue/valid-v-else.description": "有効なv-elseディレクティブを強制する",
+  "vue/valid-v-else.unexpected_expression": "v-elseディレクティブには式を指定できません",
+  "vue/valid-v-else.missing_v_if": "v-elseには対応するv-ifまたはv-else-ifが必要です",
+  "vue/valid-v-else.help": "v-elseはv-ifまたはv-else-if要素の直後に配置してください",
+
+  "vue/valid-v-bind.description": "有効なv-bindディレクティブを強制する",
+  "vue/valid-v-bind.missing_expression": "v-bindには式が必要です",
+  "vue/valid-v-bind.help": "v-bindディレクティブに式を追加してください",
+
+  "vue/valid-v-on.description": "有効なv-onディレクティブを強制する",
+  "vue/valid-v-on.missing_event": "v-onにはイベント名が必要です",
+  "vue/valid-v-on.help": "@clickやv-on:clickのようにイベント名を追加してください",
+
+  "vue/valid-v-model.description": "有効なv-modelディレクティブを強制する",
+  "vue/valid-v-model.missing_expression": "v-modelには式が必要です",
+  "vue/valid-v-model.invalid_element": "v-modelは<{tag}>要素では使用できません",
+  "vue/valid-v-model.help": "v-modelはinput、textarea、select、またはカスタムコンポーネントで使用できます",
+
+  "vue/valid-v-show.description": "有効なv-showディレクティブを強制する",
+  "vue/valid-v-show.missing_expression": "v-showディレクティブには式が必要です",
+  "vue/valid-v-show.on_template": "v-showは<template>要素では使用できません",
+  "vue/valid-v-show.help": "v-showディレクティブに式を追加してください",
+
+  "vue/valid-v-slot.description": "有効なv-slotディレクティブを強制する",
+  "vue/valid-v-slot.invalid_location": "v-slotはコンポーネントまたはtemplate要素でのみ使用できます",
+  "vue/valid-v-slot.help": "コンポーネント内のコンポーネントまたはtemplate要素でv-slotを使用してください",
+
+  "vue/no-use-v-if-with-v-for.description": "v-forと同じ要素でのv-ifの使用を禁止する",
+  "vue/no-use-v-if-with-v-for.message_access": "同じ要素でv-ifとv-forを使用しないでください。v-if条件からv-forスコープ変数にアクセスできません",
+  "vue/no-use-v-if-with-v-for.message_perf": "同じ要素でv-ifとv-forを使用しないでください。先にcomputedプロパティでリストをフィルタリングしてください",
+  "vue/no-use-v-if-with-v-for.help": "v-ifをラッパー要素に移動するか、computedプロパティを使用してください",
+
+  "vue/no-unused-vars.description": "v-forディレクティブで未使用の変数定義を禁止する",
+  "vue/no-unused-vars.message": "変数'{name}'は定義されていますが使用されていません",
+  "vue/no-unused-vars.help": "未使用の変数を削除するか、意図的に使用しないことを示すために_を接頭辞として付けてください",
+
+  "vue/no-duplicate-attributes.description": "重複する属性を禁止する",
+  "vue/no-duplicate-attributes.message": "属性'{attr}'が重複しています",
+  "vue/no-duplicate-attributes.help": "重複する属性を削除してください",
+
+  "vue/no-template-key.description": "template要素でのkey属性を禁止する",
+  "vue/no-template-key.message": "<template>要素にはkey属性を指定できません",
+  "vue/no-template-key.help": "keyをtemplate内の最初の子要素に移動してください",
+
+  "vue/no-textarea-mustache.description": "textareaでのマスタッシュ補間を禁止する",
+  "vue/no-textarea-mustache.message": "textarea内でのマスタッシュ補間は許可されていません",
+  "vue/no-textarea-mustache.help": "textareaではマスタッシュ補間の代わりにv-modelを使用してください",
+
+  "vue/no-dupe-v-else-if.description": "v-ifチェーンでの重複条件を禁止する",
+  "vue/no-dupe-v-else-if.message": "この条件は同じv-if/v-else-ifチェーン内の条件と重複しています",
+  "vue/no-dupe-v-else-if.help": "重複する条件を削除または変更してください",
+
+  "vue/no-reserved-component-names.description": "予約されたコンポーネント名を禁止する",
+  "vue/no-reserved-component-names.message": "'{name}'は予約されたHTML要素名であり、コンポーネント名として使用できません",
+  "vue/no-reserved-component-names.help": "予約名を避けるためにコンポーネント名を変更してください",
+
+  "vue/no-template-shadow.description": "v-forでの変数シャドーイングを禁止する",
+  "vue/no-template-shadow.message": "変数'{name}'は外側のスコープの変数をシャドーイングしています",
+  "vue/no-template-shadow.help": "シャドーイングを避けるために変数名を変更してください: '{name}'の代わりに別の名前を使用してください",
+
+  "vue/no-multi-spaces.description": "複数の連続したスペースを禁止する",
+  "vue/no-multi-spaces.message": "複数の連続したスペースが見つかりました",
+  "vue/no-multi-spaces.help": "複数のスペースを1つのスペースに置き換えてください",
+
+  "vue/v-bind-style.description": "v-bindディレクティブのスタイルを強制する",
+  "vue/v-bind-style.prefer_shorthand": "'v-bind:'の代わりに省略形':'を使用してください",
+  "vue/v-bind-style.prefer_longform": "省略形':'の代わりに'v-bind:'を使用してください",
+  "vue/v-bind-style.help": "推奨されるスタイルに置き換えてください",
+
+  "vue/v-on-style.description": "v-onディレクティブのスタイルを強制する",
+  "vue/v-on-style.prefer_shorthand": "'v-on:'の代わりに省略形'@'を使用してください",
+  "vue/v-on-style.prefer_longform": "省略形'@'の代わりに'v-on:'を使用してください",
+  "vue/v-on-style.help": "推奨されるスタイルに置き換えてください",
+
+  "vue/multi-word-component-names.description": "コンポーネント名を複数単語にすることを要求する",
+  "vue/multi-word-component-names.message": "コンポーネント名\"{name}\"はHTML要素との衝突を避けるために複数単語にする必要があります",
+  "vue/multi-word-component-names.help": "複数の単語を使用するようにコンポーネント名を変更してください（例: \"Item\"の代わりに\"TodoItem\"）",
+
+  "vue/a11y-img-alt.description": "アクセシビリティのために画像にalt属性を必須にする",
+  "vue/a11y-img-alt.message": "<img>要素にはアクセシビリティのためにalt属性が必要です",
+  "vue/a11y-img-alt.help": "説明的な画像にはalt=\"説明\"を、装飾的な画像にはalt=\"\"を追加してください",
+
+  "vue/no-unsafe-url.description": "安全でないURLバインディングについて警告する",
+  "vue/no-unsafe-url.message": "動的な:{attr}バインディングはjavascript:プロトコル経由でXSSに脆弱な可能性があります",
+  "vue/no-unsafe-url.help_href": "<router-link :to=\"...\">を使用するか、@braintree/sanitize-urlでURLをサニタイズすることを検討してください",
+  "vue/no-unsafe-url.help_src": "バインディング前にURLがサニタイズされていることを確認してください。検証には@braintree/sanitize-urlを使用してください",
+
+  "vue/no-v-html.description": "XSS攻撃を防ぐためにv-htmlの使用を禁止する",
+  "vue/no-v-html.message": "v-htmlはXSS攻撃につながる可能性があります。ユーザー提供のコンテンツでの使用は避けてください",
+  "vue/no-v-html.help": "テキスト補間{{ }}またはサニタイゼーションライブラリの使用を検討してください",
+
+  "vue/require-scoped-style.description": "styleブロックにscoped属性を必須にする",
+  "vue/require-scoped-style.message": "styleブロックはスタイルの漏れを防ぐためにscoped属性を使用する必要があります",
+  "vue/require-scoped-style.help": "styleブロックに'scoped'属性を追加してください",
+
+  "vapor/no-suspense.description": "Vaporのみのアプリケーションでのサスペンスについて警告する",
+  "vapor/no-suspense.message": "SuspenseはVaporのみのアプリケーションではサポートされていません",
+  "vapor/no-suspense.help": "SuspenseはVaporコンポーネントがVDOM Suspenseバウンダリ内でレンダリングされる場合にのみ機能します。SuspenseサポートにはcreateAppとvaporInteropPluginを使用してください",
+
+  "vapor/no-inline-template.description": "非推奨のinline-template属性を禁止する",
+  "vapor/no-inline-template.message": "inline-templateは非推奨であり、Vaporではサポートされていません",
+  "vapor/no-inline-template.help": "inline-templateの代わりにスロットを使用してください",
+
+  "vapor/prefer-static-class.description": "動的バインディングよりも静的クラスを優先する",
+  "vapor/prefer-static-class.message": "定数値には動的な:classバインディングよりも静的なclass属性を優先してください",
+  "vapor/prefer-static-class.help": "静的なクラスをclass属性に移動してください",
+
+  "vapor/no-vue-lifecycle-events.description": "@vue:xxxの要素ごとのライフサイクルイベントを禁止する",
+  "vapor/no-vue-lifecycle-events.message": "@vue:{event}ライフサイクルイベントはVaporではサポートされていません",
+  "vapor/no-vue-lifecycle-events.help": "代わりにコンポーネントライフサイクルフックを使用してください",
+
+  "script/no-options-api.description": "Options APIパターンを禁止する",
+  "script/no-options-api.message": "Options APIはVaporではサポートされていません。代わりにComposition APIを使用してください",
+  "script/no-options-api.help": "<script setup>とComposition APIを使用するようにリファクタリングしてください",
+
+  "script/no-get-current-instance.description": "getCurrentInstance()を禁止する",
+  "script/no-get-current-instance.message": "getCurrentInstance()はVaporコンポーネントではnullを返します",
+  "script/no-get-current-instance.help": "代わりにprovide/injectまたはcomposablesを使用してください",
+
+  "script/no-async-in-computed.description": "computedプロパティでの非同期関数を禁止する",
+  "script/no-async-in-computed.message": "computedプロパティは非同期にできません。値を同期的に返す必要があります",
+  "script/no-async-in-computed.help": "非同期操作にはrefとwatchEffectを使用してください: `const data = ref(null); watchEffect(async () => { data.value = await fetchData() })`",
+
+  "script/no-deep-destructure-in-props.description": "definePropsでの深くネストした分割代入を禁止する",
+  "script/no-deep-destructure-in-props.message": "definePropsでの深くネストした分割代入を避けてください（最大深度: {depth}）",
+  "script/no-deep-destructure-in-props.help": "シンプルな分割代入を使用し、ネストしたプロパティにはcomputedまたは直接のpropアクセス経由でアクセスしてください: `const props = defineProps<...>(); const nested = computed(() => props.parent.child)`",
+
+  "musea/require-title.description": "artブロックにtitle属性を必須にする",
+  "musea/require-title.message": "Artコンポーネントにはtitle属性が必要です",
+  "musea/require-title.help": "コンポーネントを説明するtitle属性を追加してください",
+
+  "compiler.parse_error": "パースエラー: {message}",
+  "compiler.unexpected_token": "予期しないトークン'{token}'",
+  "compiler.unclosed_tag": "閉じられていないタグ<{tag}>",
+  "compiler.invalid_directive": "無効なディレクティブ構文: {directive}",
+  "compiler.missing_end_tag": "<{tag}>の終了タグがありません",
+
+  "cli.compiling": "{count}ファイルをコンパイル中...",
+  "cli.compiled": "{count}ファイルを{time}msでコンパイルしました",
+  "cli.error_count": "{count}個のエラーが見つかりました",
+  "cli.warning_count": "{count}個の警告が見つかりました",
+  "cli.slow_file_warning": "{file}のコンパイルが遅いです（{time}ms）",
+  "cli.suggest_split": "大きなコンポーネントを小さなものに分割することを検討してください",
+  "cli.suggest_template": "大きなテンプレートが検出されました（{size}バイト）。一部を子コンポーネントに抽出することを検討してください"
+}

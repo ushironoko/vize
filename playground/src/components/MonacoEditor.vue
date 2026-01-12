@@ -330,11 +330,11 @@ getter 関数の戻り値を追跡し、依存関係が変更されたときの�
       `// 読み取り専用の computed
 const count = ref(1)
 const doubled = computed(() => count.value * 2)`,
-      `// 書き込み可能な computed
+`// 書き込み可能な computed
 const firstName = ref('John')
 const lastName = ref('Doe')
 const fullName = computed({
-  get: () => \`\${firstName.value} \${lastName.value}\`,
+  get: () => firstName.value + ' ' + lastName.value,
   set: (val) => {
     [firstName.value, lastName.value] = val.split(' ')
   }
@@ -353,14 +353,14 @@ const fullName = computed({
 
 デフォルトで lazy（遅延評価）で、ソースが変更されたときのみコールバックが呼ばれます。`,
     examples: [
-      `// 単一の ref を監視
+`// 単一の ref を監視
 const count = ref(0)
 watch(count, (newVal, oldVal) => {
-  console.log(\`count changed: \${oldVal} -> \${newVal}\`)
+  console.log('count changed: ' + oldVal + ' -> ' + newVal)
 })`,
-      `// 複数のソースを監視
+`// 複数のソースを監視
 watch([firstName, lastName], ([newFirst, newLast]) => {
-  console.log(\`Name: \${newFirst} \${newLast}\`)
+  console.log('Name: ' + newFirst + ' ' + newLast)
 })`,
       `// deep オプション
 watch(state, (newState) => {
@@ -382,11 +382,11 @@ watch(source, callback, { immediate: true })`
 
 \`watch\` と異なり、監視対象を明示的に指定する必要がなく、コールバック内でアクセスしたリアクティブな値がすべて追跡されます。`,
     examples: [
-      `const count = ref(0)
+`const count = ref(0)
 
 // 即座に実行され、count が変更されるたびに再実行
 watchEffect(() => {
-  console.log(\`count is: \${count.value}\`)
+  console.log('count is: ' + count.value)
 })`,
       `// クリーンアップ関数
 watchEffect((onCleanup) => {
@@ -459,6 +459,369 @@ function useFeature() {
     docUrl: 'https://vuejs.org/api/reactivity-utilities.html#torefs',
     since: 'Vue 3.0',
     seeAlso: ['toRef', 'reactive']
+  }
+};
+
+// Hover documentation for Vue directives
+const VUE_DIRECTIVE_DOCS: Record<string, HoverDoc> = {
+  'v-if': {
+    signature: 'v-if="expression"',
+    description: `**v-if** は条件付きでテンプレートブロックをレンダリングするディレクティブです。
+
+式が truthy の場合のみ、要素とその内容がレンダリングされます。
+
+\`v-else\` や \`v-else-if\` と組み合わせて使用できます。
+
+**注意:** \`v-if\` はトグル時に要素を完全に作成/破棄します。頻繁なトグルには \`v-show\` を検討してください。`,
+    examples: [
+      `<div v-if="isVisible">表示される内容</div>`,
+      `<template v-if="condition">
+  <h1>タイトル</h1>
+  <p>コンテンツ</p>
+</template>`,
+      `<div v-if="type === 'A'">A</div>
+<div v-else-if="type === 'B'">B</div>
+<div v-else>その他</div>`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/conditional.html',
+    since: 'Vue 2.0',
+    seeAlso: ['v-else', 'v-else-if', 'v-show']
+  },
+
+  'v-else': {
+    signature: 'v-else',
+    description: `**v-else** は \`v-if\` または \`v-else-if\` の "else ブロック" を表します。
+
+値は不要で、直前の兄弟要素に \`v-if\` または \`v-else-if\` が必要です。`,
+    examples: [
+      `<div v-if="isLoggedIn">ログイン済み</div>
+<div v-else>ログインしてください</div>`,
+      `<template v-if="items.length">
+  <ul>...</ul>
+</template>
+<p v-else>アイテムがありません</p>`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/conditional.html#v-else',
+    since: 'Vue 2.0',
+    seeAlso: ['v-if', 'v-else-if']
+  },
+
+  'v-else-if': {
+    signature: 'v-else-if="expression"',
+    description: `**v-else-if** は \`v-if\` の "else if ブロック" を表します。
+
+チェーンして複数の条件分岐を表現できます。
+
+直前の兄弟要素に \`v-if\` または \`v-else-if\` が必要です。`,
+    examples: [
+      `<div v-if="score >= 90">A</div>
+<div v-else-if="score >= 80">B</div>
+<div v-else-if="score >= 70">C</div>
+<div v-else>D</div>`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/conditional.html#v-else-if',
+    since: 'Vue 2.0',
+    seeAlso: ['v-if', 'v-else']
+  },
+
+  'v-for': {
+    signature: 'v-for="(item, index) in items" :key="item.id"',
+    description: `**v-for** は配列やオブジェクトに基づいて要素のリストをレンダリングするディレクティブです。
+
+**構文:**
+- \`item in items\` - 配列の各要素
+- \`(item, index) in items\` - 要素とインデックス
+- \`(value, key) in object\` - オブジェクトの値とキー
+- \`(value, key, index) in object\` - 値、キー、インデックス
+- \`n in 10\` - 数値範囲 (1 から n)
+
+**重要:** パフォーマンスと正確な DOM 更新のため、\`:key\` 属性を必ず指定してください。`,
+    examples: [
+      `<li v-for="item in items" :key="item.id">
+  {{ item.name }}
+</li>`,
+      `<li v-for="(item, index) in items" :key="item.id">
+  {{ index }}: {{ item.name }}
+</li>`,
+      `<div v-for="(value, key) in object" :key="key">
+  {{ key }}: {{ value }}
+</div>`,
+      `<!-- template で複数要素をグループ化 -->
+<template v-for="item in items" :key="item.id">
+  <h2>{{ item.title }}</h2>
+  <p>{{ item.body }}</p>
+</template>`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/list.html',
+    since: 'Vue 2.0',
+    seeAlso: ['v-if', 'key']
+  },
+
+  'v-model': {
+    signature: 'v-model="data"\nv-model:argument="data"\nv-model.modifier="data"',
+    description: `**v-model** はフォーム入力要素やコンポーネントに双方向バインディングを作成します。
+
+内部的には value prop と input イベント（または対応するもの）の糖衣構文です。
+
+**対応する要素:**
+- \`<input>\` - value + input
+- \`<textarea>\` - value + input
+- \`<select>\` - value + change
+- コンポーネント - modelValue + update:modelValue
+
+**修飾子:**
+- \`.lazy\` - change イベントで同期
+- \`.number\` - 数値に変換
+- \`.trim\` - 空白をトリム`,
+    examples: [
+      `<!-- テキスト入力 -->
+<input v-model="message" />`,
+      `<!-- チェックボックス -->
+<input type="checkbox" v-model="checked" />`,
+      `<!-- 複数選択 -->
+<select v-model="selected" multiple>
+  <option value="a">A</option>
+  <option value="b">B</option>
+</select>`,
+      `<!-- 修飾子 -->
+<input v-model.lazy="msg" />
+<input v-model.number="age" type="number" />
+<input v-model.trim="name" />`,
+      `<!-- コンポーネント (Vue 3.4+) -->
+<Child v-model="value" />
+<Child v-model:title="title" />`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/forms.html',
+    since: 'Vue 2.0',
+    seeAlso: ['defineModel', 'defineProps', 'defineEmits']
+  },
+
+  'v-on': {
+    signature: 'v-on:event="handler"\n@event="handler"\n@event.modifier="handler"',
+    description: `**v-on** (省略形: @) は DOM イベントをリッスンし、発火時にハンドラを実行します。
+
+**イベント修飾子:**
+- \`.stop\` - event.stopPropagation()
+- \`.prevent\` - event.preventDefault()
+- \`.capture\` - キャプチャモードで追加
+- \`.self\` - event.target が要素自身の場合のみ
+- \`.once\` - 最大1回
+- \`.passive\` - パッシブリスナー
+
+**キー修飾子:**
+- \`.enter\`, \`.tab\`, \`.delete\`, \`.esc\`, \`.space\`
+- \`.up\`, \`.down\`, \`.left\`, \`.right\`
+- \`.ctrl\`, \`.alt\`, \`.shift\`, \`.meta\``,
+    examples: [
+      `<!-- メソッドハンドラ -->
+<button @click="handleClick">クリック</button>`,
+      `<!-- インライン式 -->
+<button @click="count++">+1</button>`,
+      `<!-- 引数付き -->
+<button @click="say('hello')">Hello</button>`,
+      `<!-- イベント修飾子 -->
+<form @submit.prevent="onSubmit">...</form>
+<a @click.stop.prevent="doThat">...</a>`,
+      `<!-- キー修飾子 -->
+<input @keyup.enter="submit" />
+<input @keydown.ctrl.s="save" />`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/event-handling.html',
+    since: 'Vue 2.0'
+  },
+
+  'v-bind': {
+    signature: 'v-bind:attribute="expression"\n:attribute="expression"\nv-bind="object"',
+    description: `**v-bind** (省略形: :) は1つ以上の属性またはコンポーネント prop を動的にバインドします。
+
+**修飾子:**
+- \`.prop\` - DOM プロパティとしてバインド
+- \`.camel\` - kebab-case を camelCase に変換
+- \`.attr\` - 強制的に DOM 属性としてバインド
+
+**特殊なバインディング:**
+- \`:class\` - オブジェクトまたは配列構文をサポート
+- \`:style\` - オブジェクトまたは配列構文をサポート`,
+    examples: [
+      `<!-- 属性バインディング -->
+<img :src="imageSrc" :alt="imageAlt" />`,
+      `<!-- クラスバインディング -->
+<div :class="{ active: isActive, 'error': hasError }"></div>
+<div :class="[activeClass, errorClass]"></div>`,
+      `<!-- スタイルバインディング -->
+<div :style="{ color: textColor, fontSize: size + 'px' }"></div>`,
+      `<!-- オブジェクト展開 -->
+<component v-bind="$attrs"></component>
+<Child v-bind="props"></Child>`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/class-and-style.html',
+    since: 'Vue 2.0',
+    seeAlso: ['v-on', 'v-model']
+  },
+
+  'v-slot': {
+    signature: 'v-slot:slotName="slotProps"\n#slotName="slotProps"',
+    description: `**v-slot** (省略形: #) は名前付きスロットまたはスコープ付きスロットを受け取ることを示します。
+
+コンポーネントまたは \`<template>\` 要素でのみ使用可能です。
+
+**注意:** デフォルトスロットは \`#default\` または \`v-slot\` で参照できます。`,
+    examples: [
+      `<!-- 名前付きスロット -->
+<template #header>
+  <h1>ヘッダー</h1>
+</template>`,
+      `<!-- スコープ付きスロット -->
+<template #item="{ item, index }">
+  {{ index }}: {{ item.name }}
+</template>`,
+      `<!-- 省略記法 -->
+<MyComponent #default="{ data }">
+  {{ data }}
+</MyComponent>`,
+      `<!-- 動的スロット名 -->
+<template #[slotName]="slotProps">
+  ...
+</template>`
+    ],
+    docUrl: 'https://vuejs.org/guide/components/slots.html',
+    since: 'Vue 2.6',
+    seeAlso: ['defineSlots', 'useSlots']
+  },
+
+  'v-show': {
+    signature: 'v-show="expression"',
+    description: `**v-show** は式の truthy/falsy に基づいて要素の可視性を切り替えます。
+
+CSS の \`display\` プロパティを使用するため、要素は常に DOM に存在します。
+
+**v-if との違い:**
+- \`v-show\` は CSS で切り替え（初期レンダリングコストが高い）
+- \`v-if\` は DOM を作成/破棄（トグルコストが高い）
+
+頻繁にトグルする場合は \`v-show\`、条件がほとんど変わらない場合は \`v-if\` を推奨。`,
+    examples: [
+      `<div v-show="isVisible">
+  常に DOM に存在、display で切り替え
+</div>`
+    ],
+    docUrl: 'https://vuejs.org/guide/essentials/conditional.html#v-show',
+    since: 'Vue 2.0',
+    seeAlso: ['v-if']
+  },
+
+  'v-pre': {
+    signature: 'v-pre',
+    description: `**v-pre** は要素とそのすべての子要素のコンパイルをスキップします。
+
+mustache タグを生のテキストとして表示する場合に使用します。
+
+コンパイルをスキップするため、ディレクティブのない大きな量のノードでパフォーマンスが向上します。`,
+    examples: [
+      `<span v-pre>{{ これはそのまま表示される }}</span>`
+    ],
+    docUrl: 'https://vuejs.org/api/built-in-directives.html#v-pre',
+    since: 'Vue 2.0'
+  },
+
+  'v-once': {
+    signature: 'v-once',
+    description: `**v-once** は要素とコンポーネントを一度だけレンダリングし、以降の更新をスキップします。
+
+静的コンテンツの最適化に使用します。
+
+子コンポーネントや v-for で使用する場合、サブツリー全体に影響します。`,
+    examples: [
+      `<span v-once>初期値: {{ initialValue }}</span>`,
+      `<!-- 静的リスト -->
+<ul v-once>
+  <li v-for="item in staticItems" :key="item.id">
+    {{ item.name }}
+  </li>
+</ul>`
+    ],
+    docUrl: 'https://vuejs.org/api/built-in-directives.html#v-once',
+    since: 'Vue 2.0',
+    seeAlso: ['v-memo']
+  },
+
+  'v-memo': {
+    signature: 'v-memo="[dep1, dep2, ...]"',
+    description: `**v-memo** はテンプレートのサブツリーをメモ化します。
+
+依存関係配列内の値が変更されない限り、サブツリーの更新をスキップします。
+
+\`v-for\` と組み合わせて、大きなリストの部分的な再レンダリングを最適化できます。`,
+    examples: [
+      `<div v-memo="[valueA, valueB]">
+  <!-- valueA または valueB が変更された場合のみ更新 -->
+</div>`,
+      `<!-- v-for での最適化 -->
+<div v-for="item in list" :key="item.id" v-memo="[item.selected]">
+  <p>ID: {{ item.id }} - selected: {{ item.selected }}</p>
+  <!-- item.selected が変更された場合のみ更新 -->
+</div>`
+    ],
+    docUrl: 'https://vuejs.org/api/built-in-directives.html#v-memo',
+    since: 'Vue 3.2',
+    seeAlso: ['v-once', 'v-for']
+  },
+
+  'v-cloak': {
+    signature: 'v-cloak',
+    description: `**v-cloak** は Vue インスタンスが準備完了するまで要素を非表示にするために使用します。
+
+CSS と組み合わせて、コンパイル前の mustache タグが表示されるのを防ぎます。
+
+Vue がマウントされると自動的に削除されます。`,
+    examples: [
+      `<!-- CSS -->
+<style>
+[v-cloak] { display: none; }
+</style>
+
+<!-- HTML -->
+<div v-cloak>
+  {{ message }}
+</div>`
+    ],
+    docUrl: 'https://vuejs.org/api/built-in-directives.html#v-cloak',
+    since: 'Vue 2.0'
+  },
+
+  'v-html': {
+    signature: 'v-html="rawHtml"',
+    description: `**v-html** は要素の innerHTML を更新します。
+
+**⚠️ セキュリティ警告:**
+信頼できないコンテンツに \`v-html\` を使用すると、XSS 攻撃につながる可能性があります。
+
+ユーザー提供のコンテンツには絶対に使用しないでください。
+
+サニタイズライブラリと組み合わせて使用することを強く推奨します。`,
+    examples: [
+      `<div v-html="rawHtmlContent"></div>`,
+      `<!-- サニタイズと組み合わせ -->
+<div v-html="sanitize(userContent)"></div>`
+    ],
+    docUrl: 'https://vuejs.org/api/built-in-directives.html#v-html',
+    since: 'Vue 2.0'
+  },
+
+  'v-text': {
+    signature: 'v-text="expression"',
+    description: `**v-text** は要素の textContent を更新します。
+
+mustache 補間 \`{{ }}\` と同等ですが、要素の内容全体を置き換えます。
+
+部分的な更新が必要な場合は mustache 補間を使用してください。`,
+    examples: [
+      `<span v-text="message"></span>
+<!-- 以下と同等 -->
+<span>{{ message }}</span>`
+    ],
+    docUrl: 'https://vuejs.org/api/built-in-directives.html#v-text',
+    since: 'Vue 2.0'
   }
 };
 
@@ -535,6 +898,7 @@ function configureMonaco() {
     keywords: ['v-if', 'v-else', 'v-else-if', 'v-for', 'v-show', 'v-model', 'v-bind', 'v-on', 'v-slot', 'v-pre', 'v-once', 'v-memo', 'v-cloak'],
     tokenizer: {
       root: [
+        [/<!--/, { token: 'comment', next: '@htmlComment' }],
         [/<script\s+setup\s+vapor[^>]*>/, { token: 'tag', next: '@script' }],
         [/<script\s+setup[^>]*>/, { token: 'tag', next: '@script' }],
         [/<script[^>]*>/, { token: 'tag', next: '@script' }],
@@ -555,9 +919,14 @@ function configureMonaco() {
       ],
       template: [
         [/<\/template>/, { token: 'tag', next: '@pop' }],
+        [/<!--/, { token: 'comment', next: '@htmlComment' }],
         [/\{\{/, { token: 'delimiter.bracket', next: '@interpolation' }],
         [/<\/?[\w-]+/, { token: 'tag', next: '@tag' }],
         [/./, ''],
+      ],
+      htmlComment: [
+        [/-->/, { token: 'comment', next: '@pop' }],
+        [/./, 'comment'],
       ],
       interpolation: [
         [/\}\}/, { token: 'delimiter.bracket', next: '@pop' }],
@@ -586,6 +955,7 @@ function configureMonaco() {
       ],
       style: [
         [/<\/style>/, { token: 'tag', next: '@pop' }],
+        [/\/\*/, { token: 'comment', next: '@cssComment' }],
         [/[\w-]+(?=\s*:)/, 'attribute.name'],
         [/:/, 'delimiter'],
         [/[{}]/, 'delimiter.bracket'],
@@ -595,6 +965,10 @@ function configureMonaco() {
         [/\d+[\w%]*/, 'number'],
         [/[\w-]+/, 'attribute.value'],
         [/./, ''],
+      ],
+      cssComment: [
+        [/\*\//, { token: 'comment', next: '@pop' }],
+        [/./, 'comment'],
       ],
     },
   });
@@ -683,6 +1057,60 @@ function configureMonaco() {
   // Register hover provider for Vue APIs
   monaco.languages.registerHoverProvider('vue', {
     provideHover: (model, position) => {
+      const lineContent = model.getLineContent(position.lineNumber);
+
+      // Check for directives (v-if, v-for, @click, :class, etc.)
+      // Look for directive patterns around the cursor position
+      const directivePatterns = [
+        // v-directive pattern
+        { regex: /v-[\w-]+/g, prefix: '' },
+        // @ shorthand for v-on
+        { regex: /@[\w.-]+/g, prefix: 'v-on' },
+        // : shorthand for v-bind
+        { regex: /:[\w.-]+/g, prefix: 'v-bind' },
+        // # shorthand for v-slot
+        { regex: /#[\w.-]+/g, prefix: 'v-slot' },
+      ];
+
+      for (const { regex, prefix } of directivePatterns) {
+        let match;
+        while ((match = regex.exec(lineContent)) !== null) {
+          const startCol = match.index + 1;
+          const endCol = startCol + match[0].length;
+
+          if (position.column >= startCol && position.column <= endCol) {
+            let directiveName = match[0];
+
+            // Handle shorthands
+            if (directiveName.startsWith('@')) {
+              directiveName = 'v-on';
+            } else if (directiveName.startsWith(':')) {
+              directiveName = 'v-bind';
+            } else if (directiveName.startsWith('#')) {
+              directiveName = 'v-slot';
+            } else {
+              // Extract base directive name (e.g., v-on:click -> v-on)
+              directiveName = directiveName.split(':')[0].split('.')[0];
+            }
+
+            const directiveDoc = VUE_DIRECTIVE_DOCS[directiveName];
+            if (directiveDoc) {
+              return {
+                range: {
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: startCol,
+                  endColumn: endCol,
+                },
+                contents: [
+                  { value: formatHoverContent(directiveDoc) }
+                ],
+              };
+            }
+          }
+        }
+      }
+
       const word = model.getWordAtPosition(position);
       if (!word) return null;
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue';
 import MonacoEditor from './MonacoEditor.vue';
-import type { WasmModule, LintResult, LintDiagnostic, LintRule } from '../wasm/index';
+import type { WasmModule, LintResult, LintDiagnostic, LintRule, LocaleInfo } from '../wasm/index';
 
 interface Diagnostic {
   message: string;
@@ -16,7 +16,26 @@ const props = defineProps<{
   compiler: WasmModule | null;
 }>();
 
-const LINT_PRESET = `<template>
+const LINT_PRESET = `<script setup lang="ts">
+import { ref } from 'vue'
+
+const items = ref([
+  { name: 'Item 1' },
+  { name: 'Item 2' },
+])
+
+const users = ref([
+  { id: 1, name: 'Alice', active: true },
+  { id: 2, name: 'Bob', active: false },
+])
+
+const products = ref([
+  { id: 1, name: 'Product A', inStock: true },
+  { id: 2, name: 'Product B', inStock: false },
+])
+<\/script>
+
+<template>
   <div class="container">
     <!-- This will trigger vue/require-v-for-key -->
     <ul>
@@ -37,25 +56,6 @@ const LINT_PRESET = `<template>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref } from 'vue'
-
-const items = ref([
-  { name: 'Item 1' },
-  { name: 'Item 2' },
-])
-
-const users = ref([
-  { id: 1, name: 'Alice', active: true },
-  { id: 2, name: 'Bob', active: false },
-])
-
-const products = ref([
-  { id: 1, name: 'Product A', inStock: true },
-  { id: 2, name: 'Product B', inStock: false },
-])
-<\/script>
-
 <style scoped>
 .container {
   padding: 20px;
@@ -74,6 +74,43 @@ const lintTime = ref<number | null>(null);
 const enabledRules = ref<Set<string>>(new Set());
 const severityOverrides = ref<Map<string, 'error' | 'warning' | 'off'>>(new Map());
 const STORAGE_KEY = 'vize-patina-rules-config';
+const LOCALE_STORAGE_KEY = 'vize-patina-locale';
+
+// Locale state
+const locales = ref<LocaleInfo[]>([
+  { code: 'en', name: 'English' },
+  { code: 'ja', name: '日本語' },
+  { code: 'zh', name: '中文' },
+]);
+const currentLocale = ref<'en' | 'ja' | 'zh'>('en');
+
+// Load saved locale preference from localStorage
+function loadLocaleConfig() {
+  try {
+    const saved = localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (saved && ['en', 'ja', 'zh'].includes(saved)) {
+      currentLocale.value = saved as 'en' | 'ja' | 'zh';
+    }
+  } catch (e) {
+    console.warn('Failed to load locale config:', e);
+  }
+}
+
+// Save locale preference to localStorage
+function saveLocaleConfig() {
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, currentLocale.value);
+  } catch (e) {
+    console.warn('Failed to save locale config:', e);
+  }
+}
+
+// Change locale
+function setLocale(locale: 'en' | 'ja' | 'zh') {
+  currentLocale.value = locale;
+  saveLocaleConfig();
+  lint();
+}
 
 // Load saved rule configuration from localStorage
 function loadRuleConfig() {
@@ -227,6 +264,7 @@ async function lint() {
       filename: 'example.vue',
       enabledRules: Array.from(enabledRules.value),
       severityOverrides: Object.fromEntries(severityOverrides.value),
+      locale: currentLocale.value,
     });
     lintResult.value = result;
     lintTime.value = performance.now() - startTime;
@@ -277,6 +315,7 @@ watch(
 );
 
 onMounted(() => {
+  loadLocaleConfig();
   loadRuleConfig();
   if (props.compiler) {
     loadRules();
@@ -306,13 +345,22 @@ onMounted(() => {
             {{ lintTime.toFixed(4) }}ms
           </span>
         </h2>
-        <div class="summary" v-if="lintResult">
-          <span :class="['count', { 'has-errors': errorCount > 0 }]">
-            {{ errorCount }} error{{ errorCount !== 1 ? 's' : '' }}
-          </span>
-          <span :class="['count', { 'has-warnings': warningCount > 0 }]">
-            {{ warningCount }} warning{{ warningCount !== 1 ? 's' : '' }}
-          </span>
+        <div class="header-controls">
+          <div class="summary" v-if="lintResult">
+            <span :class="['count', { 'has-errors': errorCount > 0 }]">
+              {{ errorCount }} error{{ errorCount !== 1 ? 's' : '' }}
+            </span>
+            <span :class="['count', { 'has-warnings': warningCount > 0 }]">
+              {{ warningCount }} warning{{ warningCount !== 1 ? 's' : '' }}
+            </span>
+          </div>
+          <div class="locale-selector">
+            <select v-model="currentLocale" @change="setLocale(currentLocale)">
+              <option v-for="locale in locales" :key="locale.code" :value="locale.code">
+                {{ locale.name }}
+              </option>
+            </select>
+          </div>
         </div>
         <div class="tabs">
           <button
@@ -495,9 +543,29 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .summary {
   display: flex;
   gap: 0.75rem;
+}
+
+.locale-selector select {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.locale-selector select:hover {
+  border-color: var(--border-secondary);
 }
 
 .count {

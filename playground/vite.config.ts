@@ -6,7 +6,9 @@ import topLevelAwait from "vite-plugin-top-level-await";
 // Toggle between @vitejs/plugin-vue and vite-plugin-vize
 // In CI (production build), use official Vue compiler for stability
 // In development, try to use Vize for testing
-const USE_VIZE = process.env.CI !== "true";
+// FIXME: Temporarily disabled Vize due to template literal compilation bug
+// Set USE_VIZE=true env var to enable Vize compiler
+const USE_VIZE = process.env.USE_VIZE === "true";
 
 async function getVuePlugin() {
   if (USE_VIZE) {

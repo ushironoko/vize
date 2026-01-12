@@ -74,12 +74,12 @@ impl Rule for RequireVForKey {
 
         if !has_key {
             ctx.error_with_help(
-                format!(
-                    "Elements in iteration expect to have 'v-bind:key' directives. Element: <{}>",
-                    element.tag
+                ctx.t_fmt(
+                    "vue/require-v-for-key.message",
+                    &[("tag", element.tag.as_str())],
                 ),
                 &directive.loc,
-                "Add a `:key` attribute with a unique identifier for each item",
+                ctx.t("vue/require-v-for-key.help"),
             );
         }
     }

@@ -8,7 +8,18 @@ const props = defineProps<{
   compiler: WasmModule | null;
 }>();
 
-const GLYPH_PRESET = `<script setup lang="ts">
+const GLYPH_PRESET = `<template>
+<div class="container">
+<h1>{{ count }}</h1>
+<p>Doubled: {{ doubled }}</p>
+<div class="buttons">
+<button @click="decrement">-1</button>
+<button @click="increment">+1</button>
+</div>
+</div>
+</template>
+
+<script setup lang="ts">
 import {ref,computed,watch} from 'vue'
 
 const count=ref(0)
@@ -21,17 +32,6 @@ watch(count,(newVal,oldVal)=>{
 console.log(\`Count changed from \${oldVal} to \${newVal}\`)
 })
 <\/script>
-
-<template>
-<div class="container">
-<h1>{{ count }}</h1>
-<p>Doubled: {{ doubled }}</p>
-<div class="buttons">
-<button @click="decrement">-1</button>
-<button @click="increment">+1</button>
-</div>
-</div>
-</template>
 
 <style scoped>
 .container{padding:20px;background:#f0f0f0}

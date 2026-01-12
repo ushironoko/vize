@@ -134,6 +134,13 @@ export interface LintOptions {
   enabledRules?: string[];
   /** Override severity for specific rules */
   severityOverrides?: Record<string, 'error' | 'warning' | 'off'>;
+  /** Locale for i18n messages (default: 'en') */
+  locale?: 'en' | 'ja' | 'zh';
+}
+
+export interface LocaleInfo {
+  code: string;
+  name: string;
 }
 
 export interface LintDiagnostic {
@@ -193,6 +200,7 @@ export interface WasmModule {
   lintTemplate: (source: string, options: LintOptions) => LintResult;
   lintSfc: (source: string, options: LintOptions) => LintResult;
   getLintRules: () => LintRule[];
+  getLocales: () => LocaleInfo[];
   // Glyph (Formatter) functions
   formatSfc: (source: string, options: FormatOptions) => FormatResult;
   formatTemplate: (source: string, options: FormatOptions) => FormatResult;
@@ -1116,6 +1124,57 @@ function createMockModule(): WasmModule {
         category: 'Script Setup',
         fixable: false,
         defaultSeverity: 'warning',
+      },
+
+      // Vapor mode rules
+      {
+        name: 'vapor/no-vue-lifecycle-events',
+        description: 'Disallow @vue:xxx per-element lifecycle events in Vapor mode. Vapor components should use lifecycle hooks (onMounted, onUnmounted, etc.) instead.',
+        category: 'Vapor',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vapor/no-suspense',
+        description: 'Warn about <Suspense> usage in Vapor-only applications. Suspense only works when Vapor components render inside VDOM Suspense.',
+        category: 'Vapor',
+        fixable: false,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vapor/prefer-static-class',
+        description: 'Prefer static class over dynamic class binding for better performance in Vapor mode. Use :class only when necessary.',
+        category: 'Vapor',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vapor/no-inline-template',
+        description: 'Disallow inline-template attribute in Vapor mode. Use slot or component composition instead.',
+        category: 'Vapor',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vapor/require-vapor-attribute',
+        description: 'Suggest adding the vapor attribute to <script setup> blocks for Vapor mode compilation.',
+        category: 'Vapor',
+        fixable: true,
+        defaultSeverity: 'warning',
+      },
+      {
+        name: 'vapor/no-options-api',
+        description: 'Disallow Options API patterns in Vapor components. Vapor only supports Composition API.',
+        category: 'Vapor',
+        fixable: false,
+        defaultSeverity: 'error',
+      },
+      {
+        name: 'vapor/no-get-current-instance',
+        description: 'Disallow getCurrentInstance() calls in Vapor components. getCurrentInstance() returns null in Vapor mode.',
+        category: 'Vapor',
+        fixable: false,
+        defaultSeverity: 'error',
       },
     ];
   };
