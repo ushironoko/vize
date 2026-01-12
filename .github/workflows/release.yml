@@ -136,6 +136,10 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
+      - name: Setup Zig
+        if: contains(matrix.settings.build, '--zig')
+        uses: mlugg/setup-zig@v1
+
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
