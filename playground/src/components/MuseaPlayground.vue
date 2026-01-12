@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import MonacoEditor from './MonacoEditor.vue';
+
+interface Diagnostic {
+  message: string;
+  startLine: number;
+  startColumn: number;
+  endLine?: number;
+  endColumn?: number;
+  severity: 'error' | 'warning' | 'info';
+}
 import CodeHighlight from './CodeHighlight.vue';
 import type { WasmModule, ArtDescriptor, CsfOutput } from '../wasm/index';
 
@@ -35,14 +44,68 @@ const ART_PRESET = `<art
 <script setup lang="ts">
 import Button from './Button.vue'
 <\/script>
+
+<style>
+:root {
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-secondary: #6b7280;
+  --color-secondary-hover: #4b5563;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-text: #1f2937;
+  --color-text-muted: #6b7280;
+  --color-background: #ffffff;
+  --color-border: #e5e7eb;
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --font-size-sm: 12px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+}
+<\/style>
 `;
 
 const source = ref(ART_PRESET);
 const parsedArt = ref<ArtDescriptor | null>(null);
 const csfOutput = ref<CsfOutput | null>(null);
 const error = ref<string | null>(null);
-const activeTab = ref<'parsed' | 'csf' | 'variants'>('parsed');
+const diagnostics = ref<Diagnostic[]>([]);
+type TabType = 'parsed' | 'csf' | 'variants';
+const validTabs: TabType[] = ['parsed', 'csf', 'variants'];
+
+function getTabFromUrl(): TabType {
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab');
+  if (tab && validTabs.includes(tab as TabType)) {
+    return tab as TabType;
+  }
+  return 'parsed';
+}
+
+function setTabToUrl(tab: TabType) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', tab);
+  window.history.replaceState({}, '', url.toString());
+}
+
+const activeTab = ref<TabType>(getTabFromUrl());
 const compileTime = ref<number | null>(null);
+
+// Sync tab to URL
+watch(activeTab, (tab) => {
+  setTabToUrl(tab);
+});
 
 const variantCount = computed(() => parsedArt.value?.variants.length ?? 0);
 
@@ -59,20 +122,34 @@ const designTokens = computed((): DesignToken[] => {
   const tokens: DesignToken[] = [];
   const cssVarRegex = /--([a-zA-Z0-9-]+)\s*:\s*([^;]+)/g;
 
-  // Extract from styles array if available
+  // Try to extract from styles array first
   const styles = parsedArt.value.styles || [];
-  for (const style of styles) {
-    const content = style.content || '';
-    let match;
-    while ((match = cssVarRegex.exec(content)) !== null) {
-      const name = `--${match[1]}`;
-      const value = match[2].trim();
-      tokens.push({
-        name,
-        value,
-        type: isColorValue(value) ? 'color' : isSizeValue(value) ? 'size' : 'other',
-      });
+  let styleContent = '';
+
+  if (styles.length > 0) {
+    // Use styles from parsed result
+    for (const style of styles) {
+      styleContent += (style.content || '') + '\n';
     }
+  } else {
+    // Fallback: extract style content directly from source
+    const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/g;
+    let styleMatch;
+    while ((styleMatch = styleRegex.exec(source.value)) !== null) {
+      styleContent += styleMatch[1] + '\n';
+    }
+  }
+
+  // Extract CSS variables from style content
+  let match;
+  while ((match = cssVarRegex.exec(styleContent)) !== null) {
+    const name = `--${match[1]}`;
+    const value = match[2].trim();
+    tokens.push({
+      name,
+      value,
+      type: isColorValue(value) ? 'color' : isSizeValue(value) ? 'size' : 'other',
+    });
   }
 
   return tokens;
@@ -99,6 +176,7 @@ async function compile() {
 
   const startTime = performance.now();
   error.value = null;
+  diagnostics.value = [];
 
   try {
     // Parse Art file
@@ -115,9 +193,23 @@ async function compile() {
 
     compileTime.value = performance.now() - startTime;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    const message = e instanceof Error ? e.message : String(e);
+    error.value = message;
     parsedArt.value = null;
     csfOutput.value = null;
+
+    // Parse line info from error message if available
+    const lineMatch = message.match(/line\s*(\d+)/i);
+    const colMatch = message.match(/col(?:umn)?\s*(\d+)/i);
+    const line = lineMatch ? parseInt(lineMatch[1], 10) : 1;
+    const col = colMatch ? parseInt(colMatch[1], 10) : 1;
+
+    diagnostics.value = [{
+      message,
+      startLine: line,
+      startColumn: col,
+      severity: 'error',
+    }];
   }
 }
 
@@ -150,7 +242,7 @@ watch(
         </div>
       </div>
       <div class="editor-container">
-        <MonacoEditor v-model="source" language="vue" />
+        <MonacoEditor v-model="source" language="vue" :diagnostics="diagnostics" />
       </div>
     </div>
 
@@ -211,7 +303,7 @@ watch(
                 <span class="label">Category</span>
                 <span class="value">{{ parsedArt.metadata.category }}</span>
               </div>
-              <div v-if="parsedArt.metadata.tags.length" class="metadata-item">
+              <div v-if="parsedArt.metadata.tags?.length" class="metadata-item">
                 <span class="label">Tags</span>
                 <span class="value">
                   <span

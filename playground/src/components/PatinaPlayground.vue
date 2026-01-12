@@ -3,6 +3,15 @@ import { ref, watch, computed, onMounted } from 'vue';
 import MonacoEditor from './MonacoEditor.vue';
 import type { WasmModule, LintResult, LintDiagnostic, LintRule } from '../wasm/index';
 
+interface Diagnostic {
+  message: string;
+  startLine: number;
+  startColumn: number;
+  endLine?: number;
+  endColumn?: number;
+  severity: 'error' | 'warning' | 'info';
+}
+
 const props = defineProps<{
   compiler: WasmModule | null;
 }>();
@@ -63,6 +72,32 @@ const lintTime = ref<number | null>(null);
 
 const errorCount = computed(() => lintResult.value?.errorCount ?? 0);
 const warningCount = computed(() => lintResult.value?.warningCount ?? 0);
+
+// Calculate template start line offset for correct diagnostic positioning
+// The extracted content includes the newline after <template>, so no +1 needed
+const templateLineOffset = computed(() => {
+  const lines = source.value.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith('<template')) {
+      return i; // Line number (0-indexed) where <template> is
+    }
+  }
+  return 0;
+});
+
+// Convert lint diagnostics to Monaco markers
+const diagnostics = computed((): Diagnostic[] => {
+  if (!lintResult.value?.diagnostics) return [];
+  const offset = templateLineOffset.value;
+  return lintResult.value.diagnostics.map(d => ({
+    message: `[${d.rule}] ${d.message}`,
+    startLine: d.location.start.line + offset,
+    startColumn: d.location.start.column,
+    endLine: (d.location.end?.line ?? d.location.start.line) + offset,
+    endColumn: d.location.end?.column ?? d.location.start.column + 1,
+    severity: d.severity,
+  }));
+});
 
 // Rule filtering
 const selectedCategory = ref<string>('all');
@@ -157,7 +192,7 @@ onMounted(() => {
         </div>
       </div>
       <div class="editor-container">
-        <MonacoEditor v-model="source" language="vue" />
+        <MonacoEditor v-model="source" language="vue" :diagnostics="diagnostics" />
       </div>
     </div>
 

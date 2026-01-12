@@ -46,9 +46,19 @@ const VUE_REACTIVITY_APIS = [
   { label: 'toRefs', insertText: 'toRefs($1)', detail: 'Convert reactive to refs' },
 ];
 
+export interface Diagnostic {
+  message: string;
+  startLine: number;
+  startColumn: number;
+  endLine?: number;
+  endColumn?: number;
+  severity: 'error' | 'warning' | 'info';
+}
+
 const props = defineProps<{
   modelValue: string;
   language: string;
+  diagnostics?: Diagnostic[];
 }>();
 
 const emit = defineEmits<{
@@ -354,6 +364,33 @@ watch(() => props.language, (newLanguage) => {
     }
   }
 });
+
+// Update diagnostics markers
+watch(() => props.diagnostics, (diagnostics) => {
+  if (!editorInstance.value) return;
+  const model = editorInstance.value.getModel();
+  if (!model) return;
+
+  if (!diagnostics || diagnostics.length === 0) {
+    monaco.editor.setModelMarkers(model, 'vize', []);
+    return;
+  }
+
+  const markers: monaco.editor.IMarkerData[] = diagnostics.map(d => ({
+    severity: d.severity === 'error'
+      ? monaco.MarkerSeverity.Error
+      : d.severity === 'warning'
+        ? monaco.MarkerSeverity.Warning
+        : monaco.MarkerSeverity.Info,
+    message: d.message,
+    startLineNumber: d.startLine,
+    startColumn: d.startColumn,
+    endLineNumber: d.endLine ?? d.startLine,
+    endColumn: d.endColumn ?? d.startColumn + 1,
+  }));
+
+  monaco.editor.setModelMarkers(model, 'vize', markers);
+}, { immediate: true });
 </script>
 
 <template>

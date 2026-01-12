@@ -86,8 +86,16 @@ watch(() => [props.code, props.language], highlight);
   font-family: inherit;
 }
 
+.code-highlight :deep(.line) {
+  display: block;
+}
+
+.code-highlight.with-line-numbers :deep(code) {
+  counter-reset: line;
+}
+
 .code-highlight.with-line-numbers :deep(.line) {
-  display: flex;
+  display: block;
 }
 
 .code-highlight.with-line-numbers :deep(.line::before) {
@@ -100,9 +108,5 @@ watch(() => [props.code, props.language], highlight);
   text-align: right;
   margin-right: 16px;
   font-size: 12px;
-}
-
-.code-highlight.with-line-numbers :deep(code) {
-  counter-reset: line;
 }
 </style>

@@ -107,6 +107,11 @@ export interface ArtVariant {
   args?: Record<string, unknown>;
 }
 
+export interface ArtStyleBlock {
+  content: string;
+  scoped: boolean;
+}
+
 export interface ArtDescriptor {
   filename: string;
   metadata: ArtMetadata;
@@ -114,6 +119,7 @@ export interface ArtDescriptor {
   hasScriptSetup: boolean;
   hasScript: boolean;
   styleCount: number;
+  styles: ArtStyleBlock[];
 }
 
 export interface CsfOutput {
@@ -510,6 +516,17 @@ function createMockModule(): WasmModule {
       });
     }
 
+    // Extract style blocks
+    const styleRegex = /<style(\s+scoped)?>([\s\S]*?)<\/style>/g;
+    const styles: ArtStyleBlock[] = [];
+    let styleMatch;
+    while ((styleMatch = styleRegex.exec(source)) !== null) {
+      styles.push({
+        content: styleMatch[2],
+        scoped: !!styleMatch[1],
+      });
+    }
+
     return {
       filename: options.filename || 'anonymous.art.vue',
       metadata: {
@@ -521,9 +538,10 @@ function createMockModule(): WasmModule {
         status: 'ready',
       },
       variants,
-      hasScriptSetup: source.includes('<script setup'),
-      hasScript: source.includes('<script') && !source.includes('<script setup'),
-      styleCount: (source.match(/<style/g) || []).length,
+      hasScriptSetup: source.includes('\x3Cscript setup'),
+      hasScript: source.includes('\x3Cscript') && !source.includes('\x3Cscript setup'),
+      styleCount: styles.length,
+      styles,
     };
   };
 
@@ -560,43 +578,80 @@ function createMockModule(): WasmModule {
     };
   };
 
+  // Helper to calculate line/column from character offset
+  function getPositionFromOffset(source: string, offset: number): { line: number; column: number } {
+    const lines = source.substring(0, offset).split('\n');
+    return {
+      line: lines.length,
+      column: lines[lines.length - 1].length + 1, // 1-indexed column
+    };
+  }
+
   // Mock lint functions
   const mockLintTemplate = (source: string, options: LintOptions): LintResult => {
     const diagnostics: LintDiagnostic[] = [];
     const filename = options.filename || 'anonymous.vue';
 
     // Simple mock lint rules
-    // Check for v-for without :key
-    const vForMatch = source.match(/v-for="[^"]+"/g);
-    const keyMatch = source.match(/:key="[^"]+"/g);
-    if (vForMatch && (!keyMatch || keyMatch.length < vForMatch.length)) {
-      const match = source.match(/v-for="[^"]+"/);
-      if (match) {
+    // Check for v-for without :key - find elements with v-for but no :key on same element
+    const vForRegex = /<(\w+)[^>]*v-for="[^"]+"/g;
+    let vForMatch;
+    while ((vForMatch = vForRegex.exec(source)) !== null) {
+      // Check if this element has a :key
+      const elementEnd = source.indexOf('>', vForMatch.index);
+      const elementStr = source.substring(vForMatch.index, elementEnd + 1);
+      if (!elementStr.includes(':key=')) {
+        const startPos = getPositionFromOffset(source, vForMatch.index);
+        const endOffset = vForMatch.index + vForMatch[0].length;
+        const endPos = getPositionFromOffset(source, endOffset);
         diagnostics.push({
           rule: 'vue/require-v-for-key',
           severity: 'error',
-          message: 'Elements in iteration expect to have \'v-bind:key\' directive',
+          message: `Elements in iteration expect to have 'v-bind:key' directives. Element: <${vForMatch[1]}>`,
           location: {
-            start: { line: 1, column: match.index || 0, offset: match.index || 0 },
-            end: { line: 1, column: (match.index || 0) + match[0].length, offset: (match.index || 0) + match[0].length },
+            start: { line: startPos.line, column: startPos.column, offset: vForMatch.index },
+            end: { line: endPos.line, column: endPos.column, offset: endOffset },
           },
-          help: 'Add a unique :key attribute to the element with v-for',
+          help: 'Add a `:key` attribute with a unique identifier for each item',
         });
       }
     }
 
     // Check for v-if with v-for on same element
-    const vIfWithVFor = source.match(/<[^>]*v-for="[^"]*"[^>]*v-if="[^"]*"/);
-    if (vIfWithVFor) {
+    const vIfWithVForRegex = /<(\w+)[^>]*v-for="[^"]*"[^>]*v-if="[^"]*"/g;
+    let vIfWithVFor;
+    while ((vIfWithVFor = vIfWithVForRegex.exec(source)) !== null) {
+      const startPos = getPositionFromOffset(source, vIfWithVFor.index);
+      const endOffset = vIfWithVFor.index + vIfWithVFor[0].length;
+      const endPos = getPositionFromOffset(source, endOffset);
       diagnostics.push({
         rule: 'vue/no-use-v-if-with-v-for',
         severity: 'warning',
-        message: 'This v-if should be moved to a wrapper element',
+        message: 'Avoid using `v-if` with `v-for` on the same element. Use a computed property to filter the list instead.',
         location: {
-          start: { line: 1, column: vIfWithVFor.index || 0, offset: vIfWithVFor.index || 0 },
-          end: { line: 1, column: (vIfWithVFor.index || 0) + vIfWithVFor[0].length, offset: (vIfWithVFor.index || 0) + vIfWithVFor[0].length },
+          start: { line: startPos.line, column: startPos.column, offset: vIfWithVFor.index },
+          end: { line: endPos.line, column: endPos.column, offset: endOffset },
         },
-        help: 'Move v-if to a <template> wrapper or use computed property to filter items',
+        help: 'Use a computed property to pre-filter the list, e.g., `computed: { activeItems() { return items.filter(i => i.active) } }`',
+      });
+    }
+
+    // Check for :key on <template> elements
+    const templateKeyRegex = /<template[^>]*:key="[^"]*"/g;
+    let templateKey;
+    while ((templateKey = templateKeyRegex.exec(source)) !== null) {
+      const startPos = getPositionFromOffset(source, templateKey.index);
+      const endOffset = templateKey.index + templateKey[0].length;
+      const endPos = getPositionFromOffset(source, endOffset);
+      diagnostics.push({
+        rule: 'vue/no-template-key',
+        severity: 'error',
+        message: '`<template>` cannot have a `:key` attribute',
+        location: {
+          start: { line: startPos.line, column: startPos.column, offset: templateKey.index },
+          end: { line: endPos.line, column: endPos.column, offset: endOffset },
+        },
+        help: 'Move the `:key` attribute to a real element inside the template',
       });
     }
 

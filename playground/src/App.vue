@@ -40,7 +40,7 @@ function mapToObject(value: unknown): unknown {
   return value;
 }
 
-type TabType = 'code' | 'ast' | 'helpers' | 'sfc' | 'css' | 'bindings';
+type TabType = 'code' | 'ast' | 'bindings' | 'tokens' | 'helpers' | 'sfc' | 'css';
 
 // State
 const inputMode = ref<InputMode>('sfc');
@@ -126,6 +126,251 @@ const isTypeScript = computed(() => {
   const lang = scriptSetup?.lang || script?.lang;
   return lang === 'ts' || lang === 'tsx';
 });
+
+// Computed: bindings summary by type
+const bindingsSummary = computed(() => {
+  const bindings = sfcResult.value?.script?.bindings?.bindings;
+  if (!bindings) return {};
+  const summary: Record<string, number> = {};
+  for (const type of Object.values(bindings)) {
+    summary[type as string] = (summary[type as string] || 0) + 1;
+  }
+  return summary;
+});
+
+// Computed: grouped bindings by type
+const groupedBindings = computed(() => {
+  const bindings = sfcResult.value?.script?.bindings?.bindings;
+  if (!bindings) return {};
+  const groups: Record<string, string[]> = {};
+  for (const [name, type] of Object.entries(bindings)) {
+    if (!groups[type as string]) groups[type as string] = [];
+    groups[type as string].push(name);
+  }
+  return groups;
+});
+
+// Helper: get icon for binding type
+function getBindingIcon(type: string): string {
+  const icons: Record<string, string> = {
+    'setup-const': 'C',
+    'setup-let': 'L',
+    'setup-reactive-const': 'R',
+    'setup-maybe-ref': '?',
+    'setup-ref': 'r',
+    'props': 'P',
+    'props-aliased': 'A',
+    'data': 'D',
+    'options': 'O',
+  };
+  return icons[type] || type[0]?.toUpperCase() || '?';
+}
+
+// Helper: get label for binding type
+function getBindingLabel(type: string): string {
+  const labels: Record<string, string> = {
+    'setup-const': 'Constants',
+    'setup-let': 'Let Variables',
+    'setup-reactive-const': 'Reactive',
+    'setup-maybe-ref': 'Maybe Ref',
+    'setup-ref': 'Refs',
+    'props': 'Props',
+    'props-aliased': 'Aliased Props',
+    'data': 'Data',
+    'options': 'Options',
+  };
+  return labels[type] || type;
+}
+
+// Lexical tokens extraction
+interface LexicalToken {
+  type: 'tag-open' | 'tag-close' | 'tag-self-close' | 'attribute' | 'text' | 'directive' | 'interpolation' | 'comment';
+  name?: string;
+  value?: string;
+  line: number;
+  column: number;
+  raw: string;
+}
+
+const lexicalTokens = computed((): LexicalToken[] => {
+  const tokens: LexicalToken[] = [];
+  const src = source.value;
+  const lines = src.split('\n');
+
+  let lineNo = 1;
+  let inTemplate = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Track template section
+    if (trimmed.startsWith('<template')) inTemplate = true;
+    if (trimmed === '</template>') inTemplate = false;
+
+    // Skip empty lines
+    if (!trimmed) {
+      lineNo++;
+      continue;
+    }
+
+    // Comment detection
+    if (trimmed.startsWith('<!--')) {
+      tokens.push({
+        type: 'comment',
+        value: trimmed.replace(/<!--(.*)-->/, '$1').trim(),
+        line: lineNo,
+        column: line.indexOf('<!--') + 1,
+        raw: trimmed,
+      });
+      lineNo++;
+      continue;
+    }
+
+    // Interpolation detection {{ }}
+    const interpRegex = /\{\{([^}]+)\}\}/g;
+    let interpMatch;
+    while ((interpMatch = interpRegex.exec(line)) !== null) {
+      tokens.push({
+        type: 'interpolation',
+        value: interpMatch[1].trim(),
+        line: lineNo,
+        column: interpMatch.index + 1,
+        raw: interpMatch[0],
+      });
+    }
+
+    // Directive detection (v-*, @*, :*)
+    const directiveRegex = /(v-[\w-]+|@[\w.-]+|:[\w.-]+)(?:="([^"]*)")?/g;
+    let dirMatch;
+    while ((dirMatch = directiveRegex.exec(line)) !== null) {
+      tokens.push({
+        type: 'directive',
+        name: dirMatch[1],
+        value: dirMatch[2] || '',
+        line: lineNo,
+        column: dirMatch.index + 1,
+        raw: dirMatch[0],
+      });
+    }
+
+    // Self-closing tag
+    const selfCloseMatch = trimmed.match(/^<([\w-]+)([^>]*)\s*\/>/);
+    if (selfCloseMatch) {
+      tokens.push({
+        type: 'tag-self-close',
+        name: selfCloseMatch[1],
+        line: lineNo,
+        column: line.indexOf('<') + 1,
+        raw: selfCloseMatch[0],
+      });
+      lineNo++;
+      continue;
+    }
+
+    // Opening tag
+    const openMatch = trimmed.match(/^<([\w-]+)([^>]*)>/);
+    if (openMatch) {
+      tokens.push({
+        type: 'tag-open',
+        name: openMatch[1],
+        line: lineNo,
+        column: line.indexOf('<') + 1,
+        raw: openMatch[0],
+      });
+      // Extract attributes (non-directive)
+      const attrRegex = /\s([\w-]+)(?:="([^"]*)")?/g;
+      let attrMatch;
+      while ((attrMatch = attrRegex.exec(openMatch[2])) !== null) {
+        if (!attrMatch[1].startsWith('v-') && !attrMatch[1].startsWith('@') && !attrMatch[1].startsWith(':')) {
+          tokens.push({
+            type: 'attribute',
+            name: attrMatch[1],
+            value: attrMatch[2] ?? 'true',
+            line: lineNo,
+            column: line.indexOf(attrMatch[0]) + 1,
+            raw: attrMatch[0].trim(),
+          });
+        }
+      }
+      lineNo++;
+      continue;
+    }
+
+    // Closing tag
+    const closeMatch = trimmed.match(/^<\/([\w-]+)>/);
+    if (closeMatch) {
+      tokens.push({
+        type: 'tag-close',
+        name: closeMatch[1],
+        line: lineNo,
+        column: line.indexOf('<') + 1,
+        raw: closeMatch[0],
+      });
+    }
+
+    lineNo++;
+  }
+
+  return tokens;
+});
+
+const tokensByType = computed(() => {
+  const grouped: Record<string, LexicalToken[]> = {};
+  for (const token of lexicalTokens.value) {
+    if (!grouped[token.type]) grouped[token.type] = [];
+    grouped[token.type].push(token);
+  }
+  return grouped;
+});
+
+const tokenStats = computed(() => ({
+  total: lexicalTokens.value.length,
+  tags: (tokensByType.value['tag-open']?.length || 0) + (tokensByType.value['tag-close']?.length || 0) + (tokensByType.value['tag-self-close']?.length || 0),
+  directives: tokensByType.value['directive']?.length || 0,
+  interpolations: tokensByType.value['interpolation']?.length || 0,
+}));
+
+function getTokenTypeIcon(type: string): string {
+  const icons: Record<string, string> = {
+    'tag-open': '<>',
+    'tag-close': '</>',
+    'tag-self-close': '/>',
+    'attribute': 'A',
+    'directive': 'v',
+    'interpolation': '{ }',
+    'text': 'T',
+    'comment': '//',
+  };
+  return icons[type] || '?';
+}
+
+function getTokenTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    'tag-open': 'Opening Tags',
+    'tag-close': 'Closing Tags',
+    'tag-self-close': 'Self-Closing',
+    'attribute': 'Attributes',
+    'directive': 'Directives',
+    'interpolation': 'Interpolations',
+    'text': 'Text',
+    'comment': 'Comments',
+  };
+  return labels[type] || type;
+}
+
+function getTokenTypeColor(type: string): string {
+  const colors: Record<string, string> = {
+    'tag-open': '#61afef',
+    'tag-close': '#61afef',
+    'tag-self-close': '#61afef',
+    'attribute': '#d19a66',
+    'directive': '#c678dd',
+    'interpolation': '#98c379',
+    'text': '#abb2bf',
+    'comment': '#5c6370',
+  };
+  return colors[type] || '#abb2bf';
+}
 
 // Methods
 async function compile() {
@@ -400,11 +645,12 @@ onMounted(async () => {
           <div class="tabs">
             <button :class="['tab', { active: activeTab === 'code' }]" @click="activeTab = 'code'">Code</button>
             <button :class="['tab', { active: activeTab === 'ast' }]" @click="activeTab = 'ast'">AST</button>
+            <button v-if="inputMode === 'sfc'" :class="['tab', { active: activeTab === 'bindings' }]" @click="activeTab = 'bindings'">Bindings</button>
+            <button :class="['tab', { active: activeTab === 'tokens' }]" @click="activeTab = 'tokens'">Tokens ({{ tokenStats.total }})</button>
             <button :class="['tab', { active: activeTab === 'helpers' }]" @click="activeTab = 'helpers'">Helpers</button>
             <template v-if="inputMode === 'sfc'">
               <button :class="['tab', { active: activeTab === 'sfc' }]" @click="activeTab = 'sfc'">SFC</button>
               <button :class="['tab', { active: activeTab === 'css' }]" @click="activeTab = 'css'">CSS</button>
-              <button :class="['tab', { active: activeTab === 'bindings' }]" @click="activeTab = 'bindings'">Bindings</button>
             </template>
           </div>
         </div>
@@ -433,9 +679,6 @@ onMounted(async () => {
               <div class="code-actions">
                 <button @click="copyToClipboard(isTypeScript && codeViewMode === 'js' ? formattedJsCode : (formattedCode || output.code))" class="btn-ghost">Copy</button>
               </div>
-              <div v-if="sfcResult?.bindingMetadata" class="bindings-comment">
-                <CodeHighlight :code="'/* Analyzed bindings: ' + JSON.stringify(sfcResult.bindingMetadata, null, 2) + ' */'" language="javascript" />
-              </div>
               <CodeHighlight
                 v-if="isTypeScript && codeViewMode === 'js'"
                 :code="formattedJsCode"
@@ -458,8 +701,8 @@ onMounted(async () => {
 
             <!-- Helpers Tab -->
             <div v-else-if="activeTab === 'helpers'" class="helpers-output">
-              <h4>Runtime Helpers Used ({{ output.helpers.length }})</h4>
-              <ul v-if="output.helpers.length > 0" class="helpers-list">
+              <h4>Runtime Helpers Used ({{ output.helpers?.length ?? 0 }})</h4>
+              <ul v-if="output.helpers?.length > 0" class="helpers-list">
                 <li v-for="(helper, i) in output.helpers" :key="i" class="helper-item">
                   <span class="helper-name">{{ helper }}</span>
                 </li>
@@ -486,8 +729,8 @@ onMounted(async () => {
                 <CodeHighlight :code="sfcResult.descriptor.script.content" language="typescript" />
               </div>
 
-              <div v-if="sfcResult.descriptor.styles.length > 0" class="sfc-block">
-                <h5>Styles ({{ sfcResult.descriptor.styles.length }})</h5>
+              <div v-if="sfcResult.descriptor.styles?.length > 0" class="sfc-block">
+                <h5>Styles ({{ sfcResult.descriptor.styles?.length }})</h5>
                 <div v-for="(style, i) in sfcResult.descriptor.styles" :key="i" class="style-block">
                   <span class="style-meta">
                     <span v-if="style.scoped" class="badge">scoped</span>
@@ -522,7 +765,7 @@ onMounted(async () => {
                   <CodeHighlight :code="formattedCss || cssResult.code" language="css" show-line-numbers />
                 </div>
 
-                <div v-if="cssResult.cssVars.length > 0" class="css-vars">
+                <div v-if="cssResult.cssVars?.length > 0" class="css-vars">
                   <h5>CSS Variables (v-bind)</h5>
                   <ul class="helpers-list">
                     <li v-for="(v, i) in cssResult.cssVars" :key="i" class="helper-item">
@@ -531,7 +774,7 @@ onMounted(async () => {
                   </ul>
                 </div>
 
-                <div v-if="cssResult.errors.length > 0" class="css-errors">
+                <div v-if="cssResult.errors?.length > 0" class="css-errors">
                   <h5>Errors</h5>
                   <pre v-for="(err, i) in cssResult.errors" :key="i" class="error-message">{{ err }}</pre>
                 </div>
@@ -542,23 +785,113 @@ onMounted(async () => {
             <!-- Bindings Tab -->
             <div v-else-if="activeTab === 'bindings' && sfcResult?.script?.bindings" class="bindings-output">
               <h4>Script Setup Bindings</h4>
-              <table class="bindings-table">
-                <thead>
-                  <tr>
-                    <th>Variable</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(bindingType, varName) in sfcResult.script.bindings.bindings" :key="varName">
-                    <td class="var-name">{{ varName }}</td>
-                    <td class="binding-type"><span class="badge" :class="`badge-${bindingType}`">{{ bindingType }}</span></td>
-                  </tr>
-                </tbody>
-              </table>
+
+              <!-- Summary Cards -->
+              <div class="bindings-summary">
+                <div class="summary-card" v-for="(count, type) in bindingsSummary" :key="type">
+                  <span class="summary-count">{{ count }}</span>
+                  <span :class="['summary-type', `type-${type}`]">{{ type }}</span>
+                </div>
+              </div>
+
+              <!-- Grouped Bindings -->
+              <div class="bindings-groups">
+                <div
+                  v-for="(vars, type) in groupedBindings"
+                  :key="type"
+                  class="binding-group"
+                >
+                  <div :class="['group-header', `type-${type}`]">
+                    <span class="group-icon">{{ getBindingIcon(type) }}</span>
+                    <span class="group-title">{{ getBindingLabel(type) }}</span>
+                    <span class="group-count">{{ vars.length }}</span>
+                  </div>
+                  <div class="group-vars">
+                    <span
+                      v-for="v in vars"
+                      :key="v"
+                      :class="['var-chip', `type-${type}`]"
+                    >{{ v }}</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div v-else-if="activeTab === 'bindings'" class="bindings-output">
               <p class="no-bindings">No bindings information available</p>
+            </div>
+
+            <!-- Tokens Tab -->
+            <div v-else-if="activeTab === 'tokens'" class="tokens-output">
+              <!-- Token Statistics -->
+              <div class="token-stats">
+                <div class="stat-card">
+                  <span class="stat-value">{{ tokenStats.total }}</span>
+                  <span class="stat-label">Total</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-value">{{ tokenStats.tags }}</span>
+                  <span class="stat-label">Tags</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-value">{{ tokenStats.directives }}</span>
+                  <span class="stat-label">Directives</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-value">{{ tokenStats.interpolations }}</span>
+                  <span class="stat-label">Interpolations</span>
+                </div>
+              </div>
+
+              <!-- Token Stream -->
+              <h4>Token Stream</h4>
+              <div class="token-stream">
+                <div
+                  v-for="(token, i) in lexicalTokens"
+                  :key="i"
+                  class="token-item"
+                  :style="{ '--token-color': getTokenTypeColor(token.type) }"
+                >
+                  <span class="token-badge" :style="{ background: getTokenTypeColor(token.type) }">
+                    {{ getTokenTypeIcon(token.type) }}
+                  </span>
+                  <div class="token-content">
+                    <div class="token-main">
+                      <span v-if="token.name" class="token-name">{{ token.name }}</span>
+                      <span v-if="token.value" class="token-value-text">{{ token.value }}</span>
+                    </div>
+                    <span class="token-location">{{ token.line }}:{{ token.column }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Grouped by Type -->
+              <h4>By Type</h4>
+              <div class="token-groups">
+                <template v-for="(tokens, type) in tokensByType" :key="type">
+                  <div v-if="tokens.length > 0" class="token-group">
+                    <div class="group-header" :style="{ borderLeftColor: getTokenTypeColor(String(type)) }">
+                      <span class="group-icon" :style="{ background: getTokenTypeColor(String(type)) }">
+                        {{ getTokenTypeIcon(String(type)) }}
+                      </span>
+                      <span class="group-title">{{ getTokenTypeLabel(String(type)) }}</span>
+                      <span class="group-count">{{ tokens.length }}</span>
+                    </div>
+                    <div class="group-tokens">
+                      <span
+                        v-for="(token, i) in tokens.slice(0, 12)"
+                        :key="i"
+                        class="group-token-chip"
+                        :style="{ '--chip-color': getTokenTypeColor(String(type)) }"
+                      >
+                        {{ token.name || token.value?.slice(0, 25) || token.raw.slice(0, 25) }}
+                      </span>
+                      <span v-if="tokens.length > 12" class="more-indicator">
+                        +{{ tokens.length - 12 }} more
+                      </span>
+                    </div>
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
         </div>
