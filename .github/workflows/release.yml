@@ -151,11 +151,14 @@ jobs:
           path: npm/vize-native/*.node
           if-no-files-found: error
 
-  # Publish native packages to npm
+  # Publish native packages to npm (using Trusted Publishing / OIDC)
   release-npm-native:
     name: Release @vizejs/native to npm
     runs-on: ubuntu-latest
     needs: build-native
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -185,14 +188,15 @@ jobs:
 
       - name: Publish
         working-directory: npm/vize-native
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
-  # Build and publish WASM package
+  # Build and publish WASM package (using Trusted Publishing / OIDC)
   release-npm-wasm:
     name: Release @vizejs/wasm to npm
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -223,15 +227,16 @@ jobs:
 
       - name: Publish @vizejs/wasm
         working-directory: npm/vize-wasm
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
-  # Build and publish Vite plugin
+  # Build and publish Vite plugin (using Trusted Publishing / OIDC)
   release-npm-vite-plugin:
     name: Release @vizejs/vite-plugin to npm
     runs-on: ubuntu-latest
     needs: release-npm-native
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -253,9 +258,7 @@ jobs:
 
       - name: Publish @vizejs/vite-plugin
         working-directory: npm/vite-plugin-vize
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
   # Publish crates to crates.io (using Trusted Publishing)
   release-crates:
@@ -350,11 +353,14 @@ jobs:
             cli-artifacts/*.tar.gz
             cli-artifacts/*.zip
 
-  # Publish CLI npm package
+  # Publish CLI npm package (using Trusted Publishing / OIDC)
   release-npm-cli:
     name: Release vize CLI to npm
     runs-on: ubuntu-latest
     needs: create-github-release
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -369,6 +375,4 @@ jobs:
 
       - name: Publish vize CLI package
         working-directory: npm/vize
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
