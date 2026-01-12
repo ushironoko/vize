@@ -6,7 +6,9 @@ use crate::diagnostic::{LintDiagnostic, Severity};
 use std::borrow::Cow;
 use vize_carton::i18n::{t, t_fmt, Locale};
 use vize_carton::{Allocator, CompactString, FxHashMap, FxHashSet};
+use vize_croquis::AnalysisSummary;
 use vize_relief::ast::SourceLocation;
+use vize_relief::BindingType;
 
 /// Represents a disabled range for a specific rule or all rules
 #[derive(Debug, Clone)]
@@ -89,6 +91,8 @@ pub struct LintContext<'a> {
     line_offsets: Vec<u32>,
     /// Optional set of enabled rule names (if None, all rules are enabled)
     enabled_rules: Option<FxHashSet<String>>,
+    /// Optional semantic analysis from croquis
+    analysis: Option<&'a AnalysisSummary>,
 }
 
 impl<'a> LintContext<'a> {
@@ -126,7 +130,53 @@ impl<'a> LintContext<'a> {
             disabled_rules: FxHashMap::default(),
             line_offsets: Self::compute_line_offsets(source),
             enabled_rules: None,
+            analysis: None,
         }
+    }
+
+    /// Create a new lint context with semantic analysis
+    #[inline]
+    pub fn with_analysis(
+        allocator: &'a Allocator,
+        source: &'a str,
+        filename: &'a str,
+        analysis: &'a AnalysisSummary,
+    ) -> Self {
+        Self {
+            allocator,
+            source,
+            filename,
+            locale: Locale::default(),
+            diagnostics: Vec::with_capacity(Self::INITIAL_DIAGNOSTICS_CAPACITY),
+            current_rule: "",
+            element_stack: Vec::with_capacity(Self::INITIAL_STACK_CAPACITY),
+            scope_variables: FxHashSet::default(),
+            error_count: 0,
+            warning_count: 0,
+            disabled_all: Vec::new(),
+            disabled_rules: FxHashMap::default(),
+            line_offsets: Self::compute_line_offsets(source),
+            enabled_rules: None,
+            analysis: Some(analysis),
+        }
+    }
+
+    /// Set semantic analysis
+    #[inline]
+    pub fn set_analysis(&mut self, analysis: &'a AnalysisSummary) {
+        self.analysis = Some(analysis);
+    }
+
+    /// Get semantic analysis (if available)
+    #[inline]
+    pub fn analysis(&self) -> Option<&AnalysisSummary> {
+        self.analysis
+    }
+
+    /// Check if semantic analysis is available
+    #[inline]
+    pub fn has_analysis(&self) -> bool {
+        self.analysis.is_some()
     }
 
     /// Set enabled rules filter
@@ -451,5 +501,98 @@ impl<'a> LintContext<'a> {
     #[inline]
     pub fn warning_count(&self) -> usize {
         self.warning_count
+    }
+
+    // =========================================================================
+    // Semantic Analysis Helpers
+    // =========================================================================
+    // These methods leverage croquis AnalysisSummary when available.
+    // They provide fallback behavior when analysis is not available.
+
+    /// Check if a variable is defined (in any scope or script binding)
+    ///
+    /// Uses semantic analysis if available, otherwise falls back to
+    /// v-for variable tracking only.
+    #[inline]
+    pub fn is_variable_defined(&self, name: &str) -> bool {
+        // First check template-local scope (v-for variables)
+        if self.is_v_for_var(name) {
+            return true;
+        }
+
+        // Then check semantic analysis if available
+        if let Some(analysis) = &self.analysis {
+            return analysis.is_defined(name);
+        }
+
+        false
+    }
+
+    /// Get the binding type for a variable
+    ///
+    /// Returns None if analysis is not available or variable is not found.
+    #[inline]
+    pub fn get_binding_type(&self, name: &str) -> Option<BindingType> {
+        self.analysis.and_then(|a| a.get_binding_type(name))
+    }
+
+    /// Check if a name refers to a script-level binding
+    #[inline]
+    pub fn has_script_binding(&self, name: &str) -> bool {
+        self.analysis
+            .map(|a| a.bindings.contains(name))
+            .unwrap_or(false)
+    }
+
+    /// Check if a component is registered or imported
+    #[inline]
+    pub fn is_component_registered(&self, name: &str) -> bool {
+        self.analysis
+            .map(|a| a.is_component_registered(name))
+            .unwrap_or(false)
+    }
+
+    /// Check if a prop is defined via defineProps
+    #[inline]
+    pub fn has_prop(&self, name: &str) -> bool {
+        self.analysis
+            .map(|a| a.macros.props().iter().any(|p| p.name.as_str() == name))
+            .unwrap_or(false)
+    }
+
+    /// Check if an emit is defined via defineEmits
+    #[inline]
+    pub fn has_emit(&self, name: &str) -> bool {
+        self.analysis
+            .map(|a| a.macros.emits().iter().any(|e| e.name.as_str() == name))
+            .unwrap_or(false)
+    }
+
+    /// Check if a model is defined via defineModel
+    #[inline]
+    pub fn has_model(&self, name: &str) -> bool {
+        self.analysis
+            .map(|a| a.macros.models().iter().any(|m| m.name.as_str() == name))
+            .unwrap_or(false)
+    }
+
+    /// Check if the component uses async setup (top-level await)
+    #[inline]
+    pub fn is_async_setup(&self) -> bool {
+        self.analysis.map(|a| a.is_async()).unwrap_or(false)
+    }
+
+    /// Get all props defined in the component
+    pub fn get_props(&self) -> Vec<&str> {
+        self.analysis
+            .map(|a| a.macros.props().iter().map(|p| p.name.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get all emits defined in the component
+    pub fn get_emits(&self) -> Vec<&str> {
+        self.analysis
+            .map(|a| a.macros.emits().iter().map(|e| e.name.as_str()).collect())
+            .unwrap_or_default()
     }
 }

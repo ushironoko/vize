@@ -94,32 +94,13 @@ pub fn default_helper_alias(helper: RuntimeHelper) -> &'static str {
     }
 }
 
-/// Capitalize first letter of a string
+// Re-export from vize_carton for convenience
+pub use vize_carton::{camelize, capitalize};
+
+/// Capitalize first letter of a string (alias for capitalize)
+#[inline]
 pub fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => "".into(),
-    }
-}
-
-/// Convert kebab-case to camelCase
-pub fn camelize(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut capitalize_next = false;
-
-    for c in s.chars() {
-        if c == '-' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.extend(c.to_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
+    capitalize(s).into()
 }
 
 /// Check if a component is a Vue built-in that should be imported directly

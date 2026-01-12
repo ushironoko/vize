@@ -93,41 +93,13 @@ pub fn is_dynamic_event(dir: &DirectiveNode<'_>) -> bool {
     }
 }
 
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::default(),
-        Some(first) => first
-            .to_uppercase()
-            .chain(chars)
-            .collect::<std::string::String>()
-            .into(),
-    }
-}
-
-/// Convert kebab-case to camelCase (e.g., "select-koma" -> "selectKoma")
-fn kebab_to_camel(s: &str) -> std::string::String {
-    let mut result = std::string::String::with_capacity(s.len());
-    let mut capitalize_next = false;
-
-    for c in s.chars() {
-        if c == '-' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.extend(c.to_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
-}
+// Use utilities from vize_carton
+use vize_carton::{camelize, capitalize};
 
 /// Create on-event name from event name
 /// Converts kebab-case to camelCase (e.g., "select-koma" -> "onSelectKoma")
 pub fn create_on_name(event: &str) -> String {
-    let camel = kebab_to_camel(event);
+    let camel = camelize(event);
     format!("on{}", capitalize(&camel)).into()
 }
 
@@ -174,10 +146,11 @@ mod tests {
     }
 
     #[test]
-    fn test_kebab_to_camel() {
-        assert_eq!(kebab_to_camel("select-koma"), "selectKoma");
-        assert_eq!(kebab_to_camel("update-value"), "updateValue");
-        assert_eq!(kebab_to_camel("my-custom-event"), "myCustomEvent");
-        assert_eq!(kebab_to_camel("click"), "click"); // No change for non-kebab
+    fn test_camelize() {
+        // Using vize_carton::camelize (re-exported in this module)
+        assert_eq!(camelize("select-koma").as_str(), "selectKoma");
+        assert_eq!(camelize("update-value").as_str(), "updateValue");
+        assert_eq!(camelize("my-custom-event").as_str(), "myCustomEvent");
+        assert_eq!(camelize("click").as_str(), "click"); // No change for non-kebab
     }
 }

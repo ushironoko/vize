@@ -11,7 +11,9 @@ use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 
 use crate::types::{BindingMetadata, BindingType};
-use vize_croquis::macros::is_builtin_macro;
+use vize_carton::CompactString;
+use vize_croquis::analysis::AnalysisSummary;
+use vize_croquis::macros::{is_builtin_macro, EmitDefinition, ModelDefinition, PropDefinition};
 
 use super::define_props_destructure::process_props_destructure;
 use super::{MacroCall, ScriptSetupMacros};
@@ -92,6 +94,91 @@ impl ScriptCompileContext {
         let source = std::mem::take(&mut self.source);
         self.parse_with_oxc(&source);
         self.source = source;
+    }
+
+    /// Convert to an AnalysisSummary for use in transforms and linting.
+    ///
+    /// This bridges the atelier script context to the shared croquis analysis format.
+    pub fn to_analysis_summary(&self) -> AnalysisSummary {
+        let mut summary = AnalysisSummary::new();
+
+        // Convert bindings
+        summary.bindings.is_script_setup = true;
+        for (name, binding_type) in &self.bindings.bindings {
+            summary.bindings.add(name.as_str(), *binding_type);
+        }
+
+        // Convert props aliases
+        for (local, key) in &self.bindings.props_aliases {
+            summary
+                .bindings
+                .props_aliases
+                .insert(CompactString::new(local), CompactString::new(key));
+        }
+
+        // Convert props from macros
+        if let Some(ref props_call) = self.macros.define_props {
+            for (name, binding_type) in &self.bindings.bindings {
+                if matches!(binding_type, BindingType::Props) {
+                    summary.macros.add_prop(PropDefinition {
+                        name: CompactString::new(name),
+                        required: false, // We don't track this in the current implementation
+                        prop_type: None,
+                        default_value: props_call.binding_name.clone().map(CompactString::new),
+                    });
+                }
+            }
+        }
+
+        // Convert emits
+        if let Some(ref emits_call) = self.macros.define_emits {
+            // Parse emits from the macro call args if available
+            let trimmed = emits_call.args.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                // Array syntax: ['click', 'update']
+                let inner = &trimmed[1..trimmed.len() - 1];
+                for part in inner.split(',') {
+                    let part = part.trim();
+                    if (part.starts_with('\'') && part.ends_with('\''))
+                        || (part.starts_with('"') && part.ends_with('"'))
+                    {
+                        let name = &part[1..part.len() - 1];
+                        summary.macros.add_emit(EmitDefinition {
+                            name: CompactString::new(name),
+                            payload_type: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Convert models
+        for model_call in &self.macros.define_models {
+            if let Some(ref binding_name) = model_call.binding_name {
+                // Extract model name from args if present
+                let args = model_call.args.trim();
+                let name = if args.starts_with('\'') || args.starts_with('"') {
+                    let quote = args.as_bytes()[0];
+                    if let Some(end) = args[1..].find(|c: char| c as u8 == quote) {
+                        CompactString::new(&args[1..=end])
+                    } else {
+                        CompactString::new("modelValue")
+                    }
+                } else {
+                    CompactString::new("modelValue")
+                };
+
+                summary.macros.add_model(ModelDefinition {
+                    name: name.clone(),
+                    local_name: CompactString::new(binding_name),
+                    model_type: None,
+                    required: false,
+                    default_value: None,
+                });
+            }
+        }
+
+        summary
     }
 
     /// Extract all macros from the source

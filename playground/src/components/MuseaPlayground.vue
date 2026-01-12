@@ -236,7 +236,10 @@ watch(
   <div class="musea-playground">
     <div class="panel input-panel">
       <div class="panel-header">
-        <h2>Art File (.art.vue)</h2>
+        <div class="header-title">
+          <span class="icon">&#x1F3A8;</span>
+          <h2>Source</h2>
+        </div>
         <div class="panel-actions">
           <button @click="source = ART_PRESET" class="btn-ghost">Reset</button>
         </div>
@@ -248,97 +251,90 @@ watch(
 
     <div class="panel output-panel">
       <div class="panel-header">
-        <h2>
-          Output
-          <span v-if="compileTime !== null" class="compile-time">
-            {{ compileTime.toFixed(4) }}ms
+        <div class="header-title">
+          <span class="icon">&#x2756;</span>
+          <h2>Art Analysis</h2>
+          <span v-if="compileTime !== null" class="perf-badge">
+            {{ compileTime.toFixed(2) }}ms
           </span>
-        </h2>
+        </div>
         <div class="tabs">
           <button
             :class="['tab', { active: activeTab === 'parsed' }]"
             @click="activeTab = 'parsed'"
-          >
-            Parsed
-          </button>
+          >Metadata</button>
           <button
             :class="['tab', { active: activeTab === 'variants' }]"
             @click="activeTab = 'variants'"
-          >
-            Variants ({{ variantCount }})
+          >Variants
+            <span v-if="variantCount > 0" class="tab-count">{{ variantCount }}</span>
           </button>
           <button
             :class="['tab', { active: activeTab === 'csf' }]"
             @click="activeTab = 'csf'"
-          >
-            Storybook CSF
-          </button>
+          >CSF</button>
         </div>
       </div>
 
       <div class="output-content">
-        <div v-if="error" class="error">
-          <h3>Parse Error</h3>
-          <pre>{{ error }}</pre>
+        <div v-if="error" class="error-panel">
+          <div class="error-header">Parse Error</div>
+          <pre class="error-content">{{ error }}</pre>
         </div>
 
         <template v-else-if="parsedArt">
           <!-- Parsed Tab -->
           <div v-if="activeTab === 'parsed'" class="parsed-output">
-            <h4>Metadata</h4>
-            <div class="metadata-grid">
-              <div class="metadata-item">
-                <span class="label">Title</span>
-                <span class="value">{{ parsedArt.metadata.title }}</span>
-              </div>
-              <div v-if="parsedArt.metadata.description" class="metadata-item">
-                <span class="label">Description</span>
-                <span class="value">{{ parsedArt.metadata.description }}</span>
-              </div>
-              <div v-if="parsedArt.metadata.component" class="metadata-item">
-                <span class="label">Component</span>
-                <span class="value">{{ parsedArt.metadata.component }}</span>
-              </div>
-              <div v-if="parsedArt.metadata.category" class="metadata-item">
-                <span class="label">Category</span>
-                <span class="value">{{ parsedArt.metadata.category }}</span>
-              </div>
-              <div v-if="parsedArt.metadata.tags?.length" class="metadata-item">
-                <span class="label">Tags</span>
-                <span class="value">
-                  <span
-                    v-for="tag in parsedArt.metadata.tags"
-                    :key="tag"
-                    class="tag"
-                  >
-                    {{ tag }}
-                  </span>
-                </span>
-              </div>
-              <div class="metadata-item">
-                <span class="label">Status</span>
-                <span :class="['value', 'status', parsedArt.metadata.status]">
-                  {{ parsedArt.metadata.status }}
-                </span>
+            <div class="output-header-bar">
+              <span class="output-title">Component Metadata</span>
+              <div class="file-badges">
+                <span v-if="parsedArt.hasScriptSetup" class="file-badge">setup</span>
+                <span v-if="parsedArt.hasScript" class="file-badge">script</span>
+                <span v-if="parsedArt.styleCount > 0" class="file-badge">{{ parsedArt.styleCount }} style</span>
               </div>
             </div>
 
-            <h4>File Info</h4>
-            <div class="file-info">
-              <span v-if="parsedArt.hasScriptSetup" class="badge">Script Setup</span>
-              <span v-if="parsedArt.hasScript" class="badge">Script</span>
-              <span v-if="parsedArt.styleCount > 0" class="badge">
-                {{ parsedArt.styleCount }} Style{{ parsedArt.styleCount > 1 ? 's' : '' }}
-              </span>
+            <div class="metadata-section">
+              <div class="metadata-grid">
+                <div class="metadata-item">
+                  <span class="meta-label">Title</span>
+                  <span class="meta-value">{{ parsedArt.metadata.title }}</span>
+                </div>
+                <div v-if="parsedArt.metadata.description" class="metadata-item span-full">
+                  <span class="meta-label">Description</span>
+                  <span class="meta-value">{{ parsedArt.metadata.description }}</span>
+                </div>
+                <div v-if="parsedArt.metadata.component" class="metadata-item">
+                  <span class="meta-label">Component</span>
+                  <code class="meta-code">{{ parsedArt.metadata.component }}</code>
+                </div>
+                <div v-if="parsedArt.metadata.category" class="metadata-item">
+                  <span class="meta-label">Category</span>
+                  <span class="meta-value category-value">{{ parsedArt.metadata.category }}</span>
+                </div>
+                <div v-if="parsedArt.metadata.tags?.length" class="metadata-item">
+                  <span class="meta-label">Tags</span>
+                  <span class="tags-list">
+                    <span v-for="tag in parsedArt.metadata.tags" :key="tag" class="tag-item">{{ tag }}</span>
+                  </span>
+                </div>
+                <div class="metadata-item">
+                  <span class="meta-label">Status</span>
+                  <span :class="['status-badge', parsedArt.metadata.status]">{{ parsedArt.metadata.status }}</span>
+                </div>
+              </div>
             </div>
 
             <!-- Design Tokens -->
             <template v-if="designTokens.length > 0">
-              <h4>Design Tokens ({{ designTokens.length }})</h4>
+              <div class="section-header">
+                <span class="section-title">Design Tokens</span>
+                <span class="section-count">{{ designTokens.length }}</span>
+              </div>
 
               <!-- Color Tokens -->
               <div v-if="colorTokens.length > 0" class="token-section">
-                <h5>Colors</h5>
+                <div class="token-category">Colors</div>
                 <div class="color-grid">
                   <div
                     v-for="token in colorTokens"
@@ -349,7 +345,7 @@ watch(
                   >
                     <div class="color-swatch" :style="{ background: token.value }"></div>
                     <div class="token-info">
-                      <span class="token-name">{{ token.name }}</span>
+                      <code class="token-name">{{ token.name }}</code>
                       <span class="token-value">{{ token.value }}</span>
                     </div>
                   </div>
@@ -358,7 +354,7 @@ watch(
 
               <!-- Size Tokens -->
               <div v-if="sizeTokens.length > 0" class="token-section">
-                <h5>Sizes</h5>
+                <div class="token-category">Sizes</div>
                 <div class="token-list">
                   <div
                     v-for="token in sizeTokens"
@@ -367,7 +363,7 @@ watch(
                     @click="copyToClipboard(token.name)"
                     :title="`Click to copy: ${token.name}`"
                   >
-                    <span class="token-name">{{ token.name }}</span>
+                    <code class="token-name">{{ token.name }}</code>
                     <span class="token-value">{{ token.value }}</span>
                     <div class="size-preview" :style="{ width: token.value }"></div>
                   </div>
@@ -376,7 +372,7 @@ watch(
 
               <!-- Other Tokens -->
               <div v-if="otherTokens.length > 0" class="token-section">
-                <h5>Other</h5>
+                <div class="token-category">Other</div>
                 <div class="token-list">
                   <div
                     v-for="token in otherTokens"
@@ -385,7 +381,7 @@ watch(
                     @click="copyToClipboard(token.name)"
                     :title="`Click to copy: ${token.name}`"
                   >
-                    <span class="token-name">{{ token.name }}</span>
+                    <code class="token-name">{{ token.name }}</code>
                     <span class="token-value">{{ token.value }}</span>
                   </div>
                 </div>
@@ -395,40 +391,52 @@ watch(
 
           <!-- Variants Tab -->
           <div v-else-if="activeTab === 'variants'" class="variants-output">
-            <div
-              v-for="variant in parsedArt.variants"
-              :key="variant.name"
-              class="variant-card"
-            >
-              <div class="variant-header">
-                <h5>{{ variant.name }}</h5>
-                <div class="variant-actions">
-                  <button @click="copyToClipboard(variant.template)" class="btn-ghost btn-small">Copy</button>
-                  <span v-if="variant.isDefault" class="badge default">Default</span>
-                  <span v-if="variant.skipVrt" class="badge skip">Skip VRT</span>
+            <div class="output-header-bar">
+              <span class="output-title">Variants</span>
+              <span class="variant-count">{{ parsedArt.variants.length }} variant{{ parsedArt.variants.length !== 1 ? 's' : '' }}</span>
+            </div>
+
+            <div class="variants-list">
+              <div
+                v-for="variant in parsedArt.variants"
+                :key="variant.name"
+                class="variant-item"
+              >
+                <div class="variant-header">
+                  <div class="variant-name">
+                    {{ variant.name }}
+                    <span v-if="variant.isDefault" class="default-badge">default</span>
+                    <span v-if="variant.skipVrt" class="skip-badge">skip vrt</span>
+                  </div>
+                  <button @click="copyToClipboard(variant.template)" class="btn-copy">Copy</button>
                 </div>
-              </div>
-              <div class="variant-template">
-                <CodeHighlight :code="variant.template" language="html" />
+                <div class="variant-template">
+                  <CodeHighlight :code="variant.template" language="html" />
+                </div>
               </div>
             </div>
           </div>
 
           <!-- CSF Tab -->
           <div v-else-if="activeTab === 'csf' && csfOutput" class="csf-output">
-            <div class="csf-header">
-              <h4>{{ csfOutput.filename }}</h4>
-              <button @click="copyToClipboard(csfOutput.code)" class="btn-ghost">Copy</button>
+            <div class="output-header-bar">
+              <span class="output-title">Storybook CSF</span>
+              <div class="csf-actions">
+                <code class="filename-badge">{{ csfOutput.filename }}</code>
+                <button @click="copyToClipboard(csfOutput.code)" class="btn-copy">Copy</button>
+              </div>
             </div>
-            <CodeHighlight
-              :code="csfOutput.code"
-              language="typescript"
-              show-line-numbers
-            />
+            <div class="code-container">
+              <CodeHighlight
+                :code="csfOutput.code"
+                language="typescript"
+                show-line-numbers
+              />
+            </div>
           </div>
         </template>
 
-        <div v-else class="loading">
+        <div v-else class="loading-state">
           <span>Enter an Art file to see the output</span>
         </div>
       </div>
@@ -443,7 +451,8 @@ watch(
   gap: 0;
   height: 100%;
   min-height: 0;
-  grid-column: 1 / -1; /* Span full width of parent grid */
+  grid-column: 1 / -1;
+  background: var(--bg-primary);
 }
 
 .panel {
@@ -467,18 +476,30 @@ watch(
   flex-shrink: 0;
 }
 
-.panel-header h2 {
-  font-size: 0.875rem;
-  font-weight: 600;
+.header-title {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.compile-time {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--text-muted);
+.header-title .icon {
+  font-size: 1rem;
+  color: var(--accent-rust);
+}
+
+.header-title h2 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.perf-badge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .panel-actions {
@@ -487,7 +508,7 @@ watch(
 }
 
 .btn-ghost {
-  padding: 0.25rem 0.75rem;
+  padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--border-primary);
@@ -504,11 +525,11 @@ watch(
 
 .tabs {
   display: flex;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .tab {
-  padding: 0.375rem 0.75rem;
+  padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   background: transparent;
   border: none;
@@ -516,6 +537,9 @@ watch(
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .tab:hover {
@@ -524,8 +548,15 @@ watch(
 }
 
 .tab.active {
-  color: var(--accent-rust);
-  background: rgba(163, 72, 40, 0.15);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  font-weight: 500;
+}
+
+.tab-count {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .editor-container {
@@ -539,214 +570,217 @@ watch(
   padding: 1rem;
 }
 
-.error {
-  padding: 1rem;
+/* Error State */
+.error-panel {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
+  overflow: hidden;
 }
 
-.error h3 {
-  color: #ef4444;
-  margin-bottom: 0.5rem;
-  font-size: 0.875rem;
+.error-header {
+  padding: 0.5rem 0.75rem;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
-.error pre {
+.error-content {
+  padding: 0.75rem;
   font-size: 0.75rem;
   color: #fca5a5;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.parsed-output h4,
-.variants-output h4,
-.csf-output h4 {
-  font-size: 0.875rem;
-  font-weight: 600;
+/* Output Header Bar */
+.output-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(236, 72, 153, 0.15));
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 4px;
   margin-bottom: 0.75rem;
-  color: var(--text-secondary);
+}
+
+.output-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #a78bfa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.file-badges {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.file-badge {
+  font-size: 0.5625rem;
+  padding: 0.125rem 0.375rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Metadata Section */
+.metadata-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
 }
 
 .metadata-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
 }
 
 .metadata-item {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0.75rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
 }
 
-.metadata-item .label {
-  font-size: 0.625rem;
+.metadata-item.span-full {
+  grid-column: 1 / -1;
+}
+
+.meta-label {
+  font-size: 0.5625rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
 }
 
-.metadata-item .value {
-  font-size: 0.875rem;
+.meta-value {
+  font-size: 0.8125rem;
   color: var(--text-primary);
 }
 
-.tag {
-  display: inline-block;
-  padding: 0.125rem 0.5rem;
-  margin-right: 0.25rem;
+.meta-code {
   font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #60a5fa;
+  background: var(--bg-tertiary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+}
+
+.category-value {
+  color: #a78bfa;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.tag-item {
+  font-size: 0.6875rem;
+  padding: 0.125rem 0.375rem;
   background: var(--bg-tertiary);
   border-radius: 3px;
   color: var(--text-secondary);
 }
 
-.status {
+.status-badge {
+  font-size: 0.6875rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 3px;
   text-transform: capitalize;
 }
 
-.status.ready {
+.status-badge.ready {
+  background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
 }
 
-.status.draft {
+.status-badge.draft {
+  background: rgba(251, 191, 36, 0.15);
   color: #fbbf24;
 }
 
-.status.deprecated {
+.status-badge.deprecated {
+  background: rgba(248, 113, 113, 0.15);
   color: #f87171;
 }
 
-.file-info {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  color: var(--text-secondary);
-}
-
-.badge.default {
-  background: rgba(163, 72, 40, 0.2);
-  color: var(--accent-rust);
-}
-
-.badge.skip {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
-}
-
-.variant-card {
-  margin-bottom: 1rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.variant-header {
+/* Section Header */
+.section-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-primary);
 }
 
-.variant-header h5 {
-  font-size: 0.875rem;
+.section-title {
+  font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-primary);
-}
-
-.variant-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn-small {
-  padding: 0.125rem 0.5rem;
-  font-size: 0.625rem;
-}
-
-.variant-template {
-  padding: 0.5rem;
-}
-
-.csf-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.csf-header h4 {
-  font-family: 'JetBrains Mono', monospace;
-  margin: 0;
-}
-
-.loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 200px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--text-muted);
+}
+
+.section-count {
+  font-size: 0.625rem;
+  padding: 0.0625rem 0.375rem;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* Design Tokens */
 .token-section {
-  margin-top: 1rem;
   margin-bottom: 1rem;
 }
 
-.token-section h5 {
-  font-size: 0.75rem;
-  font-weight: 600;
+.token-category {
+  font-size: 0.6875rem;
+  font-weight: 500;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   margin-bottom: 0.5rem;
 }
 
 .color-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.5rem;
 }
 
 .color-token {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
+  gap: 0.625rem;
+  padding: 0.5rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .color-token:hover {
   border-color: var(--accent-rust);
-  transform: translateY(-1px);
 }
 
 .color-swatch {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
   border: 1px solid rgba(0, 0, 0, 0.1);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
@@ -755,12 +789,12 @@ watch(
 .token-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
 .token-name {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-primary);
   white-space: nowrap;
@@ -769,7 +803,7 @@ watch(
 }
 
 .token-value {
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-muted);
   white-space: nowrap;
@@ -780,18 +814,18 @@ watch(
 .token-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.375rem;
 }
 
 .size-token,
 .other-token {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -804,26 +838,146 @@ watch(
 .size-token .token-name,
 .other-token .token-name {
   flex: 1;
-  font-size: 0.8rem;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text-primary);
+  font-size: 0.75rem;
 }
 
 .size-token .token-value,
 .other-token .token-value {
-  font-size: 0.75rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6875rem;
   color: var(--accent-rust);
-  min-width: 60px;
+  min-width: 50px;
   text-align: right;
 }
 
 .size-preview {
-  height: 8px;
+  height: 6px;
   background: var(--accent-rust);
-  border-radius: 4px;
+  border-radius: 3px;
   min-width: 4px;
-  max-width: 200px;
+  max-width: 150px;
+}
+
+/* Variants Output */
+.variants-output {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.variant-count {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.variants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.variant-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.variant-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.variant-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.default-badge {
+  font-size: 0.5625rem;
+  padding: 0.0625rem 0.375rem;
+  background: rgba(163, 72, 40, 0.2);
+  color: var(--accent-rust);
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.skip-badge {
+  font-size: 0.5625rem;
+  padding: 0.0625rem 0.375rem;
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.btn-copy {
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-copy:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.variant-template {
+  padding: 0.5rem;
+}
+
+/* CSF Output */
+.csf-output {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.csf-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filename-badge {
+  font-size: 0.625rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+}
+
+.code-container {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  overflow: auto;
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 /* Mobile responsive */
@@ -858,8 +1012,8 @@ watch(
     grid-template-columns: 1fr;
   }
 
-  .editor-container {
-    min-height: 200px;
+  .color-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

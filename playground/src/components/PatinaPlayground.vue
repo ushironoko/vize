@@ -351,7 +351,10 @@ onMounted(() => {
   <div class="patina-playground">
     <div class="panel input-panel">
       <div class="panel-header">
-        <h2>Vue SFC (.vue)</h2>
+        <div class="header-title">
+          <span class="icon">&#x26A0;</span>
+          <h2>Source</h2>
+        </div>
         <div class="panel-actions">
           <button @click="source = LINT_PRESET" class="btn-ghost">Reset</button>
         </div>
@@ -363,103 +366,102 @@ onMounted(() => {
 
     <div class="panel output-panel">
       <div class="panel-header">
-        <h2>
-          Lint Results
-          <span v-if="lintTime !== null" class="lint-time">
-            {{ lintTime.toFixed(4) }}ms
+        <div class="header-title">
+          <span class="icon">&#x2714;</span>
+          <h2>Lint Analysis</h2>
+          <span v-if="lintTime !== null" class="perf-badge">
+            {{ lintTime.toFixed(2) }}ms
           </span>
-        </h2>
-        <div class="header-controls">
-          <div class="summary" v-if="lintResult">
-            <span :class="['count', { 'has-errors': errorCount > 0 }]">
-              {{ errorCount }} error{{ errorCount !== 1 ? 's' : '' }}
-            </span>
-            <span :class="['count', { 'has-warnings': warningCount > 0 }]">
-              {{ warningCount }} warning{{ warningCount !== 1 ? 's' : '' }}
-            </span>
-          </div>
-          <div class="locale-selector">
-            <select v-model="currentLocale" @change="setLocale(currentLocale)">
-              <option v-for="locale in locales" :key="locale.code" :value="locale.code">
-                {{ locale.name }}
-              </option>
-            </select>
-          </div>
+          <template v-if="lintResult">
+            <span v-if="errorCount > 0" class="count-badge errors">{{ errorCount }}</span>
+            <span v-if="warningCount > 0" class="count-badge warnings">{{ warningCount }}</span>
+          </template>
         </div>
         <div class="tabs">
           <button
             :class="['tab', { active: activeTab === 'diagnostics' }]"
             @click="activeTab = 'diagnostics'"
-          >
-            Diagnostics ({{ lintResult?.diagnostics.length ?? 0 }})
+          >Diagnostics
+            <span v-if="lintResult?.diagnostics.length" class="tab-badge">{{ lintResult.diagnostics.length }}</span>
           </button>
           <button
             :class="['tab', { active: activeTab === 'rules' }]"
             @click="activeTab = 'rules'"
-          >
-            Rules ({{ rules.length }})
+          >Rules
+            <span class="tab-count">{{ enabledRuleCount }}/{{ rules.length }}</span>
           </button>
         </div>
       </div>
 
       <div class="output-content">
-        <div v-if="error" class="error">
-          <h3>Lint Error</h3>
-          <pre>{{ error }}</pre>
+        <div v-if="error" class="error-panel">
+          <div class="error-header">Lint Error</div>
+          <pre class="error-content">{{ error }}</pre>
         </div>
 
         <template v-else-if="lintResult">
           <!-- Diagnostics Tab -->
           <div v-if="activeTab === 'diagnostics'" class="diagnostics-output">
-            <div v-if="lintResult.diagnostics.length === 0" class="no-issues">
-              <span class="check-icon">✓</span>
+            <div class="output-header-bar">
+              <span class="output-title">Issues</span>
+              <div class="locale-selector">
+                <select v-model="currentLocale" @change="setLocale(currentLocale)">
+                  <option v-for="locale in locales" :key="locale.code" :value="locale.code">
+                    {{ locale.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div v-if="lintResult.diagnostics.length === 0" class="success-state">
+              <span class="success-icon">&#x2713;</span>
               <span>No issues found</span>
             </div>
 
-            <div
-              v-for="(diagnostic, i) in lintResult.diagnostics"
-              :key="i"
-              :class="['diagnostic-card', getSeverityClass(diagnostic.severity)]"
-            >
-              <div class="diagnostic-header">
-                <span class="severity-icon">{{ getSeverityIcon(diagnostic.severity) }}</span>
-                <span class="rule-name">{{ diagnostic.rule }}</span>
-                <span class="location">
-                  {{ diagnostic.location.start.line }}:{{ diagnostic.location.start.column }}
-                </span>
-              </div>
-              <div class="diagnostic-message">{{ diagnostic.message }}</div>
-              <div v-if="diagnostic.help" class="diagnostic-help">
-                <span class="help-icon">💡</span>
-                {{ diagnostic.help }}
+            <div v-else class="diagnostics-list">
+              <div
+                v-for="(diagnostic, i) in lintResult.diagnostics"
+                :key="i"
+                :class="['diagnostic-item', `severity-${diagnostic.severity}`]"
+              >
+                <div class="diagnostic-header">
+                  <span class="severity-icon">{{ getSeverityIcon(diagnostic.severity) }}</span>
+                  <code class="rule-id">{{ diagnostic.rule }}</code>
+                  <span class="location-badge">
+                    {{ diagnostic.location.start.line }}:{{ diagnostic.location.start.column }}
+                  </span>
+                </div>
+                <div class="diagnostic-message">{{ diagnostic.message }}</div>
+                <div v-if="diagnostic.help" class="diagnostic-help">
+                  <span class="help-label">Fix:</span>
+                  {{ diagnostic.help }}
+                </div>
               </div>
             </div>
           </div>
 
           <!-- Rules Tab -->
           <div v-else-if="activeTab === 'rules'" class="rules-output">
-            <div class="rules-toolbar">
-              <div class="rules-filters">
-                <input
-                  v-model="searchQuery"
-                  type="text"
-                  placeholder="Search rules..."
-                  class="search-input"
-                />
-                <select v-model="selectedCategory" class="category-select">
-                  <option v-for="cat in categories" :key="cat" :value="cat">
-                    {{ cat === 'all' ? 'All Categories' : cat }}
-                  </option>
-                </select>
-              </div>
+            <div class="output-header-bar">
+              <span class="output-title">Rule Configuration</span>
               <div class="rules-actions">
                 <button @click="enableAllRules" class="btn-action">Enable All</button>
                 <button @click="disableAllRules" class="btn-action">Disable All</button>
               </div>
             </div>
 
-            <div class="rules-count">
-              {{ enabledRuleCount }} enabled / {{ filteredRules.length }} of {{ rules.length }} rules
+            <div class="rules-toolbar">
+              <input
+                v-model="searchQuery"
+                type="text"
+                placeholder="Search rules..."
+                class="search-input"
+              />
+              <select v-model="selectedCategory" class="category-select">
+                <option v-for="cat in categories" :key="cat" :value="cat">
+                  {{ cat === 'all' ? 'All Categories' : cat }}
+                </option>
+              </select>
             </div>
 
             <!-- Category toggle headers when filtering by category -->
@@ -475,44 +477,46 @@ onMounted(() => {
                   @change="toggleCategory(selectedCategory, ($event.target as HTMLInputElement).checked)"
                   class="rule-checkbox"
                 />
-                <span class="category-name">{{ selectedCategory }}</span>
-                <span class="category-count">({{ filteredRules.length }} rules)</span>
+                <span class="category-label">{{ selectedCategory }}</span>
+                <span class="category-count">{{ filteredRules.length }} rules</span>
               </label>
             </div>
 
-            <div
-              v-for="rule in filteredRules"
-              :key="rule.name"
-              :class="['rule-card', { disabled: !enabledRules.has(rule.name) }]"
-            >
-              <div class="rule-header">
-                <label class="rule-toggle">
-                  <input
-                    type="checkbox"
-                    :checked="enabledRules.has(rule.name)"
-                    @change="toggleRule(rule.name)"
-                    class="rule-checkbox"
-                  />
-                  <span class="rule-name">{{ rule.name }}</span>
-                </label>
-                <div class="rule-badges">
-                  <span class="badge category">{{ rule.category }}</span>
-                  <span :class="['badge', 'severity', rule.defaultSeverity]">
-                    {{ rule.defaultSeverity }}
-                  </span>
-                  <span v-if="rule.fixable" class="badge fixable">fixable</span>
+            <div class="rules-list">
+              <div
+                v-for="rule in filteredRules"
+                :key="rule.name"
+                :class="['rule-item', { disabled: !enabledRules.has(rule.name) }]"
+              >
+                <div class="rule-main">
+                  <label class="rule-toggle">
+                    <input
+                      type="checkbox"
+                      :checked="enabledRules.has(rule.name)"
+                      @change="toggleRule(rule.name)"
+                      class="rule-checkbox"
+                    />
+                    <code class="rule-id">{{ rule.name }}</code>
+                  </label>
+                  <div class="rule-badges">
+                    <span class="badge category-badge">{{ rule.category }}</span>
+                    <span :class="['badge', 'severity-badge', rule.defaultSeverity]">
+                      {{ rule.defaultSeverity }}
+                    </span>
+                    <span v-if="rule.fixable" class="badge fixable-badge">fix</span>
+                  </div>
                 </div>
+                <div class="rule-description">{{ rule.description }}</div>
               </div>
-              <div class="rule-description">{{ rule.description }}</div>
-            </div>
 
-            <div v-if="filteredRules.length === 0" class="no-rules">
-              No rules match your search
+              <div v-if="filteredRules.length === 0" class="empty-state">
+                No rules match your search
+              </div>
             </div>
           </div>
         </template>
 
-        <div v-else class="loading">
+        <div v-else class="loading-state">
           <span>Enter Vue code to see lint results</span>
         </div>
       </div>
@@ -527,7 +531,8 @@ onMounted(() => {
   gap: 0;
   height: 100%;
   min-height: 0;
-  grid-column: 1 / -1; /* Span full width of parent grid */
+  grid-column: 1 / -1;
+  background: var(--bg-primary);
 }
 
 .panel {
@@ -549,62 +554,51 @@ onMounted(() => {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
   flex-shrink: 0;
-  flex-wrap: wrap;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.panel-header h2 {
+.header-title .icon {
+  font-size: 1rem;
+  color: var(--accent-rust);
+}
+
+.header-title h2 {
   font-size: 0.875rem;
   font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  margin: 0;
 }
 
-.lint-time {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--text-muted);
+.perf-badge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+.count-badge {
+  font-size: 0.625rem;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 8px;
+  min-width: 1.25rem;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.summary {
-  display: flex;
-  gap: 0.75rem;
+.count-badge.errors {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
 }
 
-.locale-selector select {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
-.locale-selector select:hover {
-  border-color: var(--border-secondary);
-}
-
-.count {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.count.has-errors {
-  color: #ef4444;
-  font-weight: 600;
-}
-
-.count.has-warnings {
-  color: #f59e0b;
-  font-weight: 600;
+.count-badge.warnings {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
 }
 
 .panel-actions {
@@ -613,7 +607,7 @@ onMounted(() => {
 }
 
 .btn-ghost {
-  padding: 0.25rem 0.75rem;
+  padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--border-primary);
@@ -630,11 +624,11 @@ onMounted(() => {
 
 .tabs {
   display: flex;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .tab {
-  padding: 0.375rem 0.75rem;
+  padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   background: transparent;
   border: none;
@@ -642,6 +636,9 @@ onMounted(() => {
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .tab:hover {
@@ -650,8 +647,25 @@ onMounted(() => {
 }
 
 .tab.active {
-  color: var(--accent-rust);
-  background: rgba(163, 72, 40, 0.15);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  font-weight: 500;
+}
+
+.tab-badge {
+  font-size: 0.625rem;
+  padding: 0.0625rem 0.3125rem;
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border-radius: 8px;
+  min-width: 1rem;
+  text-align: center;
+}
+
+.tab-count {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .editor-container {
@@ -665,54 +679,96 @@ onMounted(() => {
   padding: 1rem;
 }
 
-.error {
-  padding: 1rem;
+/* Error State */
+.error-panel {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
+  overflow: hidden;
 }
 
-.error h3 {
-  color: #ef4444;
-  margin-bottom: 0.5rem;
-  font-size: 0.875rem;
+.error-header {
+  padding: 0.5rem 0.75rem;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
-.error pre {
+.error-content {
+  padding: 0.75rem;
   font-size: 0.75rem;
   color: #fca5a5;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.no-issues {
+/* Output Header Bar */
+.output-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(239, 68, 68, 0.15));
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.output-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.locale-selector select {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.625rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/* Success State */
+.success-state {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
   padding: 2rem;
   color: #4ade80;
-  font-size: 1rem;
+  font-size: 0.875rem;
 }
 
-.check-icon {
-  font-size: 1.5rem;
+.success-icon {
+  font-size: 1.25rem;
 }
 
-.diagnostic-card {
-  margin-bottom: 0.75rem;
+/* Diagnostics List */
+.diagnostics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.diagnostic-item {
   padding: 0.75rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
-  border-radius: 6px;
+  border-radius: 4px;
   border-left: 3px solid;
 }
 
-.diagnostic-card.severity-error {
+.diagnostic-item.severity-error {
   border-left-color: #ef4444;
 }
 
-.diagnostic-card.severity-warning {
+.diagnostic-item.severity-warning {
   border-left-color: #f59e0b;
 }
 
@@ -720,11 +776,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.375rem;
 }
 
 .severity-icon {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: bold;
 }
 
@@ -736,131 +792,70 @@ onMounted(() => {
   color: #f59e0b;
 }
 
-.rule-name {
-  font-size: 0.75rem;
+.rule-id {
+  font-size: 0.6875rem;
   font-family: 'JetBrains Mono', monospace;
-  color: var(--text-secondary);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
 }
 
-.location {
+.location-badge {
   margin-left: auto;
-  font-size: 0.75rem;
+  font-size: 0.625rem;
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-muted);
 }
 
 .diagnostic-message {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--text-primary);
-  margin-bottom: 0.5rem;
+  line-height: 1.4;
 }
 
 .diagnostic-help {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: 0.375rem;
   font-size: 0.75rem;
   color: var(--text-muted);
+  margin-top: 0.5rem;
   padding: 0.5rem;
   background: var(--bg-tertiary);
   border-radius: 4px;
 }
 
-.help-icon {
+.help-label {
+  color: #4ade80;
+  font-weight: 500;
   flex-shrink: 0;
 }
 
-.rule-card {
-  margin-bottom: 0.75rem;
-  padding: 0.75rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-}
-
-.rule-header {
+/* Rules Output */
+.rules-output {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.rules-output .rule-name {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.rule-badges {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.125rem 0.5rem;
-  font-size: 0.625rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-radius: 3px;
-}
-
-.badge.category {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-}
-
-.badge.severity {
-  background: var(--bg-tertiary);
-}
-
-.badge.severity.error {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-}
-
-.badge.severity.warning {
-  background: rgba(245, 158, 11, 0.2);
-  color: #f59e0b;
-}
-
-.badge.fixable {
-  background: rgba(74, 222, 128, 0.2);
-  color: #4ade80;
-}
-
-.rule-description {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
+  flex-direction: column;
+  height: 100%;
 }
 
 .rules-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.rules-filters {
-  display: flex;
   gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .rules-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.375rem;
 }
 
 .btn-action {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.625rem;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-primary);
-  border-radius: 4px;
+  border-radius: 3px;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s;
@@ -872,57 +867,10 @@ onMounted(() => {
   border-color: var(--accent-rust);
 }
 
-.category-toggle {
-  padding: 0.75rem;
-  margin-bottom: 0.75rem;
-  background: var(--bg-tertiary);
-  border-radius: 6px;
-  border: 1px solid var(--border-primary);
-}
-
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.category-name {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.category-count {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.rule-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.rule-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-rust);
-  cursor: pointer;
-}
-
-.rule-card.disabled {
-  opacity: 0.5;
-}
-
-.rule-card.disabled .rule-name {
-  text-decoration: line-through;
-}
-
 .search-input {
   flex: 1;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
@@ -939,8 +887,8 @@ onMounted(() => {
 }
 
 .category-select {
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
@@ -953,24 +901,145 @@ onMounted(() => {
   border-color: var(--accent-rust);
 }
 
-.rules-count {
-  font-size: 0.75rem;
-  color: var(--text-muted);
+.category-toggle {
+  padding: 0.625rem 0.75rem;
   margin-bottom: 0.75rem;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  border: 1px solid var(--border-primary);
 }
 
-.no-rules {
-  text-align: center;
-  padding: 2rem;
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.category-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.category-count {
+  font-size: 0.6875rem;
   color: var(--text-muted);
 }
 
-.loading {
+/* Rules List */
+.rules-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.rule-item {
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.rule-item:hover {
+  border-color: var(--border-secondary);
+}
+
+.rule-item.disabled {
+  opacity: 0.5;
+}
+
+.rule-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.rule-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.rule-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-rust);
+  cursor: pointer;
+}
+
+.rules-output .rule-id {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: transparent;
+  padding: 0;
+}
+
+.rule-item.disabled .rule-id {
+  text-decoration: line-through;
+}
+
+.rule-badges {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.5625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 2px;
+}
+
+.category-badge {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.severity-badge {
+  background: var(--bg-tertiary);
+}
+
+.severity-badge.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.severity-badge.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.fixable-badge {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.rule-description {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  padding-left: 1.375rem;
+}
+
+.empty-state,
+.loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 200px;
+  padding: 2rem;
   color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 /* Mobile responsive */
@@ -1001,33 +1070,18 @@ onMounted(() => {
     width: 100%;
   }
 
-  .summary {
-    width: 100%;
-    justify-content: flex-start;
+  .rules-toolbar {
+    flex-direction: column;
   }
 
-  .diagnostic-header {
-    flex-wrap: wrap;
-  }
-
-  .rule-header {
+  .rule-main {
     flex-direction: column;
     align-items: flex-start;
+    gap: 0.375rem;
   }
 
-  .editor-container {
-    min-height: 200px;
-  }
-
-  .rules-filters {
-    flex-direction: column;
-  }
-
-  .header-controls {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.5rem;
-    width: 100%;
+  .rule-description {
+    padding-left: 0;
   }
 }
 </style>

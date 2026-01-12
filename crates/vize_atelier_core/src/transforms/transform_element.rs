@@ -2,7 +2,7 @@
 //!
 //! Transforms element nodes and their props.
 
-use vize_carton::String;
+use vize_carton::{capitalize, String};
 
 use crate::ast::*;
 use crate::transform::TransformContext;
@@ -111,18 +111,6 @@ pub fn build_props<'a>(
         dynamic_prop_names,
         has_runtime_props,
     })
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::default(),
-        Some(first) => first
-            .to_uppercase()
-            .chain(chars)
-            .collect::<std::string::String>()
-            .into(),
-    }
 }
 
 /// Props expression for codegen (transform-specific)

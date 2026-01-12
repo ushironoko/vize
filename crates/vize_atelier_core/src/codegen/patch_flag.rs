@@ -97,7 +97,7 @@ pub fn calculate_element_patch_info(
 
                                             // Transform key based on modifiers
                                             let prop_name = if has_camel {
-                                                camelize(key)
+                                                camelize(key).to_string()
                                             } else if has_prop {
                                                 format!(".{}", key)
                                             } else if has_attr {

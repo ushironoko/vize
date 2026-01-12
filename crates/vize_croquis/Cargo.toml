@@ -10,5 +10,7 @@ description = "Croquis - Semantic analysis layer for Vize. Quick sketches of mea
 vize_carton.workspace = true
 vize_relief.workspace = true
 phf.workspace = true
+once_cell.workspace = true
+rustc-hash.workspace = true
 
 [dev-dependencies]

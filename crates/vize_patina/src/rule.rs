@@ -142,6 +142,14 @@ impl RuleRegistry {
         ));
 
         // ============================================
+        // Security Rules (Warning)
+        // ============================================
+        // These rules help prevent security vulnerabilities.
+
+        registry.register(Box::new(crate::rules::vue::NoVHtml));
+        registry.register(Box::new(crate::rules::vue::NoUnsafeUrl));
+
+        // ============================================
         // Vue Strongly Recommended Rules (Warning)
         // ============================================
         // These rules improve readability and developer experience.
@@ -165,6 +173,7 @@ impl RuleRegistry {
         registry.register(Box::new(crate::rules::vue::AttributeOrder));
         registry.register(Box::new(crate::rules::vue::SfcElementOrder));
         registry.register(Box::new(crate::rules::vue::ScopedEventNames));
+        registry.register(Box::new(crate::rules::vue::PreferPropsShorthand));
 
         // ============================================
         // Vapor Mode Rules (Warning)
@@ -226,6 +235,10 @@ impl RuleRegistry {
             crate::rules::vue::MultiWordComponentNames::default(),
         ));
 
+        // Security Rules
+        registry.register(Box::new(crate::rules::vue::NoVHtml));
+        registry.register(Box::new(crate::rules::vue::NoUnsafeUrl));
+
         registry
     }
 
@@ -250,6 +263,14 @@ impl RuleRegistry {
         registry.register(Box::new(
             crate::rules::vue::RequireComponentRegistration::default(),
         ));
+
+        // Additional opt-in rules
+        registry.register(Box::new(crate::rules::vue::NoInlineStyle));
+        registry.register(Box::new(crate::rules::vue::RequireScopedStyle));
+
+        // Warning/informational rules (opt-in)
+        registry.register(Box::new(crate::rules::vue::WarnCustomBlock));
+        registry.register(Box::new(crate::rules::vue::WarnCustomDirective));
 
         registry
     }

@@ -83,24 +83,8 @@ pub fn is_dynamic_binding(dir: &DirectiveNode<'_>) -> bool {
     }
 }
 
-/// Camelize a string (convert kebab-case to camelCase)
-pub fn camelize(s: &str) -> String {
-    let mut result = std::string::String::new();
-    let mut capitalize_next = false;
-
-    for c in s.chars() {
-        if c == '-' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.push(c.to_ascii_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(c);
-        }
-    }
-
-    result.into()
-}
+// Re-export camelize from vize_carton
+pub use vize_carton::camelize;
 
 #[cfg(test)]
 mod tests {
@@ -108,8 +92,8 @@ mod tests {
 
     #[test]
     fn test_camelize() {
-        assert_eq!(camelize("foo-bar"), "fooBar");
-        assert_eq!(camelize("foo-bar-baz"), "fooBarBaz");
-        assert_eq!(camelize("foo"), "foo");
+        assert_eq!(camelize("foo-bar").as_str(), "fooBar");
+        assert_eq!(camelize("foo-bar-baz").as_str(), "fooBarBaz");
+        assert_eq!(camelize("foo").as_str(), "foo");
     }
 }

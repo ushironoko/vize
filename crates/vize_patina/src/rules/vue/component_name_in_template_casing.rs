@@ -20,6 +20,9 @@
 use crate::context::LintContext;
 use crate::diagnostic::Severity;
 use crate::rule::{Rule, RuleCategory, RuleMeta};
+use vize_carton::{hyphenate, is_html_tag, is_svg_tag};
+use vize_croquis::builtins::is_builtin_component;
+use vize_croquis::naming::{is_kebab_case_loose, is_pascal_case, to_pascal_case};
 use vize_relief::ast::ElementNode;
 
 static META: RuleMeta = RuleMeta {
@@ -29,196 +32,6 @@ static META: RuleMeta = RuleMeta {
     fixable: true,
     default_severity: Severity::Warning,
 };
-
-/// Known HTML elements that should not be treated as components
-const HTML_ELEMENTS: &[&str] = &[
-    "a",
-    "abbr",
-    "address",
-    "area",
-    "article",
-    "aside",
-    "audio",
-    "b",
-    "base",
-    "bdi",
-    "bdo",
-    "blockquote",
-    "body",
-    "br",
-    "button",
-    "canvas",
-    "caption",
-    "cite",
-    "code",
-    "col",
-    "colgroup",
-    "data",
-    "datalist",
-    "dd",
-    "del",
-    "details",
-    "dfn",
-    "dialog",
-    "div",
-    "dl",
-    "dt",
-    "em",
-    "embed",
-    "fieldset",
-    "figcaption",
-    "figure",
-    "footer",
-    "form",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "head",
-    "header",
-    "hgroup",
-    "hr",
-    "html",
-    "i",
-    "iframe",
-    "img",
-    "input",
-    "ins",
-    "kbd",
-    "label",
-    "legend",
-    "li",
-    "link",
-    "main",
-    "map",
-    "mark",
-    "menu",
-    "meta",
-    "meter",
-    "nav",
-    "noscript",
-    "object",
-    "ol",
-    "optgroup",
-    "option",
-    "output",
-    "p",
-    "param",
-    "picture",
-    "pre",
-    "progress",
-    "q",
-    "rp",
-    "rt",
-    "ruby",
-    "s",
-    "samp",
-    "script",
-    "section",
-    "select",
-    "slot",
-    "small",
-    "source",
-    "span",
-    "strong",
-    "style",
-    "sub",
-    "summary",
-    "sup",
-    "table",
-    "tbody",
-    "td",
-    "template",
-    "textarea",
-    "tfoot",
-    "th",
-    "thead",
-    "time",
-    "title",
-    "tr",
-    "track",
-    "u",
-    "ul",
-    "var",
-    "video",
-    "wbr",
-];
-
-/// SVG elements
-const SVG_ELEMENTS: &[&str] = &[
-    "svg",
-    "animate",
-    "animateMotion",
-    "animateTransform",
-    "circle",
-    "clipPath",
-    "defs",
-    "desc",
-    "ellipse",
-    "feBlend",
-    "feColorMatrix",
-    "feComponentTransfer",
-    "feComposite",
-    "feConvolveMatrix",
-    "feDiffuseLighting",
-    "feDisplacementMap",
-    "feDistantLight",
-    "feDropShadow",
-    "feFlood",
-    "feFuncA",
-    "feFuncB",
-    "feFuncG",
-    "feFuncR",
-    "feGaussianBlur",
-    "feImage",
-    "feMerge",
-    "feMergeNode",
-    "feMorphology",
-    "feOffset",
-    "fePointLight",
-    "feSpecularLighting",
-    "feSpotLight",
-    "feTile",
-    "feTurbulence",
-    "filter",
-    "foreignObject",
-    "g",
-    "image",
-    "line",
-    "linearGradient",
-    "marker",
-    "mask",
-    "metadata",
-    "mpath",
-    "path",
-    "pattern",
-    "polygon",
-    "polyline",
-    "radialGradient",
-    "rect",
-    "set",
-    "stop",
-    "switch",
-    "symbol",
-    "text",
-    "textPath",
-    "tspan",
-    "use",
-    "view",
-];
-
-/// Vue built-in components
-const VUE_BUILT_IN: &[&str] = &[
-    "component",
-    "transition",
-    "transition-group",
-    "keep-alive",
-    "slot",
-    "teleport",
-    "suspense",
-];
 
 /// Casing style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -243,61 +56,6 @@ impl Default for ComponentNameInTemplateCasing {
     }
 }
 
-impl ComponentNameInTemplateCasing {
-    fn is_html_element(tag: &str) -> bool {
-        HTML_ELEMENTS.contains(&tag.to_lowercase().as_str())
-    }
-
-    fn is_svg_element(tag: &str) -> bool {
-        SVG_ELEMENTS.contains(&tag)
-    }
-
-    fn is_vue_built_in(tag: &str) -> bool {
-        VUE_BUILT_IN.contains(&tag.to_lowercase().as_str())
-    }
-
-    fn is_pascal_case(name: &str) -> bool {
-        if name.is_empty() {
-            return false;
-        }
-        let first_char = name.chars().next().unwrap();
-        first_char.is_uppercase() && !name.contains('-')
-    }
-
-    fn is_kebab_case(name: &str) -> bool {
-        name.chars().all(|c| c.is_lowercase() || c == '-')
-    }
-
-    fn to_pascal_case(name: &str) -> String {
-        let mut result = String::with_capacity(name.len());
-        let mut capitalize_next = true;
-        for c in name.chars() {
-            if c == '-' {
-                capitalize_next = true;
-            } else if capitalize_next {
-                result.push(c.to_ascii_uppercase());
-                capitalize_next = false;
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
-    fn to_kebab_case(name: &str) -> String {
-        let mut result = String::with_capacity(name.len() + 4);
-        for (i, c) in name.chars().enumerate() {
-            if c.is_uppercase() && i > 0 {
-                result.push('-');
-                result.push(c.to_ascii_lowercase());
-            } else {
-                result.push(c.to_ascii_lowercase());
-            }
-        }
-        result
-    }
-}
-
 impl Rule for ComponentNameInTemplateCasing {
     fn meta(&self) -> &'static RuleMeta {
         &META
@@ -307,14 +65,19 @@ impl Rule for ComponentNameInTemplateCasing {
         let tag = element.tag.as_str();
 
         // Skip HTML elements, SVG elements, and Vue built-ins
-        if Self::is_html_element(tag) || Self::is_svg_element(tag) || Self::is_vue_built_in(tag) {
+        let tag_lower = tag.to_lowercase();
+        if is_html_tag(&tag_lower)
+            || is_svg_tag(tag)
+            || is_builtin_component(tag)
+            || is_builtin_component(&tag_lower)
+        {
             return;
         }
 
         match self.casing {
             ComponentCasing::PascalCase => {
-                if !Self::is_pascal_case(tag) {
-                    let pascal = Self::to_pascal_case(tag);
+                if !is_pascal_case(tag) {
+                    let pascal = to_pascal_case(tag);
                     ctx.warn_with_help(
                         format!("Component `<{}>` should use PascalCase", tag),
                         &element.loc,
@@ -323,8 +86,8 @@ impl Rule for ComponentNameInTemplateCasing {
                 }
             }
             ComponentCasing::KebabCase => {
-                if !Self::is_kebab_case(tag) {
-                    let kebab = Self::to_kebab_case(tag);
+                if !is_kebab_case_loose(tag) {
+                    let kebab = hyphenate(tag);
                     ctx.warn_with_help(
                         format!("Component `<{}>` should use kebab-case", tag),
                         &element.loc,

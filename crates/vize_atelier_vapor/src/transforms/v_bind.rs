@@ -2,7 +2,7 @@
 //!
 //! Transforms v-bind (: shorthand) directives into SetPropIRNode.
 
-use vize_carton::{Box, Bump, Vec};
+use vize_carton::{camelize, Box, Bump, Vec};
 
 use crate::ir::{IRProp, OperationNode, SetPropIRNode};
 use vize_atelier_core::{
@@ -71,7 +71,7 @@ fn extract_prop_key<'a>(
             let content = if has_modifier(dir, "camel") {
                 camelize(&exp.content)
             } else {
-                exp.content.to_string()
+                exp.content.clone()
             };
 
             let node = SimpleExpressionNode::new(content, exp.is_static, exp.loc.clone());
@@ -121,25 +121,6 @@ fn has_modifier(dir: &DirectiveNode<'_>, name: &str) -> bool {
     dir.modifiers.iter().any(|m| m.content == name)
 }
 
-/// Convert kebab-case to camelCase
-fn camelize(s: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize_next = false;
-
-    for c in s.chars() {
-        if c == '-' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.push(c.to_ascii_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
-}
-
 /// Check if binding is dynamic (needs effect)
 pub fn is_dynamic_binding(dir: &DirectiveNode<'_>) -> bool {
     // Check if argument is dynamic
@@ -174,8 +155,8 @@ mod tests {
 
     #[test]
     fn test_camelize() {
-        assert_eq!(camelize("foo-bar"), "fooBar");
-        assert_eq!(camelize("foo-bar-baz"), "fooBarBaz");
-        assert_eq!(camelize("foo"), "foo");
+        assert_eq!(camelize("foo-bar").as_str(), "fooBar");
+        assert_eq!(camelize("foo-bar-baz").as_str(), "fooBarBaz");
+        assert_eq!(camelize("foo").as_str(), "foo");
     }
 }

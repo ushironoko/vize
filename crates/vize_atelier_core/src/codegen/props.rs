@@ -404,17 +404,17 @@ pub fn generate_directive_prop_with_static(
                 is_style = key == "style";
 
                 // Transform key based on modifiers
-                let transformed_key = if has_camel {
+                let transformed_key: vize_carton::String = if has_camel {
                     // Convert kebab-case to camelCase
                     camelize(key)
                 } else if has_prop {
                     // Add . prefix for DOM property binding
-                    format!(".{}", key)
+                    format!(".{}", key).into()
                 } else if has_attr {
                     // Add ^ prefix for attribute binding
-                    format!("^{}", key)
+                    format!("^{}", key).into()
                 } else {
-                    key.to_string()
+                    key.to_string().into()
                 };
 
                 let needs_quotes = !is_valid_js_identifier(&transformed_key);

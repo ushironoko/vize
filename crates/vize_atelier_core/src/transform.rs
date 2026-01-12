@@ -3,7 +3,9 @@
 //! This module provides the transform context, traversal, and base transform traits.
 
 use vize_carton::{is_builtin_directive, Box, Bump, CompactString, FxHashSet, String, Vec};
-use vize_croquis::{BindingType, ScopeBinding, ScopeChain, ScopeKind, VForScopeData};
+use vize_croquis::{
+    AnalysisSummary, BindingType, ScopeBinding, ScopeChain, ScopeKind, VForScopeData,
+};
 
 use crate::ast::*;
 use crate::errors::{CompilerError, ErrorCode};
@@ -79,6 +81,8 @@ pub struct TransformContext<'a> {
     pub errors: std::vec::Vec<CompilerError>,
     /// Node was removed flag
     node_removed: bool,
+    /// Semantic analysis summary (optional, for enhanced transforms)
+    analysis: Option<&'a AnalysisSummary>,
 }
 
 /// Enum for parent node types
@@ -137,7 +141,143 @@ impl<'a> TransformContext<'a> {
             in_ssr: ssr,
             errors: std::vec::Vec::new(),
             node_removed: false,
+            analysis: None,
         }
+    }
+
+    /// Create a new transform context with semantic analysis data
+    pub fn with_analysis(
+        allocator: &'a Bump,
+        source: String,
+        options: TransformOptions,
+        analysis: &'a AnalysisSummary,
+    ) -> Self {
+        let mut ctx = Self::new(allocator, source, options);
+        ctx.analysis = Some(analysis);
+        ctx
+    }
+
+    /// Set the analysis summary
+    pub fn set_analysis(&mut self, analysis: &'a AnalysisSummary) {
+        self.analysis = Some(analysis);
+    }
+
+    /// Get the analysis summary if available
+    #[inline]
+    pub fn analysis(&self) -> Option<&AnalysisSummary> {
+        self.analysis
+    }
+
+    /// Check if analysis data is available
+    #[inline]
+    pub fn has_analysis(&self) -> bool {
+        self.analysis.is_some()
+    }
+
+    /// Check if a variable is defined (from analysis or binding metadata)
+    ///
+    /// This checks both the scope chain (template-local) and script bindings.
+    pub fn is_variable_defined(&self, name: &str) -> bool {
+        // First check scope chain (v-for, v-slot variables)
+        if self.scope_chain.is_defined(name) {
+            return true;
+        }
+
+        // Check analysis summary if available
+        if let Some(analysis) = &self.analysis {
+            return analysis.is_defined(name);
+        }
+
+        // Fall back to binding metadata from options
+        if let Some(metadata) = &self.options.binding_metadata {
+            return metadata.bindings.contains_key(name);
+        }
+
+        false
+    }
+
+    /// Get the binding type for a name
+    pub fn get_binding_type(&self, name: &str) -> Option<BindingType> {
+        // First check scope chain
+        if let Some((_, binding)) = self.scope_chain.lookup(name) {
+            return Some(binding.binding_type);
+        }
+
+        // Check analysis summary
+        if let Some(analysis) = &self.analysis {
+            return analysis.get_binding_type(name);
+        }
+
+        // Fall back to binding metadata
+        if let Some(metadata) = &self.options.binding_metadata {
+            return metadata.bindings.get(name).copied();
+        }
+
+        None
+    }
+
+    /// Check if a name needs $setup prefix (for script setup bindings)
+    ///
+    /// Returns true if the name is a script binding and should use $setup prefix.
+    pub fn needs_setup_prefix(&self, name: &str) -> bool {
+        // Skip if in scope (v-for, v-slot)
+        if self.scope_chain.is_defined(name) {
+            return false;
+        }
+
+        // Check binding type
+        if let Some(binding_type) = self.get_binding_type(name) {
+            matches!(
+                binding_type,
+                BindingType::SetupConst
+                    | BindingType::SetupLet
+                    | BindingType::SetupRef
+                    | BindingType::SetupMaybeRef
+                    | BindingType::SetupReactiveConst
+            )
+        } else {
+            false
+        }
+    }
+
+    /// Check if a binding is a ref that needs .value in script
+    pub fn is_ref(&self, name: &str) -> bool {
+        if let Some(analysis) = &self.analysis {
+            analysis.bindings.is_ref(name)
+        } else if let Some(binding_type) = self.get_binding_type(name) {
+            matches!(
+                binding_type,
+                BindingType::SetupRef | BindingType::SetupMaybeRef
+            )
+        } else {
+            false
+        }
+    }
+
+    /// Check if a binding is from props
+    pub fn is_prop(&self, name: &str) -> bool {
+        if let Some(analysis) = &self.analysis {
+            analysis.bindings.is_prop(name)
+        } else {
+            matches!(
+                self.get_binding_type(name),
+                Some(BindingType::Props | BindingType::PropsAliased)
+            )
+        }
+    }
+
+    /// Check if a component is registered (from analysis or binding metadata)
+    pub fn is_component_registered(&self, name: &str) -> bool {
+        if let Some(analysis) = &self.analysis {
+            return analysis.is_component_registered(name);
+        }
+
+        // Fall back to checking binding metadata
+        if let Some(metadata) = &self.options.binding_metadata {
+            return metadata.bindings.contains_key(name);
+        }
+
+        false
     }
 
     /// Add a helper

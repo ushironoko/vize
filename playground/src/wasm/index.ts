@@ -387,7 +387,8 @@ export async function loadWasm(): Promise<WasmModule> {
         parseSfc: wasm.parseSfc || mock.parseSfc,
         compileSfc: wasm.compileSfc || mock.compileSfc,
         // Analysis functions
-        analyzeSfc: wasm.analyzeSfc || mock.analyzeSfc,
+        // Use mock analyzeSfc for enhanced scope detection (WASM version has limited scope support)
+        analyzeSfc: mock.analyzeSfc,
         // Musea functions
         parseArt: wasm.parseArt || mock.parseArt,
         artToCsf: wasm.artToCsf || mock.artToCsf,
@@ -760,67 +761,71 @@ function createMockModule(): WasmModule {
       }
     }
 
-    // Generate VIR text
+    // Generate VIR text (formal TOML-like format)
     let vir = '';
-    vir += '╭─────────────────────────────────────────────────────────────────╮\n';
-    vir += '│  VIR — Vize Intermediate Representation (Mock)                  │\n';
-    vir += '╰─────────────────────────────────────────────────────────────────╯\n';
+    vir += '# VIR v0.1\n';
     vir += '\n';
+
+    // Stats section
+    vir += '[stats]\n';
+    vir += `bindings = ${bindings.length}\n`;
+    vir += `macros = ${macros.length}\n`;
 
     // Macros section
     if (macros.length > 0) {
-      vir += '■ MACROS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
+      vir += '\n[macros]\n';
       for (const macro of macros) {
-        vir += `│  @${macro.name}`;
+        vir += `@${macro.name}`;
         if (macro.type_args) {
-          vir += ` <${macro.type_args.trim().substring(0, 30)}${macro.type_args.length > 30 ? '...' : ''}>`;
+          vir += `<{\n${macro.type_args.trim()}\n}>`;
         }
-        vir += '\n';
+        if (macro.identifier) {
+          vir += ` -> ${macro.identifier}`;
+        }
+        vir += ` # ${macro.start}:${macro.end}\n`;
       }
-      vir += '│\n';
-    }
-
-    // Props section
-    if (props.length > 0) {
-      vir += '■ PROPS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
-      for (const prop of props) {
-        vir += `│  ▸ ${prop.name}${prop.required ? ' (required)' : ' (optional)'}\n`;
-      }
-      vir += '│\n';
-    }
-
-    // Emits section
-    if (emits.length > 0) {
-      vir += '■ EMITS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
-      for (const emit of emits) {
-        vir += `│  ▸ ${emit.name}\n`;
-      }
-      vir += '│\n';
     }
 
     // Bindings section
     if (bindings.length > 0) {
-      vir += '■ BINDINGS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
+      vir += '\n[bindings]\n';
       for (const binding of bindings) {
-        vir += `│  ▸ ${binding.name} [${binding.kind}] → ${binding.source}\n`;
+        const flags: string[] = [];
+        if (binding.kind === 'SetupRef') flags.push('ref');
+        if (binding.metadata?.isUsed !== false) flags.push('used');
+        if (binding.metadata?.isMutated) flags.push('mut');
+        vir += `${binding.name}: ${binding.source} @0:0`;
+        if (flags.length > 0) {
+          vir += ` [${flags.join(', ')}]`;
+        }
+        vir += '\n';
       }
-      vir += '│\n';
     }
 
     // CSS section
+    const selectorCount = (source.match(/[.#\w][\w-]*\s*\{/g) || []).length;
+    const vBindCount = (source.match(/v-bind\(/g) || []).length;
     if (hasScoped) {
-      const selectorCount = (source.match(/[.#\w][\w-]*\s*\{/g) || []).length;
-      const vBindCount = (source.match(/v-bind\(/g) || []).length;
-      vir += '■ STYLE\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
-      vir += `│  scoped: true\n`;
-      vir += `│  selectors: ${selectorCount}\n`;
-      vir += `│  v-bind(): ${vBindCount}\n`;
-      vir += '│\n';
+      vir += '\n[css]\n';
+      vir += `scoped = true\n`;
+      vir += `selectors = ${selectorCount}\n`;
+      vir += `v_bind = ${vBindCount}\n`;
+    }
+
+    // Props section
+    if (props.length > 0) {
+      vir += '\n[props]\n';
+      for (const prop of props) {
+        vir += `${prop.name}: ${prop.type || 'any'}\n`;
+      }
+    }
+
+    // Emits section
+    if (emits.length > 0) {
+      vir += '\n[emits]\n';
+      for (const emit of emits) {
+        vir += `${emit.name}\n`;
+      }
     }
 
     // Generate scopes from source analysis
@@ -905,7 +910,7 @@ function createMockModule(): WasmModule {
             id: scopeId++,
             parentId: setupScope.id,
             kind: 'arrowFunction',
-            kindStr: 'Watch Callback',
+            kindStr: 'watch',
             start: setupStart + funcMatch.index,
             end: setupStart + funcMatch.index + funcMatch[0].length + 30,
             bindings: params,
@@ -914,6 +919,430 @@ function createMockModule(): WasmModule {
           };
           setupScope.children.push(watchScope.id);
           scopes.push(watchScope);
+        }
+
+        // Detect watchEffect callbacks
+        const watchEffectRegex = /watchEffect\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = watchEffectRegex.exec(scriptSetupMatch[1])) !== null) {
+          const watchEffectScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'watchEffect',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(watchEffectScope.id);
+          scopes.push(watchEffectScope);
+        }
+
+        // Detect computed callbacks
+        const computedRegex = /(?:const|let)\s+(\w+)\s*=\s*computed\s*\(\s*(?:\([^)]*\)\s*)?=>/g;
+        while ((funcMatch = computedRegex.exec(scriptSetupMatch[1])) !== null) {
+          const computedScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: `computed (${funcMatch[1]})`,
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(computedScope.id);
+          scopes.push(computedScope);
+        }
+
+        // Detect computed with getter/setter
+        const computedGetSetRegex = /(?:const|let)\s+(\w+)\s*=\s*computed\s*\(\s*\{/g;
+        while ((funcMatch = computedGetSetRegex.exec(scriptSetupMatch[1])) !== null) {
+          const computedScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'function',
+            kindStr: `computed (${funcMatch[1]}) [get/set]`,
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 50,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(computedScope.id);
+          scopes.push(computedScope);
+        }
+
+        // Detect lifecycle hooks
+        const lifecycleHooks = ['onMounted', 'onUnmounted', 'onBeforeMount', 'onBeforeUnmount', 'onUpdated', 'onBeforeUpdate', 'onActivated', 'onDeactivated', 'onErrorCaptured', 'onRenderTracked', 'onRenderTriggered', 'onServerPrefetch'];
+        for (const hook of lifecycleHooks) {
+          const hookRegex = new RegExp(`${hook}\\s*\\(\\s*(?:async\\s*)?\\(?([^)]*)\\)?\\s*=>`, 'g');
+          while ((funcMatch = hookRegex.exec(scriptSetupMatch[1])) !== null) {
+            const hookScope: ScopeDisplay = {
+              id: scopeId++,
+              parentId: setupScope.id,
+              kind: 'arrowFunction',
+              kindStr: hook,
+              start: setupStart + funcMatch.index,
+              end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+              bindings: [],
+              children: [],
+              depth: 2,
+            };
+            setupScope.children.push(hookScope.id);
+            scopes.push(hookScope);
+          }
+        }
+
+        // Detect provide with factory function
+        const provideRegex = /provide\s*\(\s*['"][^'"]+['"]\s*,\s*\(\)\s*=>/g;
+        while ((funcMatch = provideRegex.exec(scriptSetupMatch[1])) !== null) {
+          const provideScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'provide factory',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(provideScope.id);
+          scopes.push(provideScope);
+        }
+
+        // Detect inject with default factory
+        const injectRegex = /inject\s*\(\s*['"][^'"]+['"]\s*,\s*\(\)\s*=>/g;
+        while ((funcMatch = injectRegex.exec(scriptSetupMatch[1])) !== null) {
+          const injectScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'inject default',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(injectScope.id);
+          scopes.push(injectScope);
+        }
+
+        // Detect try-catch blocks
+        const tryCatchRegex = /try\s*\{/g;
+        while ((funcMatch = tryCatchRegex.exec(scriptSetupMatch[1])) !== null) {
+          const tryScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'try',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(tryScope.id);
+          scopes.push(tryScope);
+        }
+
+        const catchRegex = /catch\s*\(\s*(\w+)\s*\)\s*\{/g;
+        while ((funcMatch = catchRegex.exec(scriptSetupMatch[1])) !== null) {
+          const catchScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'catch',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(catchScope.id);
+          scopes.push(catchScope);
+        }
+
+        // Detect for loops
+        const forLoopRegex = /for\s*\(\s*(?:const|let|var)\s+(\w+)/g;
+        while ((funcMatch = forLoopRegex.exec(scriptSetupMatch[1])) !== null) {
+          const forScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'for',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(forScope.id);
+          scopes.push(forScope);
+        }
+
+        // Detect for...of / for...in loops
+        const forOfInRegex = /for\s*\(\s*(?:const|let|var)\s+(\w+)\s+(?:of|in)\s+/g;
+        while ((funcMatch = forOfInRegex.exec(scriptSetupMatch[1])) !== null) {
+          const forOfScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'for..of/in',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(forOfScope.id);
+          scopes.push(forOfScope);
+        }
+
+        // Detect if blocks with block-scoped variables
+        const ifLetRegex = /if\s*\([^)]+\)\s*\{[^}]*(?:const|let)\s+(\w+)/g;
+        while ((funcMatch = ifLetRegex.exec(scriptSetupMatch[1])) !== null) {
+          const ifScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'if',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(ifScope.id);
+          scopes.push(ifScope);
+        }
+
+        // Detect Array.forEach callbacks
+        const forEachRegex = /\.forEach\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = forEachRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const forEachScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'forEach',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(forEachScope.id);
+          scopes.push(forEachScope);
+        }
+
+        // Detect Array.map callbacks
+        const mapRegex = /\.map\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = mapRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const mapScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'map',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(mapScope.id);
+          scopes.push(mapScope);
+        }
+
+        // Detect Array.filter callbacks
+        const filterRegex = /\.filter\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = filterRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const filterScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'filter',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(filterScope.id);
+          scopes.push(filterScope);
+        }
+
+        // Detect Array.reduce callbacks
+        const reduceRegex = /\.reduce\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = reduceRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const reduceScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'reduce',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(reduceScope.id);
+          scopes.push(reduceScope);
+        }
+
+        // Detect Array.find/findIndex callbacks
+        const findRegex = /\.find(?:Index)?\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = findRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const findScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'find',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(findScope.id);
+          scopes.push(findScope);
+        }
+
+        // Detect Array.some/every callbacks
+        const someEveryRegex = /\.(?:some|every)\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = someEveryRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const someEveryScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'some/every',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(someEveryScope.id);
+          scopes.push(someEveryScope);
+        }
+
+        // Detect Promise.then callbacks
+        const thenRegex = /\.then\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = thenRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const thenScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: '.then',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(thenScope.id);
+          scopes.push(thenScope);
+        }
+
+        // Detect Promise.catch callbacks
+        const promiseCatchRegex = /\.catch\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = promiseCatchRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const promiseCatchScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: '.catch',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(promiseCatchScope.id);
+          scopes.push(promiseCatchScope);
+        }
+
+        // Detect Promise.finally callbacks
+        const finallyRegex = /\.finally\s*\(\s*\(\)\s*=>/g;
+        while ((funcMatch = finallyRegex.exec(scriptSetupMatch[1])) !== null) {
+          const finallyScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: '.finally',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(finallyScope.id);
+          scopes.push(finallyScope);
+        }
+
+        // Detect setTimeout/setInterval callbacks
+        const timerRegex = /set(?:Timeout|Interval)\s*\(\s*\(\)\s*=>/g;
+        while ((funcMatch = timerRegex.exec(scriptSetupMatch[1])) !== null) {
+          const timerScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'timer',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(timerScope.id);
+          scopes.push(timerScope);
+        }
+
+        // Detect nextTick callbacks
+        const nextTickRegex = /nextTick\s*\(\s*\(\)\s*=>/g;
+        while ((funcMatch = nextTickRegex.exec(scriptSetupMatch[1])) !== null) {
+          const nextTickScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'nextTick',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(nextTickScope.id);
+          scopes.push(nextTickScope);
+        }
+
+        // Detect async IIFE
+        const asyncIifeRegex = /\(\s*async\s*\(\)\s*=>\s*\{/g;
+        while ((funcMatch = asyncIifeRegex.exec(scriptSetupMatch[1])) !== null) {
+          const asyncIifeScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'async IIFE',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(asyncIifeScope.id);
+          scopes.push(asyncIifeScope);
         }
       }
     }
@@ -993,29 +1422,19 @@ function createMockModule(): WasmModule {
     }
 
     // Add scopes to VIR
-    if (scopes.length > 1) {
-      vir += '■ SCOPES\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
+    if (scopes.length > 0) {
+      vir += '\n[scopes]\n';
       for (const scope of scopes) {
-        const indent = '  '.repeat(scope.depth);
-        vir += `│${indent}▸ ${scope.kindStr} [${scope.start}:${scope.end}]`;
+        vir += `#${scope.id} ${scope.kindStr.toLowerCase()} @${scope.start}:${scope.end}`;
         if (scope.bindings.length > 0) {
-          vir += ` → {${scope.bindings.join(', ')}}`;
+          vir += ` {${scope.bindings.join(', ')}}`;
         }
         vir += '\n';
       }
-      vir += '│\n';
     }
 
-    // Stats section
-    vir += '■ STATS\n';
-    vir += '├─────────────────────────────────────────────────────────────────\n';
-    vir += `│  bindings: ${bindings.length}\n`;
-    vir += `│  macros: ${macros.length}\n`;
-    vir += `│  props: ${props.length}\n`;
-    vir += `│  emits: ${emits.length}\n`;
-    vir += `│  scopes: ${scopes.length}\n`;
-    vir += '╰─────────────────────────────────────────────────────────────────╯\n';
+    // Update stats with scope count
+    vir = vir.replace('[stats]\n', `[stats]\nscopes = ${scopes.length}\n`);
 
     const summary: AnalysisSummary = {
       is_setup: hasScriptSetup,
@@ -2205,67 +2624,71 @@ function createMockModule(): WasmModule {
       }
     }
 
-    // Generate VIR text
+    // Generate VIR text (formal TOML-like format)
     let vir = '';
-    vir += '╭─────────────────────────────────────────────────────────────────╮\n';
-    vir += '│  VIR — Vize Intermediate Representation (Mock)                  │\n';
-    vir += '╰─────────────────────────────────────────────────────────────────╯\n';
+    vir += '# VIR v0.1\n';
     vir += '\n';
+
+    // Stats section
+    vir += '[stats]\n';
+    vir += `bindings = ${bindings.length}\n`;
+    vir += `macros = ${macros.length}\n`;
 
     // Macros section
     if (macros.length > 0) {
-      vir += '■ MACROS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
+      vir += '\n[macros]\n';
       for (const macro of macros) {
-        vir += `│  @${macro.name}`;
+        vir += `@${macro.name}`;
         if (macro.type_args) {
-          vir += ` <${macro.type_args.trim().substring(0, 30)}${macro.type_args.length > 30 ? '...' : ''}>`;
+          vir += `<{\n${macro.type_args.trim()}\n}>`;
         }
-        vir += '\n';
+        if (macro.identifier) {
+          vir += ` -> ${macro.identifier}`;
+        }
+        vir += ` # ${macro.start}:${macro.end}\n`;
       }
-      vir += '│\n';
-    }
-
-    // Props section
-    if (props.length > 0) {
-      vir += '■ PROPS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
-      for (const prop of props) {
-        vir += `│  ▸ ${prop.name}${prop.required ? ' (required)' : ' (optional)'}\n`;
-      }
-      vir += '│\n';
-    }
-
-    // Emits section
-    if (emits.length > 0) {
-      vir += '■ EMITS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
-      for (const emit of emits) {
-        vir += `│  ▸ ${emit.name}\n`;
-      }
-      vir += '│\n';
     }
 
     // Bindings section
     if (bindings.length > 0) {
-      vir += '■ BINDINGS\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
+      vir += '\n[bindings]\n';
       for (const binding of bindings) {
-        vir += `│  ▸ ${binding.name} [${binding.kind}] → ${binding.source}\n`;
+        const flags: string[] = [];
+        if (binding.kind === 'SetupRef') flags.push('ref');
+        if (binding.metadata?.isUsed !== false) flags.push('used');
+        if (binding.metadata?.isMutated) flags.push('mut');
+        vir += `${binding.name}: ${binding.source} @0:0`;
+        if (flags.length > 0) {
+          vir += ` [${flags.join(', ')}]`;
+        }
+        vir += '\n';
       }
-      vir += '│\n';
     }
 
     // CSS section
+    const selectorCount = (source.match(/[.#\w][\w-]*\s*\{/g) || []).length;
+    const vBindCount = (source.match(/v-bind\(/g) || []).length;
     if (hasScoped) {
-      const selectorCount = (source.match(/[.#\w][\w-]*\s*\{/g) || []).length;
-      const vBindCount = (source.match(/v-bind\(/g) || []).length;
-      vir += '■ STYLE\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
-      vir += `│  scoped: true\n`;
-      vir += `│  selectors: ${selectorCount}\n`;
-      vir += `│  v-bind(): ${vBindCount}\n`;
-      vir += '│\n';
+      vir += '\n[css]\n';
+      vir += `scoped = true\n`;
+      vir += `selectors = ${selectorCount}\n`;
+      vir += `v_bind = ${vBindCount}\n`;
+    }
+
+    // Props section
+    if (props.length > 0) {
+      vir += '\n[props]\n';
+      for (const prop of props) {
+        vir += `${prop.name}: ${prop.type || 'any'}\n`;
+      }
+    }
+
+    // Emits section
+    if (emits.length > 0) {
+      vir += '\n[emits]\n';
+      for (const emit of emits) {
+        vir += `${emit.name}\n`;
+      }
     }
 
     // Generate scopes from source analysis
@@ -2350,7 +2773,7 @@ function createMockModule(): WasmModule {
             id: scopeId++,
             parentId: setupScope.id,
             kind: 'arrowFunction',
-            kindStr: 'Watch Callback',
+            kindStr: 'watch',
             start: setupStart + funcMatch.index,
             end: setupStart + funcMatch.index + funcMatch[0].length + 30,
             bindings: params,
@@ -2359,6 +2782,430 @@ function createMockModule(): WasmModule {
           };
           setupScope.children.push(watchScope.id);
           scopes.push(watchScope);
+        }
+
+        // Detect watchEffect callbacks
+        const watchEffectRegex = /watchEffect\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = watchEffectRegex.exec(scriptSetupMatch[1])) !== null) {
+          const watchEffectScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'watchEffect',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(watchEffectScope.id);
+          scopes.push(watchEffectScope);
+        }
+
+        // Detect computed callbacks
+        const computedRegex = /(?:const|let)\s+(\w+)\s*=\s*computed\s*\(\s*(?:\([^)]*\)\s*)?=>/g;
+        while ((funcMatch = computedRegex.exec(scriptSetupMatch[1])) !== null) {
+          const computedScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: `computed (${funcMatch[1]})`,
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(computedScope.id);
+          scopes.push(computedScope);
+        }
+
+        // Detect computed with getter/setter
+        const computedGetSetRegex = /(?:const|let)\s+(\w+)\s*=\s*computed\s*\(\s*\{/g;
+        while ((funcMatch = computedGetSetRegex.exec(scriptSetupMatch[1])) !== null) {
+          const computedScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'function',
+            kindStr: `computed (${funcMatch[1]}) [get/set]`,
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 50,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(computedScope.id);
+          scopes.push(computedScope);
+        }
+
+        // Detect lifecycle hooks
+        const lifecycleHooks = ['onMounted', 'onUnmounted', 'onBeforeMount', 'onBeforeUnmount', 'onUpdated', 'onBeforeUpdate', 'onActivated', 'onDeactivated', 'onErrorCaptured', 'onRenderTracked', 'onRenderTriggered', 'onServerPrefetch'];
+        for (const hook of lifecycleHooks) {
+          const hookRegex = new RegExp(`${hook}\\s*\\(\\s*(?:async\\s*)?\\(?([^)]*)\\)?\\s*=>`, 'g');
+          while ((funcMatch = hookRegex.exec(scriptSetupMatch[1])) !== null) {
+            const hookScope: ScopeDisplay = {
+              id: scopeId++,
+              parentId: setupScope.id,
+              kind: 'arrowFunction',
+              kindStr: hook,
+              start: setupStart + funcMatch.index,
+              end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+              bindings: [],
+              children: [],
+              depth: 2,
+            };
+            setupScope.children.push(hookScope.id);
+            scopes.push(hookScope);
+          }
+        }
+
+        // Detect provide with factory function
+        const provideRegex = /provide\s*\(\s*['"][^'"]+['"]\s*,\s*\(\)\s*=>/g;
+        while ((funcMatch = provideRegex.exec(scriptSetupMatch[1])) !== null) {
+          const provideScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'provide factory',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(provideScope.id);
+          scopes.push(provideScope);
+        }
+
+        // Detect inject with default factory
+        const injectRegex = /inject\s*\(\s*['"][^'"]+['"]\s*,\s*\(\)\s*=>/g;
+        while ((funcMatch = injectRegex.exec(scriptSetupMatch[1])) !== null) {
+          const injectScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'inject default',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(injectScope.id);
+          scopes.push(injectScope);
+        }
+
+        // Detect try-catch blocks
+        const tryCatchRegex = /try\s*\{/g;
+        while ((funcMatch = tryCatchRegex.exec(scriptSetupMatch[1])) !== null) {
+          const tryScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'try',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(tryScope.id);
+          scopes.push(tryScope);
+        }
+
+        const catchRegex = /catch\s*\(\s*(\w+)\s*\)\s*\{/g;
+        while ((funcMatch = catchRegex.exec(scriptSetupMatch[1])) !== null) {
+          const catchScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'catch',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(catchScope.id);
+          scopes.push(catchScope);
+        }
+
+        // Detect for loops
+        const forLoopRegex = /for\s*\(\s*(?:const|let|var)\s+(\w+)/g;
+        while ((funcMatch = forLoopRegex.exec(scriptSetupMatch[1])) !== null) {
+          const forScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'for',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(forScope.id);
+          scopes.push(forScope);
+        }
+
+        // Detect for...of / for...in loops
+        const forOfInRegex = /for\s*\(\s*(?:const|let|var)\s+(\w+)\s+(?:of|in)\s+/g;
+        while ((funcMatch = forOfInRegex.exec(scriptSetupMatch[1])) !== null) {
+          const forOfScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'for..of/in',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(forOfScope.id);
+          scopes.push(forOfScope);
+        }
+
+        // Detect if blocks with block-scoped variables
+        const ifLetRegex = /if\s*\([^)]+\)\s*\{[^}]*(?:const|let)\s+(\w+)/g;
+        while ((funcMatch = ifLetRegex.exec(scriptSetupMatch[1])) !== null) {
+          const ifScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'block',
+            kindStr: 'if',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [funcMatch[1]],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(ifScope.id);
+          scopes.push(ifScope);
+        }
+
+        // Detect Array.forEach callbacks
+        const forEachRegex = /\.forEach\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = forEachRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const forEachScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'forEach',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(forEachScope.id);
+          scopes.push(forEachScope);
+        }
+
+        // Detect Array.map callbacks
+        const mapRegex = /\.map\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = mapRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const mapScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'map',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(mapScope.id);
+          scopes.push(mapScope);
+        }
+
+        // Detect Array.filter callbacks
+        const filterRegex = /\.filter\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = filterRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const filterScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'filter',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(filterScope.id);
+          scopes.push(filterScope);
+        }
+
+        // Detect Array.reduce callbacks
+        const reduceRegex = /\.reduce\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = reduceRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const reduceScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'reduce',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(reduceScope.id);
+          scopes.push(reduceScope);
+        }
+
+        // Detect Array.find/findIndex callbacks
+        const findRegex = /\.find(?:Index)?\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = findRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const findScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'find',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(findScope.id);
+          scopes.push(findScope);
+        }
+
+        // Detect Array.some/every callbacks
+        const someEveryRegex = /\.(?:some|every)\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = someEveryRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const someEveryScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'some/every',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(someEveryScope.id);
+          scopes.push(someEveryScope);
+        }
+
+        // Detect Promise.then callbacks
+        const thenRegex = /\.then\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = thenRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const thenScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: '.then',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(thenScope.id);
+          scopes.push(thenScope);
+        }
+
+        // Detect Promise.catch callbacks
+        const promiseCatchRegex = /\.catch\s*\(\s*\(?([^)]*)\)?\s*=>/g;
+        while ((funcMatch = promiseCatchRegex.exec(scriptSetupMatch[1])) !== null) {
+          const params = funcMatch[1]?.split(',').map(p => p.trim()).filter(Boolean) || [];
+          const promiseCatchScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: '.catch',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: params,
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(promiseCatchScope.id);
+          scopes.push(promiseCatchScope);
+        }
+
+        // Detect Promise.finally callbacks
+        const finallyRegex = /\.finally\s*\(\s*\(\)\s*=>/g;
+        while ((funcMatch = finallyRegex.exec(scriptSetupMatch[1])) !== null) {
+          const finallyScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: '.finally',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(finallyScope.id);
+          scopes.push(finallyScope);
+        }
+
+        // Detect setTimeout/setInterval callbacks
+        const timerRegex = /set(?:Timeout|Interval)\s*\(\s*\(\)\s*=>/g;
+        while ((funcMatch = timerRegex.exec(scriptSetupMatch[1])) !== null) {
+          const timerScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'timer',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(timerScope.id);
+          scopes.push(timerScope);
+        }
+
+        // Detect nextTick callbacks
+        const nextTickRegex = /nextTick\s*\(\s*\(\)\s*=>/g;
+        while ((funcMatch = nextTickRegex.exec(scriptSetupMatch[1])) !== null) {
+          const nextTickScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'nextTick',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 20,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(nextTickScope.id);
+          scopes.push(nextTickScope);
+        }
+
+        // Detect async IIFE
+        const asyncIifeRegex = /\(\s*async\s*\(\)\s*=>\s*\{/g;
+        while ((funcMatch = asyncIifeRegex.exec(scriptSetupMatch[1])) !== null) {
+          const asyncIifeScope: ScopeDisplay = {
+            id: scopeId++,
+            parentId: setupScope.id,
+            kind: 'arrowFunction',
+            kindStr: 'async IIFE',
+            start: setupStart + funcMatch.index,
+            end: setupStart + funcMatch.index + funcMatch[0].length + 30,
+            bindings: [],
+            children: [],
+            depth: 2,
+          };
+          setupScope.children.push(asyncIifeScope.id);
+          scopes.push(asyncIifeScope);
         }
       }
     }
@@ -2438,29 +3285,19 @@ function createMockModule(): WasmModule {
     }
 
     // Add scopes to VIR
-    if (scopes.length > 1) {
-      vir += '■ SCOPES\n';
-      vir += '├─────────────────────────────────────────────────────────────────\n';
+    if (scopes.length > 0) {
+      vir += '\n[scopes]\n';
       for (const scope of scopes) {
-        const indent = '  '.repeat(scope.depth);
-        vir += `│${indent}▸ ${scope.kindStr} [${scope.start}:${scope.end}]`;
+        vir += `#${scope.id} ${scope.kindStr.toLowerCase()} @${scope.start}:${scope.end}`;
         if (scope.bindings.length > 0) {
-          vir += ` → {${scope.bindings.join(', ')}}`;
+          vir += ` {${scope.bindings.join(', ')}}`;
         }
         vir += '\n';
       }
-      vir += '│\n';
     }
 
-    // Stats section
-    vir += '■ STATS\n';
-    vir += '├─────────────────────────────────────────────────────────────────\n';
-    vir += `│  bindings: ${bindings.length}\n`;
-    vir += `│  macros: ${macros.length}\n`;
-    vir += `│  props: ${props.length}\n`;
-    vir += `│  emits: ${emits.length}\n`;
-    vir += `│  scopes: ${scopes.length}\n`;
-    vir += '╰─────────────────────────────────────────────────────────────────╯\n';
+    // Update stats with scope count
+    vir = vir.replace('[stats]\n', `[stats]\nscopes = ${scopes.length}\n`);
 
     const summary: AnalysisSummary = {
       is_setup: hasScriptSetup,

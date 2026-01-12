@@ -29,6 +29,7 @@
 use crate::context::LintContext;
 use crate::diagnostic::Severity;
 use crate::rule::{Rule, RuleCategory, RuleMeta};
+use vize_croquis::naming::names_match;
 use vize_relief::ast::{ElementNode, ExpressionNode};
 
 static META: RuleMeta = RuleMeta {
@@ -42,40 +43,6 @@ static META: RuleMeta = RuleMeta {
 /// Prefer props shorthand rule
 #[derive(Default)]
 pub struct PreferPropsShorthand;
-
-impl PreferPropsShorthand {
-    /// Convert kebab-case to camelCase
-    fn kebab_to_camel(s: &str) -> String {
-        let mut result = String::with_capacity(s.len());
-        let mut capitalize_next = false;
-
-        for c in s.chars() {
-            if c == '-' {
-                capitalize_next = true;
-            } else if capitalize_next {
-                result.push(c.to_ascii_uppercase());
-                capitalize_next = false;
-            } else {
-                result.push(c);
-            }
-        }
-
-        result
-    }
-
-    /// Check if prop name and value name match (considering kebab-case conversion)
-    fn names_match(prop_name: &str, value: &str) -> bool {
-        // Direct match
-        if prop_name == value {
-            return true;
-        }
-
-        // Check if kebab-case prop matches camelCase value
-        // e.g., user-name matches userName
-        let camel_prop = Self::kebab_to_camel(prop_name);
-        camel_prop == value
-    }
-}
 
 impl Rule for PreferPropsShorthand {
     fn meta(&self) -> &'static RuleMeta {
@@ -113,7 +80,7 @@ impl Rule for PreferPropsShorthand {
                             let is_simple_identifier =
                                 value.chars().all(|c: char| c.is_alphanumeric() || c == '_');
 
-                            if is_simple_identifier && Self::names_match(prop_name, value) {
+                            if is_simple_identifier && names_match(prop_name, value) {
                                 ctx.warn_with_help(
                                     format!(
                                         "Use shorthand syntax: `:{}` instead of `:{}=\"{}\"`",
@@ -180,15 +147,11 @@ mod tests {
     }
 
     #[test]
-    fn test_kebab_to_camel() {
-        assert_eq!(
-            PreferPropsShorthand::kebab_to_camel("user-name"),
-            "userName"
-        );
-        assert_eq!(
-            PreferPropsShorthand::kebab_to_camel("foo-bar-baz"),
-            "fooBarBaz"
-        );
-        assert_eq!(PreferPropsShorthand::kebab_to_camel("simple"), "simple");
+    fn test_camelize() {
+        // Test via vize_carton::camelize (used internally by names_match)
+        use vize_carton::camelize;
+        assert_eq!(camelize("user-name").as_str(), "userName");
+        assert_eq!(camelize("foo-bar-baz").as_str(), "fooBarBaz");
+        assert_eq!(camelize("simple").as_str(), "simple");
     }
 }

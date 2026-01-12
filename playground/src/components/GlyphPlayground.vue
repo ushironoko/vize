@@ -45,7 +45,7 @@ const source = ref(GLYPH_PRESET);
 const formatResult = ref<FormatResult | null>(null);
 const error = ref<string | null>(null);
 const formatTime = ref<number | null>(null);
-const activeTab = ref<'formatted' | 'diff'>('formatted');
+const activeTab = ref<'formatted' | 'diff' | 'options'>('formatted');
 
 // Format options
 const options = ref<FormatOptions>({
@@ -147,7 +147,10 @@ watch(
   <div class="glyph-playground">
     <div class="panel input-panel">
       <div class="panel-header">
-        <h2>Vue SFC (.vue)</h2>
+        <div class="header-title">
+          <span class="icon">&#x270E;</span>
+          <h2>Source</h2>
+        </div>
         <div class="panel-actions">
           <button @click="source = GLYPH_PRESET" class="btn-ghost">Reset</button>
           <button @click="copyToClipboard(source)" class="btn-ghost">Copy</button>
@@ -160,106 +163,162 @@ watch(
 
     <div class="panel output-panel">
       <div class="panel-header">
-        <h2>
-          Formatted Output
-          <span v-if="formatTime !== null" class="format-time">
-            {{ formatTime.toFixed(4) }}ms
+        <div class="header-title">
+          <span class="icon">&#x2728;</span>
+          <h2>Code Formatting</h2>
+          <span v-if="formatTime !== null" class="perf-badge">
+            {{ formatTime.toFixed(2) }}ms
           </span>
           <span v-if="formatResult" :class="['status-badge', formatResult.changed ? 'changed' : 'unchanged']">
             {{ formatResult.changed ? 'Changed' : 'Unchanged' }}
           </span>
-        </h2>
-        <div class="panel-actions">
-          <button v-if="formatResult?.changed" @click="applyFormatted" class="btn-primary">Apply</button>
-          <button @click="copyToClipboard(formatResult?.code || '')" class="btn-ghost">Copy</button>
         </div>
         <div class="tabs">
           <button
             :class="['tab', { active: activeTab === 'formatted' }]"
             @click="activeTab = 'formatted'"
-          >
-            Formatted
-          </button>
+          >Formatted</button>
           <button
             :class="['tab', { active: activeTab === 'diff' }]"
             @click="activeTab = 'diff'"
-          >
-            Diff
-          </button>
+          >Diff</button>
+          <button
+            :class="['tab', { active: activeTab === 'options' }]"
+            @click="activeTab = 'options'"
+          >Options</button>
         </div>
       </div>
 
       <div class="output-content">
-        <div v-if="error" class="error">
-          <h3>Format Error</h3>
-          <pre>{{ error }}</pre>
+        <div v-if="error" class="error-panel">
+          <div class="error-header">Format Error</div>
+          <pre class="error-content">{{ error }}</pre>
         </div>
 
         <template v-else-if="formatResult">
           <!-- Formatted Tab -->
           <div v-if="activeTab === 'formatted'" class="formatted-output">
-            <CodeHighlight :code="formatResult.code" language="vue" show-line-numbers />
+            <div class="output-header-bar">
+              <span class="output-title">Formatted Code</span>
+              <div class="output-actions">
+                <button v-if="formatResult?.changed" @click="applyFormatted" class="btn-apply">Apply Changes</button>
+                <button @click="copyToClipboard(formatResult?.code || '')" class="btn-ghost">Copy</button>
+              </div>
+            </div>
+            <div class="code-container">
+              <CodeHighlight :code="formatResult.code" language="vue" show-line-numbers />
+            </div>
           </div>
 
           <!-- Diff Tab -->
           <div v-else-if="activeTab === 'diff'" class="diff-output">
-            <div v-if="!formatResult.changed" class="no-changes">
-              No changes needed
+            <div class="output-header-bar">
+              <span class="output-title">Changes</span>
+              <span class="diff-stats">
+                <span class="stat additions">+{{ diffLines.filter(l => l.type === 'added').length }}</span>
+                <span class="stat deletions">-{{ diffLines.filter(l => l.type === 'removed').length }}</span>
+              </span>
+            </div>
+            <div v-if="!formatResult.changed" class="success-state">
+              <span class="success-icon">&#x2713;</span>
+              <span>No changes needed</span>
             </div>
             <div v-else class="diff-view">
-              <div
-                v-for="(line, i) in diffLines"
-                :key="i"
-                :class="['diff-line', line.type]"
-              >
-                <span class="line-prefix">{{ line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' ' }}</span>
-                <span class="line-content">{{ line.content }}</span>
+              <div class="diff-line-numbers">
+                <span v-for="(line, i) in diffLines" :key="i" class="diff-ln">{{ i + 1 }}</span>
+              </div>
+              <div class="diff-code">
+                <div
+                  v-for="(line, i) in diffLines"
+                  :key="i"
+                  :class="['diff-line', `diff-${line.type}`]"
+                >
+                  <span class="line-prefix">{{ line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' ' }}</span>
+                  <span class="line-content">{{ line.content || ' ' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Options Tab -->
+          <div v-else-if="activeTab === 'options'" class="options-output">
+            <div class="output-header-bar">
+              <span class="output-title">Format Configuration</span>
+            </div>
+            <div class="options-content">
+              <div class="options-section">
+                <h4 class="section-title">Layout</h4>
+                <div class="options-grid">
+                  <label class="option-card">
+                    <div class="option-header">
+                      <span class="option-name">Print Width</span>
+                      <input type="number" v-model.number="options.printWidth" min="40" max="200" class="option-input" />
+                    </div>
+                    <span class="option-desc">Maximum line length before wrapping</span>
+                  </label>
+                  <label class="option-card">
+                    <div class="option-header">
+                      <span class="option-name">Tab Width</span>
+                      <input type="number" v-model.number="options.tabWidth" min="1" max="8" class="option-input" />
+                    </div>
+                    <span class="option-desc">Number of spaces per indentation level</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="options-section">
+                <h4 class="section-title">Style</h4>
+                <div class="toggle-grid">
+                  <label class="toggle-card">
+                    <div class="toggle-main">
+                      <input type="checkbox" v-model="options.useTabs" class="toggle-checkbox" />
+                      <span class="toggle-name">Use Tabs</span>
+                    </div>
+                    <span class="toggle-desc">Indent with tabs instead of spaces</span>
+                  </label>
+                  <label class="toggle-card">
+                    <div class="toggle-main">
+                      <input type="checkbox" v-model="options.semi" class="toggle-checkbox" />
+                      <span class="toggle-name">Semicolons</span>
+                    </div>
+                    <span class="toggle-desc">Add semicolons at the end of statements</span>
+                  </label>
+                  <label class="toggle-card">
+                    <div class="toggle-main">
+                      <input type="checkbox" v-model="options.singleQuote" class="toggle-checkbox" />
+                      <span class="toggle-name">Single Quotes</span>
+                    </div>
+                    <span class="toggle-desc">Use single quotes instead of double quotes</span>
+                  </label>
+                  <label class="toggle-card">
+                    <div class="toggle-main">
+                      <input type="checkbox" v-model="options.bracketSpacing" class="toggle-checkbox" />
+                      <span class="toggle-name">Bracket Spacing</span>
+                    </div>
+                    <span class="toggle-desc">Print spaces between brackets in object literals</span>
+                  </label>
+                  <label class="toggle-card">
+                    <div class="toggle-main">
+                      <input type="checkbox" v-model="options.bracketSameLine" class="toggle-checkbox" />
+                      <span class="toggle-name">Bracket Same Line</span>
+                    </div>
+                    <span class="toggle-desc">Put closing bracket on the same line</span>
+                  </label>
+                  <label class="toggle-card">
+                    <div class="toggle-main">
+                      <input type="checkbox" v-model="options.singleAttributePerLine" class="toggle-checkbox" />
+                      <span class="toggle-name">Single Attribute Per Line</span>
+                    </div>
+                    <span class="toggle-desc">Enforce single attribute per line in templates</span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
         </template>
 
-        <div v-else class="loading">
+        <div v-else class="loading-state">
           <span>Enter Vue code to format</span>
-        </div>
-      </div>
-
-      <!-- Format Options -->
-      <div class="options-panel">
-        <h3>Format Options</h3>
-        <div class="options-grid">
-          <label class="option">
-            <span>Print Width</span>
-            <input type="number" v-model.number="options.printWidth" min="40" max="200" />
-          </label>
-          <label class="option">
-            <span>Tab Width</span>
-            <input type="number" v-model.number="options.tabWidth" min="1" max="8" />
-          </label>
-          <label class="option checkbox">
-            <input type="checkbox" v-model="options.useTabs" />
-            <span>Use Tabs</span>
-          </label>
-          <label class="option checkbox">
-            <input type="checkbox" v-model="options.semi" />
-            <span>Semicolons</span>
-          </label>
-          <label class="option checkbox">
-            <input type="checkbox" v-model="options.singleQuote" />
-            <span>Single Quotes</span>
-          </label>
-          <label class="option checkbox">
-            <input type="checkbox" v-model="options.bracketSpacing" />
-            <span>Bracket Spacing</span>
-          </label>
-          <label class="option checkbox">
-            <input type="checkbox" v-model="options.bracketSameLine" />
-            <span>Bracket Same Line</span>
-          </label>
-          <label class="option checkbox">
-            <input type="checkbox" v-model="options.singleAttributePerLine" />
-            <span>Single Attr Per Line</span>
-          </label>
         </div>
       </div>
     </div>
@@ -272,13 +331,16 @@ watch(
   grid-template-columns: 1fr 1fr;
   gap: 0;
   height: 100%;
-  grid-column: 1 / -1; /* Span full width of parent grid */
+  min-height: 0;
+  grid-column: 1 / -1;
+  background: var(--bg-primary);
 }
 
 .panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .input-panel {
@@ -293,22 +355,32 @@ watch(
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
   flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 0.5rem;
 }
 
-.panel-header h2 {
-  font-size: 0.875rem;
-  font-weight: 600;
+.header-title {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.format-time {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--text-muted);
+.header-title .icon {
+  font-size: 1rem;
+  color: var(--accent-rust);
+}
+
+.header-title h2 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.perf-badge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .status-badge {
@@ -335,7 +407,7 @@ watch(
 }
 
 .btn-ghost {
-  padding: 0.25rem 0.75rem;
+  padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--border-primary);
@@ -350,28 +422,13 @@ watch(
   color: var(--text-primary);
 }
 
-.btn-primary {
-  padding: 0.25rem 0.75rem;
-  font-size: 0.75rem;
-  background: var(--accent-rust);
-  border: none;
-  border-radius: 4px;
-  color: white;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-primary:hover {
-  background: #8b3720;
-}
-
 .tabs {
   display: flex;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .tab {
-  padding: 0.375rem 0.75rem;
+  padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   background: transparent;
   border: none;
@@ -387,8 +444,9 @@ watch(
 }
 
 .tab.active {
-  color: var(--accent-rust);
-  background: rgba(163, 72, 40, 0.15);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  font-weight: 500;
 }
 
 .editor-container {
@@ -402,62 +460,184 @@ watch(
   padding: 1rem;
 }
 
-.error {
-  padding: 1rem;
+/* Error State */
+.error-panel {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
+  overflow: hidden;
 }
 
-.error h3 {
-  color: #ef4444;
-  margin-bottom: 0.5rem;
-  font-size: 0.875rem;
+.error-header {
+  padding: 0.5rem 0.75rem;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
-.error pre {
+.error-content {
+  padding: 0.75rem;
   font-size: 0.75rem;
   color: #fca5a5;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.formatted-output {
-  height: 100%;
+/* Output Header Bar */
+.output-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, rgba(163, 72, 40, 0.15), rgba(217, 119, 6, 0.15));
+  border: 1px solid rgba(163, 72, 40, 0.3);
+  border-radius: 4px 4px 0 0;
+  border-bottom: none;
 }
 
-.no-changes {
+.output-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-rust);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.output-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-apply {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.625rem;
+  background: var(--accent-rust);
+  border: none;
+  border-radius: 3px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-apply:hover {
+  background: #8b3720;
+}
+
+/* Formatted Output */
+.formatted-output {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-container {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0 0 4px 4px;
+  overflow: auto;
+}
+
+/* Diff Output */
+.diff-output {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-stats {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.diff-stats .stat {
+  font-size: 0.625rem;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+}
+
+.diff-stats .additions {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.diff-stats .deletions {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.success-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 200px;
+  gap: 0.5rem;
+  padding: 2rem;
   color: #4ade80;
-  font-size: 1rem;
+  font-size: 0.875rem;
+}
+
+.success-icon {
+  font-size: 1.25rem;
 }
 
 .diff-view {
+  flex: 1;
+  display: flex;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0 0 4px 4px;
+  font-size: 0.8125rem;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  overflow: auto;
+  line-height: 1.6;
+}
+
+.diff-line-numbers {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0;
+  background: rgba(0, 0, 0, 0.15);
+  border-right: 1px solid var(--border-primary);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.diff-ln {
+  padding: 0 0.75rem;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  min-width: 2.5rem;
+  opacity: 0.6;
+}
+
+.diff-code {
+  flex: 1;
+  padding: 0.75rem 0;
   overflow-x: auto;
 }
 
 .diff-line {
   display: flex;
-  padding: 0.125rem 0.5rem;
   white-space: pre;
+  padding: 0 1rem;
+  min-height: 1.3em;
 }
 
-.diff-line.same {
+.diff-same {
   color: var(--text-secondary);
 }
 
-.diff-line.removed {
-  background: rgba(239, 68, 68, 0.15);
+.diff-removed {
+  background: rgba(239, 68, 68, 0.1);
   color: #fca5a5;
 }
 
-.diff-line.added {
-  background: rgba(74, 222, 128, 0.15);
+.diff-added {
+  background: rgba(74, 222, 128, 0.1);
   color: #86efac;
 }
 
@@ -465,43 +645,89 @@ watch(
   width: 1.5rem;
   flex-shrink: 0;
   user-select: none;
+  color: var(--text-muted);
+}
+
+.diff-removed .line-prefix {
+  color: #f87171;
+}
+
+.diff-added .line-prefix {
+  color: #4ade80;
 }
 
 .line-content {
   flex: 1;
 }
 
-.options-panel {
-  padding: 0.75rem 1rem;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-primary);
-  flex-shrink: 0;
+/* Options Output */
+.options-output {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-.options-panel h3 {
+.options-content {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0 0 4px 4px;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.options-section {
+  margin-bottom: 1.5rem;
+}
+
+.options-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-title {
   font-size: 0.75rem;
   font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .options-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.75rem;
 }
 
-.option {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
+.option-card {
+  padding: 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-.option input[type="number"] {
+.option-card:hover {
+  border-color: var(--accent-rust);
+}
+
+.option-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.option-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.option-input {
   width: 60px;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
@@ -509,31 +735,86 @@ watch(
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.option.checkbox {
+.option-input:focus {
+  outline: none;
+  border-color: var(--accent-rust);
+}
+
+.option-desc {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.5rem;
+}
+
+.toggle-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.toggle-card:hover {
+  border-color: var(--accent-rust);
+}
+
+.toggle-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toggle-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-rust);
   cursor: pointer;
 }
 
-.option.checkbox input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent-rust);
+.toggle-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
-.loading {
+.toggle-desc {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  padding-left: 1.5rem;
+}
+
+.loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 200px;
+  padding: 2rem;
   color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 /* Mobile responsive */
 @media (max-width: 768px) {
   .glyph-playground {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: minmax(300px, 1fr) minmax(300px, 1fr);
+    height: auto;
+    min-height: 100%;
+  }
+
+  .panel {
+    min-height: 300px;
   }
 
   .input-panel {
@@ -551,13 +832,9 @@ watch(
     width: 100%;
   }
 
-  .options-grid {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .option {
-    justify-content: space-between;
+  .options-grid,
+  .toggle-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

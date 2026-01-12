@@ -19,6 +19,8 @@
 use crate::context::LintContext;
 use crate::diagnostic::Severity;
 use crate::rule::{Rule, RuleCategory, RuleMeta};
+use vize_carton::hyphenate;
+use vize_croquis::naming::is_camel_case;
 use vize_relief::ast::{ElementNode, PropNode};
 
 static META: RuleMeta = RuleMeta {
@@ -74,26 +76,6 @@ impl AttributeHyphenation {
             return true;
         }
         false
-    }
-
-    fn is_camel_case(name: &str) -> bool {
-        // Check if the name has uppercase letters (indicating camelCase)
-        name.chars()
-            .enumerate()
-            .any(|(i, c)| i > 0 && c.is_uppercase())
-    }
-
-    fn to_kebab_case(name: &str) -> String {
-        let mut result = String::with_capacity(name.len() + 4);
-        for (i, c) in name.chars().enumerate() {
-            if c.is_uppercase() && i > 0 {
-                result.push('-');
-                result.push(c.to_ascii_lowercase());
-            } else {
-                result.push(c.to_ascii_lowercase());
-            }
-        }
-        result
     }
 
     fn should_ignore(&self, name: &str) -> bool {
@@ -162,8 +144,8 @@ impl Rule for AttributeHyphenation {
 
             match self.style {
                 HyphenationStyle::Always => {
-                    if Self::is_camel_case(name) {
-                        let kebab = Self::to_kebab_case(name);
+                    if is_camel_case(name) {
+                        let kebab = hyphenate(name);
                         ctx.warn_with_help(
                             format!("Attribute `{}` should be hyphenated", name),
                             loc,

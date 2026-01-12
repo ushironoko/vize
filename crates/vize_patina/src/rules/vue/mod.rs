@@ -51,6 +51,9 @@ mod sfc_element_order;
 mod no_unsafe_url;
 mod no_v_html;
 
+// Semantic analysis rules (require AnalysisSummary)
+mod no_undefined_refs;
+
 // Accessibility rules
 mod a11y_img_alt;
 
@@ -107,6 +110,9 @@ pub use sfc_element_order::SfcElementOrder;
 // Security rules exports
 pub use no_unsafe_url::NoUnsafeUrl;
 pub use no_v_html::NoVHtml;
+
+// Semantic analysis rules exports
+pub use no_undefined_refs::NoUndefinedRefs;
 
 // Accessibility rules exports
 pub use a11y_img_alt::A11yImgAlt;

@@ -29,6 +29,8 @@
 use crate::context::LintContext;
 use crate::diagnostic::Severity;
 use crate::rule::{Rule, RuleCategory, RuleMeta};
+use vize_carton::is_html_tag;
+use vize_croquis::builtins::is_builtin_component;
 use vize_relief::ast::{ElementNode, ElementType};
 
 static META: RuleMeta = RuleMeta {
@@ -39,136 +41,7 @@ static META: RuleMeta = RuleMeta {
     default_severity: Severity::Error,
 };
 
-/// Reserved HTML element names
-const HTML_ELEMENTS: &[&str] = &[
-    "html",
-    "body",
-    "base",
-    "head",
-    "link",
-    "meta",
-    "style",
-    "title",
-    "address",
-    "article",
-    "aside",
-    "footer",
-    "header",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "main",
-    "nav",
-    "section",
-    "blockquote",
-    "dd",
-    "div",
-    "dl",
-    "dt",
-    "figcaption",
-    "figure",
-    "hr",
-    "li",
-    "ol",
-    "p",
-    "pre",
-    "ul",
-    "a",
-    "abbr",
-    "b",
-    "bdi",
-    "bdo",
-    "br",
-    "cite",
-    "code",
-    "data",
-    "dfn",
-    "em",
-    "i",
-    "kbd",
-    "mark",
-    "q",
-    "rp",
-    "rt",
-    "ruby",
-    "s",
-    "samp",
-    "small",
-    "span",
-    "strong",
-    "sub",
-    "sup",
-    "time",
-    "u",
-    "var",
-    "wbr",
-    "area",
-    "audio",
-    "img",
-    "map",
-    "track",
-    "video",
-    "embed",
-    "iframe",
-    "object",
-    "param",
-    "picture",
-    "portal",
-    "source",
-    "svg",
-    "math",
-    "canvas",
-    "noscript",
-    "script",
-    "del",
-    "ins",
-    "caption",
-    "col",
-    "colgroup",
-    "table",
-    "tbody",
-    "td",
-    "tfoot",
-    "th",
-    "thead",
-    "tr",
-    "button",
-    "datalist",
-    "fieldset",
-    "form",
-    "input",
-    "label",
-    "legend",
-    "meter",
-    "optgroup",
-    "option",
-    "output",
-    "progress",
-    "select",
-    "textarea",
-    "details",
-    "dialog",
-    "menu",
-    "summary",
-    "slot",
-    "template",
-];
-
-/// Vue built-in component names
-const VUE_BUILTINS: &[&str] = &[
-    "component",
-    "transition",
-    "transition-group",
-    "keep-alive",
-    "slot",
-    "teleport",
-    "suspense",
-];
-
-/// Reserved names that cannot be used
+/// Reserved names that cannot be used (specific edge cases)
 const RESERVED_NAMES: &[&str] = &[
     "annotation-xml",
     "color-profile",
@@ -222,7 +95,7 @@ impl Rule for NoReservedComponentNames {
         }
 
         // Check against HTML elements
-        if self.disallow_html && HTML_ELEMENTS.contains(&tag_lower.as_str()) {
+        if self.disallow_html && is_html_tag(&tag_lower) {
             ctx.error_with_help(
                 ctx.t_fmt("vue/no-reserved-component-names.message", &[("name", tag)]),
                 &element.loc,
@@ -232,7 +105,9 @@ impl Rule for NoReservedComponentNames {
         }
 
         // Check against Vue built-ins
-        if self.disallow_vue_builtins && VUE_BUILTINS.contains(&tag_lower.as_str()) {
+        if self.disallow_vue_builtins
+            && (is_builtin_component(&tag_lower) || is_builtin_component(tag))
+        {
             ctx.error_with_help(
                 ctx.t_fmt("vue/no-reserved-component-names.message", &[("name", tag)]),
                 &element.loc,

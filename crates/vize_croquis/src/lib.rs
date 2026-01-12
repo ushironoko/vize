@@ -36,19 +36,32 @@ mod scope;
 mod symbol;
 
 // Analysis modules
+pub mod analysis;
+pub mod analyzer;
 pub mod builtins;
 pub mod css;
 pub mod display;
 pub mod hoist;
 pub mod macros;
+pub mod naming;
 pub mod optimization;
 pub mod provide;
 pub mod reactivity;
 pub mod types;
 
+// Re-export commonly used utilities from vize_carton for convenience
+pub use vize_carton::{
+    is_builtin_directive, is_builtin_tag, is_html_tag, is_math_ml_tag, is_native_tag,
+    is_reserved_prop, is_svg_tag, is_void_tag,
+};
+
 // Re-export core types
 pub use scope::*;
 pub use symbol::*;
+
+// Re-export analysis types
+pub use analysis::{AnalysisStats, AnalysisSummary, BindingMetadata, UndefinedRef};
+pub use analyzer::{Analyzer, AnalyzerOptions};
 
 // Re-export common types
 pub use vize_relief::BindingType;

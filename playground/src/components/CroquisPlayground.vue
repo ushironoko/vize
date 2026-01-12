@@ -1094,19 +1094,18 @@ function getSourceClass(source: BindingSource | string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.75rem;
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(59, 130, 246, 0.15));
-  border: 1px solid rgba(168, 85, 247, 0.3);
+  padding: 0.375rem 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
   border-radius: 4px 4px 0 0;
   border-bottom: none;
 }
 
 .vir-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #a78bfa;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
 }
 
 .vir-line-count {
@@ -1158,67 +1157,62 @@ function getSourceClass(source: BindingSource | string): string {
   min-height: 1.3em;
 }
 
-/* VIR Token Types - Fine-grained syntax highlighting */
+/* VIR Token Types - Subtle syntax highlighting */
 .vir-token {
-  /* Default */
+  color: var(--text-secondary);
 }
 
 .vir-border {
-  color: #6366f1;
-  opacity: 0.7;
+  color: var(--text-muted);
+  opacity: 0.5;
 }
 
 .vir-section {
-  color: #f472b6;
-  font-weight: 700;
-}
-
-.vir-section-name {
-  color: #60a5fa;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.vir-macro {
-  color: #f472b6;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
+.vir-section-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.vir-macro {
+  color: #a78bfa;
+}
+
 .vir-type {
-  color: #2dd4bf;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .vir-binding {
-  color: #4ade80;
-  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .vir-identifier {
-  color: #fbbf24;
+  color: var(--text-primary);
 }
 
 .vir-tag {
-  color: #a78bfa;
-  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .vir-source {
-  color: #fb923c;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .vir-arrow {
-  color: #f472b6;
-  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .vir-number {
-  color: #4ade80;
+  color: var(--text-muted);
 }
 
 .vir-diagnostic {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .vir-line-diagnostic .vir-diagnostic {
@@ -1226,7 +1220,7 @@ function getSourceClass(source: BindingSource | string): string {
 }
 
 .vir-keyword {
-  color: #60a5fa;
+  color: var(--text-muted);
 }
 
 .vir-colon {
@@ -1234,30 +1228,25 @@ function getSourceClass(source: BindingSource | string): string {
 }
 
 .vir-bracket {
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 .vir-plain {
   color: var(--text-secondary);
 }
 
-/* Line type background hints */
+/* Line type background hints - removed for cleaner look */
 .vir-line-section {
-  background: rgba(96, 165, 250, 0.05);
-  margin: 0.25em 0;
-  padding: 0.125em 0;
 }
 
 .vir-line-macro {
-  background: rgba(244, 114, 182, 0.03);
 }
 
 .vir-line-binding {
-  background: rgba(74, 222, 128, 0.03);
 }
 
 .vir-line-diagnostic {
-  background: rgba(248, 113, 113, 0.08);
+  background: rgba(248, 113, 113, 0.05);
 }
 
 /* Diagnostics Tab */
