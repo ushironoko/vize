@@ -191,6 +191,35 @@ pub enum BindingType {
     ExternalModule = 16,
 }
 
+impl BindingType {
+    /// Short display code for VIR output (zero allocation)
+    /// - st = state (ref, needs .value)
+    /// - ist = implicit state (reactive, props - no .value needed)
+    /// - drv = derived (computed)
+    #[inline]
+    pub const fn to_vir(self) -> &'static str {
+        match self {
+            Self::SetupLet => "let",
+            Self::SetupMaybeRef => "st?",
+            Self::SetupRef => "st",
+            Self::SetupReactiveConst => "ist",
+            Self::SetupConst => "c",
+            Self::Props => "ist",        // props are implicit state (no .value)
+            Self::PropsAliased => "ist", // aliased props too
+            Self::Data => "data",
+            Self::Options => "opt",
+            Self::LiteralConst => "lit",
+            Self::JsGlobalUniversal => "~js",
+            Self::JsGlobalBrowser => "!js",
+            Self::JsGlobalNode => "#js",
+            Self::JsGlobalDeno => "#deno",
+            Self::JsGlobalBun => "#bun",
+            Self::VueGlobal => "vue",
+            Self::ExternalModule => "ext",
+        }
+    }
+}
+
 /// Codegen options
 #[derive(Debug, Clone)]
 pub struct CodegenOptions {

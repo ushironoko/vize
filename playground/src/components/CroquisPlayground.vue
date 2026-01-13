@@ -961,8 +961,10 @@ function getScopeColorClass(kind: string): string {
 
 .output-content {
   flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Error State */
@@ -971,6 +973,7 @@ function getScopeColorClass(kind: string): string {
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
   overflow: hidden;
+  margin: 1rem;
 }
 
 .error-header {
@@ -996,6 +999,7 @@ function getScopeColorClass(kind: string): string {
   align-items: center;
   justify-content: center;
   padding: 2rem;
+  margin: 1rem;
   color: var(--text-muted);
   font-size: 0.875rem;
 }
@@ -1015,6 +1019,16 @@ function getScopeColorClass(kind: string): string {
 }
 
 /* Stats Tab */
+.stats-output,
+.bindings-output,
+.scopes-output,
+.diagnostics-output {
+  padding: 1rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1453,9 +1467,11 @@ function getScopeColorClass(kind: string): string {
 
 /* VIR Tab */
 .vir-output {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 1rem;
 }
 
 .vir-header-bar {
@@ -1484,6 +1500,7 @@ function getScopeColorClass(kind: string): string {
 
 .vir-content {
   flex: 1;
+  min-height: 0;
   display: flex;
   margin: 0;
   background: var(--bg-secondary);
@@ -1503,6 +1520,9 @@ function getScopeColorClass(kind: string): string {
   border-right: 1px solid var(--border-primary);
   user-select: none;
   flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  z-index: 1;
 }
 
 .vir-ln {
@@ -1517,7 +1537,6 @@ function getScopeColorClass(kind: string): string {
 .vir-code {
   flex: 1;
   padding: 0.75rem 1rem;
-  overflow-x: auto;
 }
 
 .vir-line {

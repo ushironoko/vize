@@ -2978,6 +2978,10 @@ name = "vize_croquis"
 version = "0.0.1-alpha.31"
 dependencies = [
  "once_cell",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_parser",
+ "oxc_span",
  "phf",
  "rustc-hash",
  "vize_carton",

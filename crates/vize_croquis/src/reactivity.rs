@@ -70,6 +70,20 @@ impl ReactiveKind {
             _ => None,
         }
     }
+
+    /// Get display abbreviation for VIR output
+    /// - st = state (ref)
+    /// - ist = implicit state (reactive - no .value needed)
+    /// - drv = derived (computed)
+    #[inline]
+    pub const fn to_display(self) -> &'static str {
+        match self {
+            Self::Ref | Self::ShallowRef | Self::ToRef | Self::ToRefs => "st",
+            Self::Reactive | Self::ShallowReactive => "ist",
+            Self::Computed => "drv",
+            Self::Readonly | Self::ShallowReadonly => "ro",
+        }
+    }
 }
 
 /// A reactive source in the code

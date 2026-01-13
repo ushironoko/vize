@@ -993,39 +993,49 @@ pub fn analyze_sfc_wasm(source: &str, options: JsValue) -> Result<JsValue, JsVal
     // Create analyzer with full options
     let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
 
-    // Analyze script if present
-    if let Some(ref script_setup) = descriptor.script_setup {
-        analyzer.analyze_script(&script_setup.content);
+    // Analyze script if present, track script offset for coordinate adjustment
+    let script_offset: u32 = if let Some(ref script_setup) = descriptor.script_setup {
+        analyzer.analyze_script_setup(&script_setup.content);
+        script_setup.loc.start as u32
     } else if let Some(ref script) = descriptor.script {
-        analyzer.analyze_script(&script.content);
-    }
+        analyzer.analyze_script_plain(&script.content);
+        script.loc.start as u32
+    } else {
+        0
+    };
 
     // Get analysis summary
     let summary = analyzer.finish();
 
     // Convert scopes to JSON with span information
+    // Adjust offsets to SFC coordinates (add script block offset)
     let scopes: Vec<serde_json::Value> = summary
         .scopes
         .iter()
         .map(|scope| {
-            let bindings: Vec<serde_json::Value> = scope
-                .bindings()
-                .map(|(name, binding)| {
-                    serde_json::json!({
-                        "name": name,
-                        "type": format!("{:?}", binding.binding_type),
-                        "offset": binding.declaration_offset,
-                    })
-                })
-                .collect();
+            let binding_names: Vec<&str> = scope.bindings().map(|(name, _)| name).collect();
+            let parent_ids: Vec<u32> = scope.parents.iter().map(|p| p.as_u32()).collect();
+            let depth = summary.scopes.depth(scope.id);
+
+            // Adjust spans to SFC coordinates (skip global scopes at 0:0)
+            let (start, end) = if scope.span.start == 0 && scope.span.end == 0 {
+                (0u32, 0u32)
+            } else {
+                (
+                    scope.span.start + script_offset,
+                    scope.span.end + script_offset,
+                )
+            };
 
             serde_json::json!({
                 "id": scope.id.as_u32(),
-                "kind": format!("{:?}", scope.kind),
-                "parentId": scope.parent.map(|p| p.as_u32()),
-                "start": scope.span.start,
-                "end": scope.span.end,
-                "bindings": bindings,
+                "kind": scope.kind.to_display(),
+                "kindStr": scope.display_name(),
+                "parentIds": parent_ids,
+                "start": start,
+                "end": end,
+                "bindings": binding_names,
+                "depth": depth,
             })
         })
         .collect();
@@ -1043,11 +1053,61 @@ pub fn analyze_sfc_wasm(source: &str, options: JsValue) -> Result<JsValue, JsVal
         })
         .collect();
 
+    // Convert macros to JSON
+    let macros: Vec<serde_json::Value> = summary
+        .macros
+        .all_calls()
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "name": m.name.as_str(),
+                "kind": format!("{:?}", m.kind),
+                "start": m.start,
+                "end": m.end,
+                "runtimeArgs": m.runtime_args.as_ref().map(|s| s.as_str()),
+                "typeArgs": m.type_args.as_ref().map(|s| s.as_str()),
+            })
+        })
+        .collect();
+
+    // Convert props to JSON
+    let props: Vec<serde_json::Value> = summary
+        .macros
+        .props()
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "name": p.name.as_str(),
+                "required": p.required,
+                "hasDefault": p.default_value.is_some(),
+            })
+        })
+        .collect();
+
+    // Convert emits to JSON
+    let emits: Vec<serde_json::Value> = summary
+        .macros
+        .emits()
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "name": e.name.as_str(),
+            })
+        })
+        .collect();
+
+    // Generate VIR (Vize Intermediate Representation) text
+    let vir = summary.to_vir();
+
     // Build result
     let result = serde_json::json!({
         "filename": filename,
+        "vir": vir,
         "scopes": scopes,
         "bindings": bindings,
+        "macros": macros,
+        "props": props,
+        "emits": emits,
         "isScriptSetup": summary.bindings.is_script_setup,
         "usedComponents": summary.used_components.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
         "usedDirectives": summary.used_directives.iter().map(|d| d.as_str()).collect::<Vec<_>>(),

@@ -497,15 +497,35 @@ export async function loadWasm(): Promise<WasmModule> {
             fromScriptSetup: rawResult.isScriptSetup || false,
           }));
 
+          // Transform macros from WASM
+          const macros: MacroDisplay[] = (rawResult.macros || []).map((m: { name: string; kind: string; start: number; end: number; typeArgs?: string }) => ({
+            name: m.name,
+            start: m.start,
+            end: m.end,
+            type_args: m.typeArgs,
+          }));
+
+          // Transform props from WASM
+          const props: PropDisplay[] = (rawResult.props || []).map((p: { name: string; required: boolean; hasDefault: boolean }) => ({
+            name: p.name,
+            required: p.required,
+            has_default: p.hasDefault,
+          }));
+
+          // Transform emits from WASM
+          const emits: EmitDisplay[] = (rawResult.emits || []).map((e: { name: string }) => ({
+            name: e.name,
+          }));
+
           // Build AnalysisResult in expected format
           const result: AnalysisResult = {
             summary: {
               is_setup: rawResult.isScriptSetup || false,
               bindings,
               scopes,
-              macros: [],
-              props: [],
-              emits: [],
+              macros,
+              props,
+              emits,
               typeExports: [],
               invalidExports: [],
               diagnostics: [],
@@ -513,7 +533,7 @@ export async function loadWasm(): Promise<WasmModule> {
                 binding_count: bindings.length,
                 unused_binding_count: (rawResult.unusedBindings || []).length,
                 scope_count: scopes.length,
-                macro_count: 0,
+                macro_count: macros.length,
                 type_export_count: 0,
                 invalid_export_count: 0,
                 error_count: 0,
@@ -526,6 +546,8 @@ export async function loadWasm(): Promise<WasmModule> {
               end: r.offset + r.name.length,
               severity: 'warning' as const,
             })),
+            // VIR (Vize Intermediate Representation) text from WASM
+            vir: rawResult.vir || '',
           };
 
           return result;
@@ -543,11 +565,10 @@ export async function loadWasm(): Promise<WasmModule> {
         parseTemplate: wasm.parseTemplate || mock.parseTemplate,
         parseSfc: wasm.parseSfc || mock.parseSfc,
         compileSfc: wasm.compileSfc || mock.compileSfc,
-        // Analysis functions
-        // Note: WASM analyzeSfc binding exists but Rust Analyzer doesn't track spans during script analysis yet.
-        // Using mock analyzer which has regex-based position detection until Rust analyzer has proper span tracking.
-        // TODO: Switch to transformAnalyzeSfc when croquis Analyzer tracks spans during analyze_script
-        analyzeSfc: mock.analyzeSfc,
+        // Analysis functions - use WASM croquis analyzer
+        // Note: Scope spans from WASM may be 0 (not tracked during analyze_script yet)
+        // but macros, props, emits, bindings are properly extracted
+        analyzeSfc: transformAnalyzeSfc,
         // Musea functions
         parseArt: wasm.parseArt || mock.parseArt,
         artToCsf: wasm.artToCsf || mock.artToCsf,
@@ -890,42 +911,50 @@ function createMockModule(): WasmModule {
 
     // Extract defineProps
     if (hasDefineProps) {
-      const propsMatch = source.match(/defineProps<\{([^}]+)\}>/);
+      // Match both inline types: defineProps<{...}>() and type references: defineProps<TypeName>()
+      const propsMatch = source.match(/defineProps<([^>]+)>\s*\(\s*\)/);
       if (propsMatch) {
+        const typeArg = propsMatch[1].trim();
         macros.push({
           name: 'defineProps',
           start: propsMatch.index || 0,
           end: (propsMatch.index || 0) + propsMatch[0].length,
-          type_args: propsMatch[1],
+          type_args: typeArg,
         });
-        // Extract prop names from type
-        const propNameMatches = propsMatch[1].matchAll(/(\w+)(\?)?:/g);
-        for (const propMatch of propNameMatches) {
-          props.push({
-            name: propMatch[1],
-            required: !propMatch[2],
-            has_default: false,
-          });
+        // Extract prop names from inline type (if it's an object type)
+        if (typeArg.startsWith('{')) {
+          const propNameMatches = typeArg.matchAll(/(\w+)(\?)?:/g);
+          for (const propMatch of propNameMatches) {
+            props.push({
+              name: propMatch[1],
+              required: !propMatch[2],
+              has_default: false,
+            });
+          }
         }
       }
     }
 
     // Extract defineEmits
     if (hasDefineEmits) {
-      const emitsMatch = source.match(/defineEmits<\{([^}]+)\}>/);
+      // Match both inline types: defineEmits<{...}>() and type references: defineEmits<TypeName>()
+      const emitsMatch = source.match(/defineEmits<([^>]+)>\s*\(\s*\)/);
       if (emitsMatch) {
+        const typeArg = emitsMatch[1].trim();
         macros.push({
           name: 'defineEmits',
           start: emitsMatch.index || 0,
           end: (emitsMatch.index || 0) + emitsMatch[0].length,
-          type_args: emitsMatch[1],
+          type_args: typeArg,
         });
-        // Extract emit names from type
-        const emitNameMatches = emitsMatch[1].matchAll(/(\w+):/g);
-        for (const emitMatch of emitNameMatches) {
-          emits.push({
-            name: emitMatch[1],
-          });
+        // Extract emit names from inline type (if it's an object type)
+        if (typeArg.startsWith('{')) {
+          const emitNameMatches = typeArg.matchAll(/(\w+):/g);
+          for (const emitMatch of emitNameMatches) {
+            emits.push({
+              name: emitMatch[1],
+            });
+          }
         }
       }
     }
@@ -3226,42 +3255,50 @@ function createMockModule(): WasmModule {
 
     // Extract defineProps
     if (hasDefineProps) {
-      const propsMatch = source.match(/defineProps<\{([^}]+)\}>/);
+      // Match both inline types: defineProps<{...}>() and type references: defineProps<TypeName>()
+      const propsMatch = source.match(/defineProps<([^>]+)>\s*\(\s*\)/);
       if (propsMatch) {
+        const typeArg = propsMatch[1].trim();
         macros.push({
           name: 'defineProps',
           start: propsMatch.index || 0,
           end: (propsMatch.index || 0) + propsMatch[0].length,
-          type_args: propsMatch[1],
+          type_args: typeArg,
         });
-        // Extract prop names from type
-        const propNameMatches = propsMatch[1].matchAll(/(\w+)(\?)?:/g);
-        for (const propMatch of propNameMatches) {
-          props.push({
-            name: propMatch[1],
-            required: !propMatch[2],
-            has_default: false,
-          });
+        // Extract prop names from inline type (if it's an object type)
+        if (typeArg.startsWith('{')) {
+          const propNameMatches = typeArg.matchAll(/(\w+)(\?)?:/g);
+          for (const propMatch of propNameMatches) {
+            props.push({
+              name: propMatch[1],
+              required: !propMatch[2],
+              has_default: false,
+            });
+          }
         }
       }
     }
 
     // Extract defineEmits
     if (hasDefineEmits) {
-      const emitsMatch = source.match(/defineEmits<\{([^}]+)\}>/);
+      // Match both inline types: defineEmits<{...}>() and type references: defineEmits<TypeName>()
+      const emitsMatch = source.match(/defineEmits<([^>]+)>\s*\(\s*\)/);
       if (emitsMatch) {
+        const typeArg = emitsMatch[1].trim();
         macros.push({
           name: 'defineEmits',
           start: emitsMatch.index || 0,
           end: (emitsMatch.index || 0) + emitsMatch[0].length,
-          type_args: emitsMatch[1],
+          type_args: typeArg,
         });
-        // Extract emit names from type
-        const emitNameMatches = emitsMatch[1].matchAll(/(\w+):/g);
-        for (const emitMatch of emitNameMatches) {
-          emits.push({
-            name: emitMatch[1],
-          });
+        // Extract emit names from inline type (if it's an object type)
+        if (typeArg.startsWith('{')) {
+          const emitNameMatches = typeArg.matchAll(/(\w+):/g);
+          for (const emitMatch of emitNameMatches) {
+            emits.push({
+              name: emitMatch[1],
+            });
+          }
         }
       }
     }

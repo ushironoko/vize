@@ -92,6 +92,317 @@ pub struct AnalysisSummary {
     pub invalid_exports: Vec<InvalidExport>,
 }
 
+impl AnalysisSummary {
+    /// Convert analysis summary to VIR (Vize Intermediate Representation) text format.
+    ///
+    /// This generates a TOML-like human-readable representation of the analysis.
+    /// Performance: Pre-allocates buffer, uses write! macro for zero-copy formatting.
+    pub fn to_vir(&self) -> String {
+        use crate::macros::MacroKind;
+        use std::fmt::Write;
+
+        // Pre-allocate with estimated capacity
+        let mut output = String::with_capacity(4096);
+
+        // [vir]
+        writeln!(output, "[vir]").ok();
+        writeln!(output, "script_setup={}", self.bindings.is_script_setup).ok();
+        writeln!(output, "scopes={}", self.scopes.len()).ok();
+        writeln!(output, "bindings={}", self.bindings.bindings.len()).ok();
+        writeln!(output).ok();
+
+        // [surface] - Component Surface (Public API)
+        let has_surface = !self.macros.props().is_empty()
+            || !self.macros.emits().is_empty()
+            || !self.macros.models().is_empty()
+            || self
+                .macros
+                .all_calls()
+                .iter()
+                .any(|c| matches!(c.kind, MacroKind::DefineExpose | MacroKind::DefineSlots));
+
+        if has_surface {
+            // [surface.props] props (ist)
+            if !self.macros.props().is_empty() {
+                writeln!(output, "[surface.props]").ok();
+                for prop in self.macros.props() {
+                    let req = if prop.required { "!" } else { "?" };
+                    let def = if prop.default_value.is_some() {
+                        "="
+                    } else {
+                        ""
+                    };
+                    if let Some(ref ty) = prop.prop_type {
+                        writeln!(output, "{}{}:{}{}", prop.name, req, ty, def).ok();
+                    } else {
+                        writeln!(output, "{}{}{}", prop.name, req, def).ok();
+                    }
+                }
+                writeln!(output).ok();
+            }
+
+            // [surface.emits] emits
+            if !self.macros.emits().is_empty() {
+                writeln!(output, "[surface.emits]").ok();
+                for emit in self.macros.emits() {
+                    if let Some(ref ty) = emit.payload_type {
+                        writeln!(output, "{}:{}", emit.name, ty).ok();
+                    } else {
+                        writeln!(output, "{}", emit.name).ok();
+                    }
+                }
+                writeln!(output).ok();
+            }
+
+            // [surface.models] models
+            if !self.macros.models().is_empty() {
+                writeln!(output, "[surface.models]").ok();
+                for model in self.macros.models() {
+                    let name = if model.name.is_empty() {
+                        "modelValue"
+                    } else {
+                        model.name.as_str()
+                    };
+                    if let Some(ref ty) = model.model_type {
+                        writeln!(output, "{}:{}", name, ty).ok();
+                    } else {
+                        writeln!(output, "{}", name).ok();
+                    }
+                }
+                writeln!(output).ok();
+            }
+
+            // [surface.expose]
+            let expose_calls: Vec<_> = self
+                .macros
+                .all_calls()
+                .iter()
+                .filter(|c| c.kind == MacroKind::DefineExpose)
+                .collect();
+            if !expose_calls.is_empty() {
+                writeln!(output, "[surface.expose]").ok();
+                for call in &expose_calls {
+                    if let Some(args) = &call.runtime_args {
+                        writeln!(output, "{}", args).ok();
+                    } else {
+                        writeln!(output, "@{}:{}", call.start, call.end).ok();
+                    }
+                }
+                writeln!(output).ok();
+            }
+
+            // [surface.slots]
+            let slots_calls: Vec<_> = self
+                .macros
+                .all_calls()
+                .iter()
+                .filter(|c| c.kind == MacroKind::DefineSlots)
+                .collect();
+            if !slots_calls.is_empty() {
+                writeln!(output, "[surface.slots]").ok();
+                for call in &slots_calls {
+                    if let Some(type_args) = &call.type_args {
+                        writeln!(output, "{}", type_args).ok();
+                    } else {
+                        writeln!(output, "@{}:{}", call.start, call.end).ok();
+                    }
+                }
+                writeln!(output).ok();
+            }
+        }
+
+        // [macros] - moved up for importance
+        if !self.macros.all_calls().is_empty() {
+            writeln!(output, "[macros]").ok();
+            for call in self.macros.all_calls() {
+                if let Some(ref ty) = call.type_args {
+                    writeln!(
+                        output,
+                        "@{}<{}> @{}:{}",
+                        call.name, ty, call.start, call.end
+                    )
+                    .ok();
+                } else {
+                    writeln!(output, "@{} @{}:{}", call.name, call.start, call.end).ok();
+                }
+            }
+            writeln!(output).ok();
+        }
+
+        // [reactivity]
+        if self.reactivity.count() > 0 {
+            writeln!(output, "[reactivity]").ok();
+            for src in self.reactivity.sources() {
+                writeln!(output, "{}={}", src.name, src.kind.to_display()).ok();
+            }
+            writeln!(output).ok();
+        }
+
+        // [extern] external imports
+        let extern_scopes: Vec<_> = self
+            .scopes
+            .iter()
+            .filter(|s| s.kind == crate::scope::ScopeKind::ExternalModule)
+            .collect();
+        if !extern_scopes.is_empty() {
+            writeln!(output, "[extern]").ok();
+            for scope in &extern_scopes {
+                if let crate::scope::ScopeData::ExternalModule(data) = scope.data() {
+                    let type_only = if data.is_type_only { "^" } else { "" };
+                    let bd: Vec<_> = scope.bindings().map(|(n, _)| n).collect();
+                    if bd.is_empty() {
+                        writeln!(output, "{}{}", data.source, type_only).ok();
+                    } else {
+                        writeln!(output, "{}{} {{{}}}", data.source, type_only, bd.join(",")).ok();
+                    }
+                }
+            }
+            writeln!(output).ok();
+        }
+
+        // [types] type exports
+        if !self.type_exports.is_empty() {
+            writeln!(output, "[types]").ok();
+            for te in &self.type_exports {
+                let hoist = if te.hoisted { "^" } else { "" };
+                let kind = match te.kind {
+                    TypeExportKind::Type => "t",
+                    TypeExportKind::Interface => "i",
+                };
+                writeln!(
+                    output,
+                    "{}{}{}@{}:{}",
+                    te.name, hoist, kind, te.start, te.end
+                )
+                .ok();
+            }
+            writeln!(output).ok();
+        }
+
+        // [bindings] - grouped by kind
+        if !self.bindings.bindings.is_empty() {
+            use vize_relief::BindingType;
+
+            writeln!(output, "[bindings]").ok();
+
+            // Group bindings by type for compact output
+            let mut by_type: FxHashMap<BindingType, Vec<&str>> = FxHashMap::default();
+            for (name, bt) in &self.bindings.bindings {
+                by_type.entry(*bt).or_default().push(name.as_str());
+            }
+
+            // Output in a consistent order
+            let type_order = [
+                BindingType::SetupConst,
+                BindingType::SetupRef,
+                BindingType::SetupMaybeRef,
+                BindingType::SetupReactiveConst,
+                BindingType::SetupLet,
+                BindingType::Props,
+                BindingType::PropsAliased,
+                BindingType::Data,
+                BindingType::Options,
+                BindingType::LiteralConst,
+                BindingType::JsGlobalUniversal,
+                BindingType::JsGlobalBrowser,
+                BindingType::JsGlobalNode,
+                BindingType::JsGlobalDeno,
+                BindingType::JsGlobalBun,
+                BindingType::VueGlobal,
+                BindingType::ExternalModule,
+            ];
+
+            for bt in type_order {
+                if let Some(names) = by_type.get(&bt) {
+                    writeln!(output, "{}:{}", bt.to_vir(), names.join(",")).ok();
+                }
+            }
+            writeln!(output).ok();
+        }
+
+        // [scopes]
+        if !self.scopes.is_empty() {
+            // Build a map from scope ID -> prefixed display ID
+            // Separate counters for ~, !, # prefixes
+            let mut prefix_counters: FxHashMap<&str, u32> = FxHashMap::default();
+            let mut id_to_display: FxHashMap<u32, String> = FxHashMap::default();
+
+            for scope in self.scopes.iter() {
+                let prefix = scope.kind.prefix();
+                let counter = prefix_counters.entry(prefix).or_insert(0);
+                id_to_display.insert(scope.id.as_u32(), format!("{}{}", prefix, *counter));
+                *counter += 1;
+            }
+
+            writeln!(output, "[scopes]").ok();
+            for scope in self.scopes.iter() {
+                let bd_count = scope.bindings().count();
+
+                // Get scope display ID with prefix
+                let scope_id_display = id_to_display
+                    .get(&scope.id.as_u32())
+                    .map(|s| s.as_str())
+                    .unwrap_or("?");
+
+                // Build parent references from the parents list using display IDs
+                let par = if scope.parents.is_empty() {
+                    String::new()
+                } else {
+                    let refs: Vec<_> = scope
+                        .parents
+                        .iter()
+                        .filter_map(|p| id_to_display.get(&p.as_u32()))
+                        .map(|s| s.as_str())
+                        .collect();
+                    if refs.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" < {}", refs.join(", "))
+                    }
+                };
+
+                if bd_count > 0 {
+                    let bd: Vec<_> = scope.bindings().map(|(n, _)| n).collect();
+                    writeln!(
+                        output,
+                        "{} {} @{}:{} [{}]{}",
+                        scope_id_display,
+                        scope.display_name(),
+                        scope.span.start,
+                        scope.span.end,
+                        bd.join(","),
+                        par
+                    )
+                    .ok();
+                } else {
+                    writeln!(
+                        output,
+                        "{} {} @{}:{}{}",
+                        scope_id_display,
+                        scope.display_name(),
+                        scope.span.start,
+                        scope.span.end,
+                        par
+                    )
+                    .ok();
+                }
+            }
+            writeln!(output).ok();
+        }
+
+        // [errors]
+        if !self.invalid_exports.is_empty() {
+            writeln!(output, "[errors]").ok();
+            for ie in &self.invalid_exports {
+                writeln!(output, "{}={:?}@{}:{}", ie.name, ie.kind, ie.start, ie.end).ok();
+            }
+            writeln!(output).ok();
+        }
+
+        output
+    }
+}
+
 /// Binding metadata extracted from script analysis.
 ///
 /// This is compatible with the existing BindingMetadata in atelier_core

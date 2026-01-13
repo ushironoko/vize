@@ -10,7 +10,7 @@
 //! - Bitflags for binding properties to reduce memory and improve cache locality
 //! - `#[inline]` hints for hot path functions
 
-use vize_carton::{bitflags, CompactString, FxHashMap, SmallVec};
+use vize_carton::{bitflags, smallvec, CompactString, FxHashMap, SmallVec};
 use vize_relief::BindingType;
 
 /// Maximum parameters typically seen in v-for/v-slot/callbacks
@@ -115,12 +115,12 @@ impl ScopeKind {
             Self::VFor => "v-for",
             Self::VSlot => "v-slot",
             Self::EventHandler => "event",
-            Self::Callback => "callback",
+            Self::Callback => "cb",
             Self::ScriptSetup => "setup",
             Self::NonScriptSetup => "plain",
             Self::Universal => "universal",
             Self::ClientOnly => "client",
-            Self::JsGlobalUniversal => "universal",
+            Self::JsGlobalUniversal => "univ",
             Self::JsGlobalBrowser => "client",
             Self::JsGlobalNode => "server",
             Self::JsGlobalDeno => "server",
@@ -140,12 +140,12 @@ impl ScopeKind {
             Self::VFor => "v-for",
             Self::VSlot => "v-slot",
             Self::EventHandler => "event",
-            Self::Callback => "callback",
+            Self::Callback => "cb",
             Self::ScriptSetup => "setup",
             Self::NonScriptSetup => "plain",
             Self::Universal => "universal",
             Self::ClientOnly => "client",
-            Self::JsGlobalUniversal => "universal",
+            Self::JsGlobalUniversal => "univ",
             Self::JsGlobalBrowser => "client",
             Self::JsGlobalNode => "server",
             Self::JsGlobalDeno => "server",
@@ -362,13 +362,17 @@ impl Span {
     }
 }
 
+/// Parent scope references (typically 1-2 parents)
+pub type ParentScopes = SmallVec<[ScopeId; 2]>;
+
 /// A single scope in the scope chain
 #[derive(Debug)]
 pub struct Scope {
     /// Unique identifier
     pub id: ScopeId,
-    /// Parent scope (None for root)
-    pub parent: Option<ScopeId>,
+    /// Parent scopes (empty for root, can have multiple for template scopes)
+    /// First parent is the lexical parent, additional parents are accessible scopes (e.g., Vue globals)
+    pub parents: ParentScopes,
     /// Kind of scope
     pub kind: ScopeKind,
     /// Bindings declared in this scope
@@ -380,12 +384,25 @@ pub struct Scope {
 }
 
 impl Scope {
-    /// Create a new scope
+    /// Create a new scope with single parent
     #[inline]
     pub fn new(id: ScopeId, parent: Option<ScopeId>, kind: ScopeKind) -> Self {
         Self {
             id,
-            parent,
+            parents: parent.map(|p| smallvec![p]).unwrap_or_default(),
+            kind,
+            bindings: FxHashMap::default(),
+            data: ScopeData::None,
+            span: Span::default(),
+        }
+    }
+
+    /// Create a new scope with multiple parents
+    #[inline]
+    pub fn with_parents(id: ScopeId, parents: ParentScopes, kind: ScopeKind) -> Self {
+        Self {
+            id,
+            parents,
             kind,
             bindings: FxHashMap::default(),
             data: ScopeData::None,
@@ -404,11 +421,44 @@ impl Scope {
     ) -> Self {
         Self {
             id,
-            parent,
+            parents: parent.map(|p| smallvec![p]).unwrap_or_default(),
             kind,
             bindings: FxHashMap::default(),
             data: ScopeData::None,
             span: Span::new(start, end),
+        }
+    }
+
+    /// Create a new scope with span and multiple parents
+    #[inline]
+    pub fn with_span_parents(
+        id: ScopeId,
+        parents: ParentScopes,
+        kind: ScopeKind,
+        start: u32,
+        end: u32,
+    ) -> Self {
+        Self {
+            id,
+            parents,
+            kind,
+            bindings: FxHashMap::default(),
+            data: ScopeData::None,
+            span: Span::new(start, end),
+        }
+    }
+
+    /// Get the primary (lexical) parent
+    #[inline]
+    pub fn parent(&self) -> Option<ScopeId> {
+        self.parents.first().copied()
+    }
+
+    /// Add an additional parent scope
+    #[inline]
+    pub fn add_parent(&mut self, parent: ScopeId) {
+        if !self.parents.contains(&parent) {
+            self.parents.push(parent);
         }
     }
 
@@ -458,6 +508,20 @@ impl Scope {
     #[inline]
     pub fn binding_count(&self) -> usize {
         self.bindings.len()
+    }
+
+    /// Get display name for this scope (includes hook name for ClientOnly scopes)
+    pub fn display_name(&self) -> String {
+        match (&self.kind, &self.data) {
+            (ScopeKind::ClientOnly, ScopeData::ClientOnly(data)) => {
+                // Use hook name without "on" prefix: onMounted -> mounted
+                data.hook_name
+                    .strip_prefix("on")
+                    .map(|s| s.to_ascii_lowercase())
+                    .unwrap_or_else(|| data.hook_name.to_string())
+            }
+            _ => self.kind.to_display().to_string(),
+        }
     }
 }
 
@@ -539,10 +603,80 @@ impl Default for ScopeChain {
 }
 
 impl ScopeChain {
-    /// Create a new scope chain with a root SFC scope
+    /// Create a new scope chain with JS universal globals as root
+    /// Based on WinterCG (Web-interoperable Runtimes) common APIs
     #[inline]
     pub fn new() -> Self {
-        let root = Scope::new(ScopeId::ROOT, None, ScopeKind::Module);
+        let mut root = Scope::new(ScopeId::ROOT, None, ScopeKind::JsGlobalUniversal);
+        // WinterCG universal APIs (work in browser, Node.js, Deno, Bun, Cloudflare Workers, etc.)
+        for name in [
+            // Core
+            "console",
+            "Math",
+            "Object",
+            "Array",
+            "JSON",
+            "Promise",
+            "globalThis",
+            "Infinity",
+            "NaN",
+            "undefined",
+            // Fetch API
+            "fetch",
+            "Request",
+            "Response",
+            "Headers",
+            // URL
+            "URL",
+            "URLSearchParams",
+            "URLPattern",
+            // Encoding
+            "TextEncoder",
+            "TextDecoder",
+            "atob",
+            "btoa",
+            // Crypto
+            "crypto",
+            "CryptoKey",
+            "SubtleCrypto",
+            // Streams
+            "ReadableStream",
+            "WritableStream",
+            "TransformStream",
+            "ReadableStreamDefaultReader",
+            "WritableStreamDefaultWriter",
+            // Abort
+            "AbortController",
+            "AbortSignal",
+            // Blob/File
+            "Blob",
+            "File",
+            "FormData",
+            // Timers
+            "setTimeout",
+            "clearTimeout",
+            "setInterval",
+            "clearInterval",
+            "queueMicrotask",
+            // Structured clone
+            "structuredClone",
+            // Events
+            "Event",
+            "EventTarget",
+            "CustomEvent",
+            // Errors
+            "Error",
+            "TypeError",
+            "RangeError",
+            "SyntaxError",
+            "AggregateError",
+            "DOMException",
+        ] {
+            root.add_binding(
+                CompactString::new(name),
+                ScopeBinding::new(BindingType::JsGlobalUniversal, 0),
+            );
+        }
         Self {
             scopes: vec![root],
             current: ScopeId::ROOT,
@@ -552,7 +686,64 @@ impl ScopeChain {
     /// Create with pre-allocated capacity
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let root = Scope::new(ScopeId::ROOT, None, ScopeKind::Module);
+        let mut root = Scope::new(ScopeId::ROOT, None, ScopeKind::JsGlobalUniversal);
+        // WinterCG universal APIs
+        for name in [
+            "console",
+            "Math",
+            "Object",
+            "Array",
+            "JSON",
+            "Promise",
+            "globalThis",
+            "Infinity",
+            "NaN",
+            "undefined",
+            "fetch",
+            "Request",
+            "Response",
+            "Headers",
+            "URL",
+            "URLSearchParams",
+            "URLPattern",
+            "TextEncoder",
+            "TextDecoder",
+            "atob",
+            "btoa",
+            "crypto",
+            "CryptoKey",
+            "SubtleCrypto",
+            "ReadableStream",
+            "WritableStream",
+            "TransformStream",
+            "ReadableStreamDefaultReader",
+            "WritableStreamDefaultWriter",
+            "AbortController",
+            "AbortSignal",
+            "Blob",
+            "File",
+            "FormData",
+            "setTimeout",
+            "clearTimeout",
+            "setInterval",
+            "clearInterval",
+            "queueMicrotask",
+            "structuredClone",
+            "Event",
+            "EventTarget",
+            "CustomEvent",
+            "Error",
+            "TypeError",
+            "RangeError",
+            "SyntaxError",
+            "AggregateError",
+            "DOMException",
+        ] {
+            root.add_binding(
+                CompactString::new(name),
+                ScopeBinding::new(BindingType::JsGlobalUniversal, 0),
+            );
+        }
         let mut scopes = Vec::with_capacity(capacity);
         scopes.push(root);
         Self {
@@ -615,6 +806,18 @@ impl ScopeChain {
         self.scopes.iter()
     }
 
+    /// Find a scope by kind (returns the first match)
+    #[inline]
+    pub fn find_scope_by_kind(&self, kind: ScopeKind) -> Option<ScopeId> {
+        self.scopes.iter().find(|s| s.kind == kind).map(|s| s.id)
+    }
+
+    /// Get mutable scope by ID
+    #[inline]
+    pub fn get_scope_mut(&mut self, id: ScopeId) -> Option<&mut Scope> {
+        self.scopes.get_mut(id.as_u32() as usize)
+    }
+
     /// Enter a new scope
     #[inline]
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
@@ -625,18 +828,49 @@ impl ScopeChain {
         id
     }
 
-    /// Exit the current scope and return to parent
+    /// Enter a new scope with Vue global access (for template scopes)
+    #[inline]
+    pub fn enter_scope_with_vue_global(&mut self, kind: ScopeKind) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut parents: ParentScopes = smallvec![self.current];
+
+        // Add Vue global scope as additional parent if it exists
+        if let Some(vue_id) = self.find_scope_by_kind(ScopeKind::VueGlobal) {
+            if !parents.contains(&vue_id) {
+                parents.push(vue_id);
+            }
+        }
+
+        let scope = Scope::with_parents(id, parents, kind);
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Exit the current scope and return to primary parent
     #[inline]
     pub fn exit_scope(&mut self) {
-        if let Some(parent) = self.current_scope().parent {
+        if let Some(parent) = self.current_scope().parent() {
             self.current = parent;
         }
+    }
+
+    /// Build parents list including Vue global for template scopes
+    fn build_template_parents(&self) -> ParentScopes {
+        let mut parents: ParentScopes = smallvec![self.current];
+        if let Some(vue_id) = self.find_scope_by_kind(ScopeKind::VueGlobal) {
+            if !parents.contains(&vue_id) {
+                parents.push(vue_id);
+            }
+        }
+        parents
     }
 
     /// Enter a v-for scope with the given data
     pub fn enter_v_for_scope(&mut self, data: VForScopeData, start: u32, end: u32) -> ScopeId {
         let id = ScopeId::new(self.scopes.len() as u32);
-        let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::VFor, start, end);
+        let parents = self.build_template_parents();
+        let mut scope = Scope::with_span_parents(id, parents, ScopeKind::VFor, start, end);
 
         // Add value alias as binding
         scope.add_binding(
@@ -669,7 +903,8 @@ impl ScopeChain {
     /// Enter a v-slot scope with the given data
     pub fn enter_v_slot_scope(&mut self, data: VSlotScopeData, start: u32, end: u32) -> ScopeId {
         let id = ScopeId::new(self.scopes.len() as u32);
-        let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::VSlot, start, end);
+        let parents = self.build_template_parents();
+        let mut scope = Scope::with_span_parents(id, parents, ScopeKind::VSlot, start, end);
 
         // Add prop names as bindings
         for prop_name in &data.prop_names {
@@ -693,8 +928,8 @@ impl ScopeChain {
         end: u32,
     ) -> ScopeId {
         let id = ScopeId::new(self.scopes.len() as u32);
-        let mut scope =
-            Scope::with_span(id, Some(self.current), ScopeKind::EventHandler, start, end);
+        let parents = self.build_template_parents();
+        let mut scope = Scope::with_span_parents(id, parents, ScopeKind::EventHandler, start, end);
 
         // Add implicit $event binding if applicable
         if data.has_implicit_event {
@@ -718,7 +953,7 @@ impl ScopeChain {
         id
     }
 
-    /// Enter a callback/arrow function scope
+    /// Enter a callback/arrow function scope (script context - no vue global)
     pub fn enter_callback_scope(
         &mut self,
         data: CallbackScopeData,
@@ -726,6 +961,7 @@ impl ScopeChain {
         end: u32,
     ) -> ScopeId {
         let id = ScopeId::new(self.scopes.len() as u32);
+        // Script callbacks only have current scope as parent (no vue global)
         let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::Callback, start, end);
 
         // Add parameter names as bindings
@@ -740,6 +976,46 @@ impl ScopeChain {
         self.scopes.push(scope);
         self.current = id;
         id
+    }
+
+    /// Enter a callback scope with vue global access (for template inline expressions)
+    pub fn enter_template_callback_scope(
+        &mut self,
+        data: CallbackScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let parents = self.build_template_parents();
+        let mut scope = Scope::with_span_parents(id, parents, ScopeKind::Callback, start, end);
+
+        // Add parameter names as bindings
+        for param_name in &data.param_names {
+            scope.add_binding(
+                param_name.clone(),
+                ScopeBinding::new(BindingType::SetupConst, start),
+            );
+        }
+
+        scope.set_data(ScopeData::Callback(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a module scope
+    pub fn enter_module_scope(&mut self, start: u32, end: u32) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let scope = Scope::with_span(id, Some(self.current), ScopeKind::Module, start, end);
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Set the current scope directly (used for switching between sibling scopes)
+    #[inline]
+    pub fn set_current(&mut self, id: ScopeId) {
+        self.current = id;
     }
 
     /// Enter a script setup scope
@@ -795,6 +1071,7 @@ impl ScopeChain {
     }
 
     /// Enter a client-only scope (onMounted, onBeforeUnmount, etc.)
+    /// Parents: current scope + !js (browser globals)
     pub fn enter_client_only_scope(
         &mut self,
         data: ClientOnlyScopeData,
@@ -802,7 +1079,16 @@ impl ScopeChain {
         end: u32,
     ) -> ScopeId {
         let id = ScopeId::new(self.scopes.len() as u32);
-        let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::ClientOnly, start, end);
+
+        // Build parents: current scope + !js (browser globals)
+        let mut parents: ParentScopes = smallvec![self.current];
+        if let Some(browser_id) = self.find_scope_by_kind(ScopeKind::JsGlobalBrowser) {
+            if !parents.contains(&browser_id) {
+                parents.push(browser_id);
+            }
+        }
+
+        let mut scope = Scope::with_span_parents(id, parents, ScopeKind::ClientOnly, start, end);
         scope.set_data(ScopeData::ClientOnly(data));
         self.scopes.push(scope);
         self.current = id;
@@ -877,38 +1163,39 @@ impl ScopeChain {
         id
     }
 
-    /// Look up a binding by name, searching up the scope chain
+    /// Look up a binding by name, searching through all parent scopes
+    /// Uses BFS to search all accessible scopes (lexical parents + additional parents like Vue globals)
     #[inline]
     pub fn lookup(&self, name: &str) -> Option<(&Scope, &ScopeBinding)> {
-        let mut scope_id = Some(self.current);
+        let mut visited: SmallVec<[ScopeId; 8]> = SmallVec::new();
+        let mut queue: SmallVec<[ScopeId; 8]> = smallvec![self.current];
 
-        while let Some(id) = scope_id {
-            // SAFETY: scope_id is always valid (from parent chain)
+        while let Some(id) = queue.pop() {
+            if visited.contains(&id) {
+                continue;
+            }
+            visited.push(id);
+
             let scope = unsafe { self.scopes.get_unchecked(id.as_u32() as usize) };
             if let Some(binding) = scope.get_binding(name) {
                 return Some((scope, binding));
             }
-            scope_id = scope.parent;
+
+            // Add all parents to queue
+            for &parent_id in &scope.parents {
+                if !visited.contains(&parent_id) {
+                    queue.push(parent_id);
+                }
+            }
         }
 
         None
     }
 
-    /// Check if a name is defined in the current scope chain
+    /// Check if a name is defined in any accessible scope
     #[inline]
     pub fn is_defined(&self, name: &str) -> bool {
-        let mut scope_id = Some(self.current);
-
-        while let Some(id) = scope_id {
-            // SAFETY: scope_id is always valid (from parent chain)
-            let scope = unsafe { self.scopes.get_unchecked(id.as_u32() as usize) };
-            if scope.has_binding(name) {
-                return true;
-            }
-            scope_id = scope.parent;
-        }
-
-        false
+        self.lookup(name).is_some()
     }
 
     /// Add a binding to the current scope
@@ -917,32 +1204,70 @@ impl ScopeChain {
         self.current_scope_mut().add_binding(name, binding);
     }
 
-    /// Mark a binding as used
+    /// Mark a binding as used (searches through all parent scopes)
     pub fn mark_used(&mut self, name: &str) {
-        let mut scope_id = Some(self.current);
+        let mut visited: SmallVec<[ScopeId; 8]> = SmallVec::new();
+        let mut queue: SmallVec<[ScopeId; 8]> = smallvec![self.current];
 
-        while let Some(id) = scope_id {
+        while let Some(id) = queue.pop() {
+            if visited.contains(&id) {
+                continue;
+            }
+            visited.push(id);
+
             let scope = &mut self.scopes[id.as_u32() as usize];
             if let Some(binding) = scope.get_binding_mut(name) {
                 binding.mark_used();
                 return;
             }
-            scope_id = scope.parent;
+
+            // Collect parents before continuing (to avoid borrow issues)
+            let parents: SmallVec<[ScopeId; 2]> = scope.parents.clone();
+            for parent_id in parents {
+                if !visited.contains(&parent_id) {
+                    queue.push(parent_id);
+                }
+            }
         }
     }
 
-    /// Mark a binding as mutated
+    /// Mark a binding as mutated (searches through all parent scopes)
     pub fn mark_mutated(&mut self, name: &str) {
-        let mut scope_id = Some(self.current);
+        let mut visited: SmallVec<[ScopeId; 8]> = SmallVec::new();
+        let mut queue: SmallVec<[ScopeId; 8]> = smallvec![self.current];
 
-        while let Some(id) = scope_id {
+        while let Some(id) = queue.pop() {
+            if visited.contains(&id) {
+                continue;
+            }
+            visited.push(id);
+
             let scope = &mut self.scopes[id.as_u32() as usize];
             if let Some(binding) = scope.get_binding_mut(name) {
                 binding.mark_mutated();
                 return;
             }
-            scope_id = scope.parent;
+
+            // Collect parents before continuing (to avoid borrow issues)
+            let parents: SmallVec<[ScopeId; 2]> = scope.parents.clone();
+            for parent_id in parents {
+                if !visited.contains(&parent_id) {
+                    queue.push(parent_id);
+                }
+            }
         }
+    }
+
+    /// Calculate the depth of a scope (distance from root via primary parent chain)
+    #[inline]
+    pub fn depth(&self, id: ScopeId) -> u32 {
+        let mut depth = 0u32;
+        let mut current_id = self.get_scope(id).and_then(|s| s.parent());
+        while let Some(pid) = current_id {
+            depth += 1;
+            current_id = self.get_scope(pid).and_then(|s| s.parent());
+        }
+        depth
     }
 }
 

@@ -47,6 +47,7 @@ pub mod naming;
 pub mod optimization;
 pub mod provide;
 pub mod reactivity;
+pub mod script_parser;
 pub mod types;
 
 // Re-export commonly used utilities from vize_carton for convenience
