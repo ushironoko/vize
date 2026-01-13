@@ -3103,6 +3103,7 @@ dependencies = [
  "vize_atelier_sfc",
  "vize_atelier_vapor",
  "vize_carton",
+ "vize_croquis",
  "vize_glyph",
  "vize_musea",
  "vize_patina",

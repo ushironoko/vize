@@ -7,29 +7,66 @@ const props = defineProps<{
   compiler: WasmModule | null;
 }>();
 
-const ANALYSIS_PRESET = `<script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+const ANALYSIS_PRESET = `<script lang="ts">
+// Non-script-setup block (Options API compatible)
+import axios from 'axios'
+import { formatDate } from '@/utils/date'
+import type { User } from '@/types'
 
-// Props with type annotation
-const props = defineProps<{
+export default {
+  name: 'DemoComponent',
+  inheritAttrs: false,
+}
+<\/script>
+
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+// External module imports
+import lodash from 'lodash'
+import dayjs from 'dayjs'
+
+// Type exports (hoisted to module level - VALID in script setup)
+export type ComponentProps = {
   title: string
   count?: number
-}>()
+}
+
+export interface ComponentEmits {
+  (e: 'update', value: number): void
+  (e: 'close'): void
+}
+
+// Props and emits using the exported types
+const props = defineProps<ComponentProps>()
 
 // Emits declaration
-const emit = defineEmits<{
-  update: [number]
-  close: []
-}>()
+const emit = defineEmits<ComponentEmits>()
+
+// Example of invalid exports (uncomment to see error detection)
+// export const INVALID_CONST = 'error'
+// export function invalidFunction() {}
 
 // Reactive refs
 const counter = ref(0)
 const doubled = computed(() => counter.value * 2)
 const message = ref('Hello Vue!')
+const windowWidth = ref(0)
 
 // Watchers
 watch(counter, (newVal) => {
   console.log('Counter changed:', newVal)
+})
+
+// Client-only lifecycle hooks (SSR safe)
+onMounted(() => {
+  // This code only runs on the client
+  windowWidth.value = window.innerWidth
+  console.log('Component mounted on client')
+})
+
+onUnmounted(() => {
+  // Cleanup on client
+  console.log('Component unmounted')
 })
 
 // Methods
@@ -41,12 +78,18 @@ function increment() {
 function reset() {
   counter.value = 0
 }
+
+// Array operations with scoped callbacks
+const items = ref([1, 2, 3, 4, 5])
+const evenItems = computed(() => items.value.filter((item) => item % 2 === 0))
+const mappedItems = computed(() => items.value.map((item) => item * 2))
 <\/script>
 
 <template>
   <div class="container">
     <h1>{{ props.title }}</h1>
     <p class="message">{{ message }}</p>
+    <p class="width">Window width: {{ windowWidth }}px</p>
     <div class="counter">
       <span>Count: {{ counter }}</span>
       <span>Doubled: {{ doubled }}</span>
@@ -55,6 +98,9 @@ function reset() {
       <button @click="increment">+1</button>
       <button @click="reset">Reset</button>
     </div>
+    <ul>
+      <li v-for="item in evenItems" :key="item">{{ item }}</li>
+    </ul>
   </div>
 </template>
 
@@ -66,6 +112,11 @@ function reset() {
 
 .message {
   color: v-bind('counter > 5 ? "red" : "green"');
+}
+
+.width {
+  color: #666;
+  font-size: 14px;
 }
 
 .counter {
@@ -92,6 +143,26 @@ const source = ref(ANALYSIS_PRESET);
 const analysisResult = ref<AnalysisResult | null>(null);
 const error = ref<string | null>(null);
 const activeTab = ref<'vir' | 'stats' | 'bindings' | 'scopes' | 'diagnostics'>('vir');
+const showScopeVisualization = ref(true);
+
+// Convert scopes to Monaco editor decorations (exclude module scope and global scopes with no position)
+const scopeDecorations = computed(() => {
+  if (!scopes.value) return [];
+  return scopes.value
+    .filter(scope => {
+      // Don't visualize module scope (covers entire file)
+      if (scope.kind === 'mod') return false;
+      // Don't visualize global scopes (start/end = 0)
+      if (scope.start === 0 && scope.end === 0) return false;
+      return true;
+    })
+    .map(scope => ({
+      start: scope.start,
+      end: scope.end,
+      kind: scope.kind,
+      kindStr: scope.kindStr,
+    }));
+});
 const analysisTime = ref<number | null>(null);
 
 // Perform analysis
@@ -143,6 +214,8 @@ const bindings = computed(() => summary.value?.bindings || []);
 const macros = computed(() => summary.value?.macros || []);
 const scopes = computed(() => summary.value?.scopes || []);
 const css = computed(() => summary.value?.css);
+const typeExports = computed(() => summary.value?.typeExports || []);
+const invalidExports = computed(() => summary.value?.invalidExports || []);
 const diagnostics = computed(() => analysisResult.value?.diagnostics || []);
 const stats = computed(() => summary.value?.stats);
 
@@ -407,6 +480,92 @@ function getSourceClass(source: BindingSource | string): string {
   };
   return classes[source] || 'src-default';
 }
+
+// Scope kind colors
+function getScopeColorClass(kind: string): string {
+  // Direct mapping for exact matches
+  const classes: Record<string, string> = {
+    // Module scope
+    mod: 'scope-module',
+    Mod: 'scope-module',
+    module: 'scope-module',
+    Module: 'scope-module',
+    // Plain (non-script-setup)
+    plain: 'scope-non-script-setup',
+    Plain: 'scope-non-script-setup',
+    nonScriptSetup: 'scope-non-script-setup',
+    NonScriptSetup: 'scope-non-script-setup',
+    // Script setup
+    setup: 'scope-script-setup',
+    Setup: 'scope-script-setup',
+    scriptSetup: 'scope-script-setup',
+    ScriptSetup: 'scope-script-setup',
+    // Function scopes
+    function: 'scope-function',
+    Function: 'scope-function',
+    arrowFunction: 'scope-function',
+    ArrowFunction: 'scope-function',
+    block: 'scope-block',
+    Block: 'scope-block',
+    Callback: 'scope-callback',
+    // Template scopes
+    vFor: 'scope-vfor',
+    VFor: 'scope-vfor',
+    vSlot: 'scope-vslot',
+    VSlot: 'scope-vslot',
+    EventHandler: 'scope-event-handler',
+    // External modules
+    extern: 'scope-external-module',
+    extmod: 'scope-external-module',
+    ExternalModule: 'scope-external-module',
+    // SSR scopes
+    universal: 'scope-universal',
+    Universal: 'scope-universal',
+    JsGlobal: 'scope-js-global-universal',
+    client: 'scope-client-only',
+    Client: 'scope-client-only',
+    clientOnly: 'scope-client-only',
+    ClientOnly: 'scope-client-only',
+    server: 'scope-js-global-node',
+    Server: 'scope-js-global-node',
+    // JS Global scopes (runtime-specific)
+    jsGlobalUniversal: 'scope-js-global-universal',
+    JsGlobalUniversal: 'scope-js-global-universal',
+    jsGlobalBrowser: 'scope-js-global-browser',
+    JsGlobalBrowser: 'scope-js-global-browser',
+    jsGlobalNode: 'scope-js-global-node',
+    JsGlobalNode: 'scope-js-global-node',
+    jsGlobalDeno: 'scope-js-global-deno',
+    JsGlobalDeno: 'scope-js-global-deno',
+    jsGlobalBun: 'scope-js-global-bun',
+    JsGlobalBun: 'scope-js-global-bun',
+    // Vue global
+    vue: 'scope-vue-global',
+    Vue: 'scope-vue-global',
+    vueGlobal: 'scope-vue-global',
+    VueGlobal: 'scope-vue-global',
+  };
+
+  // Check for exact match
+  if (classes[kind]) {
+    return classes[kind];
+  }
+
+  // Check for partial matches (e.g., "ClientOnly (onMounted)" should match 'scope-client-only')
+  if (kind.startsWith('ClientOnly')) return 'scope-client-only';
+  if (kind.startsWith('Universal')) return 'scope-universal';
+  if (kind.startsWith('ServerOnly')) return 'scope-js-global-node';
+  if (kind.startsWith('Function')) return 'scope-function';
+  if (kind.startsWith('Arrow')) return 'scope-function';
+  if (kind.startsWith('ExtMod')) return 'scope-external-module';
+  if (kind.startsWith('v-for')) return 'scope-vfor';
+  if (kind.startsWith('v-slot')) return 'scope-vslot';
+  if (kind.startsWith('@')) return 'scope-event-handler';  // Event handlers like @click
+  if (kind.includes('computed')) return 'scope-function';
+  if (kind.includes('watch')) return 'scope-function';
+
+  return 'scope-default';
+}
 </script>
 
 <template>
@@ -418,11 +577,19 @@ function getSourceClass(source: BindingSource | string): string {
           <h2>Source</h2>
         </div>
         <div class="panel-actions">
+          <label class="toggle-label">
+            <input type="checkbox" v-model="showScopeVisualization" />
+            <span>Visualize Scopes</span>
+          </label>
           <button @click="source = ANALYSIS_PRESET" class="btn-ghost">Reset</button>
         </div>
       </div>
       <div class="editor-container">
-        <MonacoEditor v-model="source" language="vue" />
+        <MonacoEditor
+          v-model="source"
+          language="vue"
+          :scopes="showScopeVisualization ? scopeDecorations : []"
+        />
       </div>
     </div>
 
@@ -534,6 +701,28 @@ function getSourceClass(source: BindingSource | string): string {
                 <span v-if="css.v_bind_count > 0" class="css-badge vbind">{{ css.v_bind_count }} v-bind</span>
               </div>
             </div>
+
+            <div class="section" v-if="typeExports.length > 0">
+              <h3 class="section-title">Type Exports <span class="badge hoisted">hoisted</span></h3>
+              <div class="export-list">
+                <div v-for="te in typeExports" :key="`${te.name}-${te.start}`" class="export-item valid">
+                  <span class="export-kind">{{ te.kind }}</span>
+                  <code class="export-name">{{ te.name }}</code>
+                  <span class="export-badge hoisted">hoisted to module</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="section" v-if="invalidExports.length > 0">
+              <h3 class="section-title">Invalid Exports <span class="badge error">error</span></h3>
+              <div class="export-list">
+                <div v-for="ie in invalidExports" :key="`${ie.name}-${ie.start}`" class="export-item invalid">
+                  <span class="export-kind">{{ ie.kind }}</span>
+                  <code class="export-name">{{ ie.name }}</code>
+                  <span class="export-badge error">not allowed in script setup</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Bindings Tab -->
@@ -558,8 +747,10 @@ function getSourceClass(source: BindingSource | string): string {
                       <span v-if="binding.typeAnnotation" class="binding-type">: {{ binding.typeAnnotation }}</span>
                     </div>
                     <div class="binding-flags">
-                      <span :class="['flag', binding.isUsed ? 'active' : 'inactive']">used</span>
+                      <span :class="['flag', binding.bindable ? 'active' : 'inactive']" title="Can be referenced from template">bindable</span>
+                      <span :class="['flag', binding.usedInTemplate ? 'active' : 'inactive']" title="Actually used in template">in-template</span>
                       <span :class="['flag', binding.isMutated ? 'active' : 'inactive']">mutated</span>
+                      <span v-if="binding.fromScriptSetup" class="flag setup" title="From script setup">setup</span>
                       <span class="refs">{{ binding.referenceCount }} refs</span>
                     </div>
                   </div>
@@ -573,9 +764,9 @@ function getSourceClass(source: BindingSource | string): string {
             <div v-if="scopes.length === 0" class="empty-state">No scopes detected</div>
 
             <div v-else class="scope-tree">
-              <div v-for="scope in scopes" :key="scope.id" class="scope-node" :style="{ marginLeft: `${(scope.depth || 0) * 20}px` }">
+              <div v-for="scope in scopes" :key="scope.id" :class="['scope-node', getScopeColorClass(scope.kindStr || scope.kind)]" :style="{ marginLeft: `${(scope.depth || 0) * 20}px` }">
                 <div class="scope-header">
-                  <span class="scope-icon">&#x25B8;</span>
+                  <span :class="['scope-indicator', getScopeColorClass(scope.kindStr || scope.kind)]"></span>
                   <span class="scope-kind">{{ scope.kindStr || scope.kind }}</span>
                   <span class="scope-range">[{{ scope.start }}:{{ scope.end }}]</span>
                 </div>
@@ -693,6 +884,34 @@ function getSourceClass(source: BindingSource | string): string {
 .btn-ghost:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.toggle-label:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-primary);
+}
+
+.toggle-label span {
+  white-space: nowrap;
 }
 
 .tabs {
@@ -901,6 +1120,84 @@ function getSourceClass(source: BindingSource | string): string {
   color: #2dd4bf;
 }
 
+/* Export sections */
+.export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.export-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+
+.export-item.valid {
+  background: rgba(34, 197, 94, 0.08);
+  border-left-color: #22c55e;
+}
+
+.export-item.invalid {
+  background: rgba(239, 68, 68, 0.08);
+  border-left-color: #ef4444;
+}
+
+.export-kind {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  background: var(--surface-elevated);
+  color: var(--text-muted);
+}
+
+.export-name {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.export-badge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+.export-badge.hoisted {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.export-badge.error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.badge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.badge.hoisted {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.badge.error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
 /* Bindings Tab */
 .source-group {
   margin-bottom: 1.25rem;
@@ -1023,6 +1320,11 @@ function getSourceClass(source: BindingSource | string): string {
   opacity: 0.5;
 }
 
+.flag.setup {
+  background: rgba(147, 112, 219, 0.15);
+  color: #9370db;
+}
+
 .refs {
   font-size: 0.625rem;
   color: var(--text-muted);
@@ -1041,6 +1343,7 @@ function getSourceClass(source: BindingSource | string): string {
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
+  border-left: 3px solid transparent;
 }
 
 .scope-header {
@@ -1049,15 +1352,17 @@ function getSourceClass(source: BindingSource | string): string {
   gap: 0.5rem;
 }
 
-.scope-icon {
-  font-size: 0.625rem;
-  color: var(--text-muted);
+.scope-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .scope-kind {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #a78bfa;
+  color: var(--text-primary);
 }
 
 .scope-range {
@@ -1071,7 +1376,7 @@ function getSourceClass(source: BindingSource | string): string {
   flex-wrap: wrap;
   gap: 0.25rem;
   margin-top: 0.375rem;
-  padding-left: 1rem;
+  padding-left: 1.5rem;
 }
 
 .scope-binding {
@@ -1082,6 +1387,69 @@ function getSourceClass(source: BindingSource | string): string {
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-secondary);
 }
+
+/* Scope kind colors */
+/* Template scopes */
+.scope-module { background: rgba(167, 139, 250, 0.08); border-left-color: #a78bfa; }
+.scope-module.scope-indicator { background: #a78bfa; }
+
+.scope-function { background: rgba(251, 191, 36, 0.08); border-left-color: #fbbf24; }
+.scope-function.scope-indicator { background: #fbbf24; }
+
+.scope-block { background: rgba(148, 163, 184, 0.08); border-left-color: #94a3b8; }
+.scope-block.scope-indicator { background: #94a3b8; }
+
+.scope-vfor { background: rgba(74, 222, 128, 0.08); border-left-color: #4ade80; }
+.scope-vfor.scope-indicator { background: #4ade80; }
+
+.scope-vslot { background: rgba(45, 212, 191, 0.08); border-left-color: #2dd4bf; }
+.scope-vslot.scope-indicator { background: #2dd4bf; }
+
+.scope-event-handler { background: rgba(244, 114, 182, 0.08); border-left-color: #f472b6; }
+.scope-event-handler.scope-indicator { background: #f472b6; }
+
+.scope-callback { background: rgba(251, 146, 60, 0.08); border-left-color: #fb923c; }
+.scope-callback.scope-indicator { background: #fb923c; }
+
+/* Script scopes */
+.scope-script-setup { background: rgba(96, 165, 250, 0.08); border-left-color: #60a5fa; }
+.scope-script-setup.scope-indicator { background: #60a5fa; }
+
+.scope-non-script-setup { background: rgba(129, 140, 248, 0.08); border-left-color: #818cf8; }
+.scope-non-script-setup.scope-indicator { background: #818cf8; }
+
+/* SSR scopes */
+.scope-universal { background: rgba(34, 211, 238, 0.08); border-left-color: #22d3ee; }
+.scope-universal.scope-indicator { background: #22d3ee; }
+
+.scope-client-only { background: rgba(248, 113, 113, 0.08); border-left-color: #f87171; }
+.scope-client-only.scope-indicator { background: #f87171; }
+
+/* JS Global scopes (runtime-specific) */
+.scope-js-global-universal { background: rgba(253, 224, 71, 0.08); border-left-color: #fde047; }
+.scope-js-global-universal.scope-indicator { background: #fde047; }
+
+.scope-js-global-browser { background: rgba(251, 146, 60, 0.08); border-left-color: #fb923c; }
+.scope-js-global-browser.scope-indicator { background: #fb923c; }
+
+.scope-js-global-node { background: rgba(74, 222, 128, 0.08); border-left-color: #4ade80; }
+.scope-js-global-node.scope-indicator { background: #4ade80; }
+
+.scope-js-global-deno { background: rgba(96, 165, 250, 0.08); border-left-color: #60a5fa; }
+.scope-js-global-deno.scope-indicator { background: #60a5fa; }
+
+.scope-js-global-bun { background: rgba(244, 114, 182, 0.08); border-left-color: #f472b6; }
+.scope-js-global-bun.scope-indicator { background: #f472b6; }
+
+/* Vue global */
+.scope-vue-global { background: rgba(52, 211, 153, 0.08); border-left-color: #34d399; }
+.scope-vue-global.scope-indicator { background: #34d399; }
+
+.scope-external-module { background: rgba(192, 132, 252, 0.08); border-left-color: #c084fc; }
+.scope-external-module.scope-indicator { background: #c084fc; }
+
+.scope-default { background: var(--bg-secondary); border-left-color: var(--border-primary); }
+.scope-default.scope-indicator { background: var(--text-muted); }
 
 /* VIR Tab */
 .vir-output {

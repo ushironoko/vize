@@ -19,6 +19,16 @@ pub struct DisabledRange {
     pub end_line: Option<u32>,
 }
 
+/// SSR mode for linting
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SsrMode {
+    /// Disabled - no SSR-specific rules
+    Disabled,
+    /// Enabled - warn about SSR-unfriendly code (default)
+    #[default]
+    Enabled,
+}
+
 /// Context for tracking element state during traversal
 ///
 /// Uses `CompactString` for tag to avoid lifetime complications while
@@ -93,6 +103,8 @@ pub struct LintContext<'a> {
     enabled_rules: Option<FxHashSet<String>>,
     /// Optional semantic analysis from croquis
     analysis: Option<&'a AnalysisSummary>,
+    /// SSR mode for linting
+    ssr_mode: SsrMode,
 }
 
 impl<'a> LintContext<'a> {
@@ -131,6 +143,7 @@ impl<'a> LintContext<'a> {
             line_offsets: Self::compute_line_offsets(source),
             enabled_rules: None,
             analysis: None,
+            ssr_mode: SsrMode::default(),
         }
     }
 
@@ -158,6 +171,7 @@ impl<'a> LintContext<'a> {
             line_offsets: Self::compute_line_offsets(source),
             enabled_rules: None,
             analysis: Some(analysis),
+            ssr_mode: SsrMode::default(),
         }
     }
 
@@ -177,6 +191,24 @@ impl<'a> LintContext<'a> {
     #[inline]
     pub fn has_analysis(&self) -> bool {
         self.analysis.is_some()
+    }
+
+    /// Set SSR mode
+    #[inline]
+    pub fn set_ssr_mode(&mut self, mode: SsrMode) {
+        self.ssr_mode = mode;
+    }
+
+    /// Get SSR mode
+    #[inline]
+    pub fn ssr_mode(&self) -> SsrMode {
+        self.ssr_mode
+    }
+
+    /// Check if SSR mode is enabled
+    #[inline]
+    pub fn is_ssr_enabled(&self) -> bool {
+        self.ssr_mode == SsrMode::Enabled
     }
 
     /// Set enabled rules filter

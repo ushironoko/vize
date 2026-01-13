@@ -24,6 +24,7 @@ vize_atelier_sfc = { workspace = true, default-features = false }
 vize_musea = { workspace = true }
 vize_patina = { workspace = true }
 vize_glyph = { workspace = true }
+vize_croquis = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

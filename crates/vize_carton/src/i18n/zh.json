@@ -202,5 +202,14 @@
   "cli.warning_count": "发现{count}个警告",
   "cli.slow_file_warning": "{file}编译缓慢（{time}ms）",
   "cli.suggest_split": "考虑将大组件拆分为小组件",
-  "cli.suggest_template": "检测到大模板（{size}字节）。考虑将部分提取为子组件"
+  "cli.suggest_template": "检测到大模板（{size}字节）。考虑将部分提取为子组件",
+
+  "ssr/no-browser-globals-in-ssr.description": "禁止在SSR上下文中使用浏览器专用全局变量",
+  "ssr/no-browser-globals-in-ssr.message": "'{name}'是浏览器专用全局变量，在SSR中不可用",
+  "ssr/no-browser-globals-in-ssr.help": "将浏览器专用代码移到onMounted()等客户端生命周期钩子中，或使用<ClientOnly>",
+
+  "ssr/no-hydration-mismatch.description": "禁止导致hydration不匹配的非确定性值",
+  "ssr/no-hydration-mismatch.message": "'{pattern}'可能导致服务器和客户端之间的hydration不匹配",
+  "ssr/no-hydration-mismatch.message-attr": "属性绑定中的'{pattern}'可能导致hydration不匹配",
+  "ssr/no-hydration-mismatch.help": "对于唯一ID使用useId()，或用<ClientOnly>包装客户端专用值"
 }

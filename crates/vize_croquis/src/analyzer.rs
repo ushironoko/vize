@@ -25,7 +25,10 @@
 //! let summary = analyzer.finish();
 //! ```
 
-use crate::analysis::{AnalysisSummary, BindingMetadata, UndefinedRef};
+use crate::analysis::{
+    AnalysisSummary, BindingMetadata, InvalidExport, InvalidExportKind, TypeExport, TypeExportKind,
+    UndefinedRef,
+};
 use crate::macros::{EmitDefinition, ModelDefinition, PropDefinition};
 use crate::reactivity::ReactiveKind;
 use crate::types::TypeResolver;
@@ -686,6 +689,31 @@ impl Analyzer {
                 }
             }
 
+            // export type / export interface (valid - hoisted)
+            if rest.starts_with("export type ") {
+                if let Some(advance) = self.parse_type_export(rest, TypeExportKind::Type, i as u32)
+                {
+                    i += advance;
+                    continue;
+                }
+            }
+            if rest.starts_with("export interface ") {
+                if let Some(advance) =
+                    self.parse_type_export(rest, TypeExportKind::Interface, i as u32)
+                {
+                    i += advance;
+                    continue;
+                }
+            }
+
+            // export const/let/var/function/class/default (invalid in script setup)
+            if rest.starts_with("export ") {
+                if let Some(advance) = self.parse_invalid_export(rest, i as u32) {
+                    i += advance;
+                    continue;
+                }
+            }
+
             i += 1;
         }
     }
@@ -810,6 +838,147 @@ impl Analyzer {
         }
 
         Some(end)
+    }
+
+    /// Parse type export (export type / export interface) - valid in script setup, hoisted
+    fn parse_type_export(
+        &mut self,
+        source: &str,
+        kind: TypeExportKind,
+        start_offset: u32,
+    ) -> Option<usize> {
+        // export type Foo = ... or export interface Foo { ... }
+        let prefix_len = match kind {
+            TypeExportKind::Type => 12,      // "export type "
+            TypeExportKind::Interface => 17, // "export interface "
+        };
+
+        let after_keyword = &source[prefix_len..];
+        let name_end = after_keyword.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+        let name = &after_keyword[..name_end];
+
+        if name.is_empty() || !is_identifier(name) {
+            return None;
+        }
+
+        // Find end of declaration
+        let end = match kind {
+            TypeExportKind::Type => {
+                // Find end of type alias (simplified: look for newline or semicolon at depth 0)
+                let mut depth = 0;
+                let mut pos = 0;
+                for (i, c) in source.char_indices() {
+                    match c {
+                        '{' | '<' | '(' | '[' => depth += 1,
+                        '}' | '>' | ')' | ']' => depth -= 1,
+                        ';' | '\n' if depth == 0 && i > prefix_len + name_end => {
+                            pos = i;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                if pos == 0 {
+                    source.len()
+                } else {
+                    pos + 1
+                }
+            }
+            TypeExportKind::Interface => {
+                // Find matching brace
+                if let Some(brace_start) = source.find('{') {
+                    self.find_matching(source, brace_start + 1, b'{', b'}')
+                        .map(|e| e + 1)
+                        .unwrap_or(source.len())
+                } else {
+                    source.find('\n').unwrap_or(source.len())
+                }
+            }
+        };
+
+        self.summary.type_exports.push(TypeExport {
+            name: CompactString::new(name),
+            kind,
+            start: start_offset,
+            end: start_offset + end as u32,
+            hoisted: true,
+        });
+
+        Some(end)
+    }
+
+    /// Parse invalid export (const/let/var/function/class/default) - invalid in script setup
+    fn parse_invalid_export(&mut self, source: &str, start_offset: u32) -> Option<usize> {
+        let after_export = source[7..].trim_start(); // Skip "export "
+
+        // Determine kind and extract name
+        let (kind, name, advance) = if let Some(rest) = after_export.strip_prefix("const ") {
+            let name_end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+            let name = &rest[..name_end];
+            let end = source.find('\n').unwrap_or(source.len());
+            (InvalidExportKind::Const, name, end)
+        } else if let Some(rest) = after_export.strip_prefix("let ") {
+            let name_end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+            let name = &rest[..name_end];
+            let end = source.find('\n').unwrap_or(source.len());
+            (InvalidExportKind::Let, name, end)
+        } else if let Some(rest) = after_export.strip_prefix("var ") {
+            let name_end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+            let name = &rest[..name_end];
+            let end = source.find('\n').unwrap_or(source.len());
+            (InvalidExportKind::Var, name, end)
+        } else if let Some(rest) = after_export.strip_prefix("function ") {
+            let name_end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+            let name = &rest[..name_end];
+            // Skip to end of function
+            let end = if let Some(brace_start) = source.find('{') {
+                self.find_matching(source, brace_start + 1, b'{', b'}')
+                    .map(|e| e + 1)
+                    .unwrap_or(source.len())
+            } else {
+                source.find('\n').unwrap_or(source.len())
+            };
+            (InvalidExportKind::Function, name, end)
+        } else if let Some(rest) = after_export.strip_prefix("async function ") {
+            let name_end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+            let name = &rest[..name_end];
+            let end = if let Some(brace_start) = source.find('{') {
+                self.find_matching(source, brace_start + 1, b'{', b'}')
+                    .map(|e| e + 1)
+                    .unwrap_or(source.len())
+            } else {
+                source.find('\n').unwrap_or(source.len())
+            };
+            (InvalidExportKind::Function, name, end)
+        } else if let Some(rest) = after_export.strip_prefix("class ") {
+            let name_end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+            let name = &rest[..name_end];
+            let end = if let Some(brace_start) = source.find('{') {
+                self.find_matching(source, brace_start + 1, b'{', b'}')
+                    .map(|e| e + 1)
+                    .unwrap_or(source.len())
+            } else {
+                source.find('\n').unwrap_or(source.len())
+            };
+            (InvalidExportKind::Class, name, end)
+        } else if after_export.starts_with("default ") {
+            let end = source.find('\n').unwrap_or(source.len());
+            (InvalidExportKind::Default, "default", end)
+        } else {
+            // Not a recognized export pattern (might be re-export like "export { ... }")
+            return None;
+        };
+
+        if !name.is_empty() && is_identifier(name) {
+            self.summary.invalid_exports.push(InvalidExport {
+                name: CompactString::new(name),
+                kind,
+                start: start_offset,
+                end: start_offset + advance as u32,
+            });
+        }
+
+        Some(advance)
     }
 
     // =========================================================================
@@ -1198,5 +1367,88 @@ mod tests {
 
         let strings = analyzer.extract_string_array(r#"["a", "b"]"#);
         assert_eq!(strings, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_type_exports() {
+        let mut analyzer = Analyzer::for_lint();
+        analyzer.analyze_script(
+            r#"
+export type Props = {
+    msg: string
+}
+export interface Emits {
+    (e: 'update', value: string): void
+}
+const count = ref(0)
+        "#,
+        );
+
+        let summary = analyzer.finish();
+        assert_eq!(summary.type_exports.len(), 2);
+
+        let type_export = &summary.type_exports[0];
+        assert_eq!(type_export.name.as_str(), "Props");
+        assert_eq!(type_export.kind, TypeExportKind::Type);
+        assert!(type_export.hoisted);
+
+        let interface_export = &summary.type_exports[1];
+        assert_eq!(interface_export.name.as_str(), "Emits");
+        assert_eq!(interface_export.kind, TypeExportKind::Interface);
+        assert!(interface_export.hoisted);
+    }
+
+    #[test]
+    fn test_invalid_exports() {
+        let mut analyzer = Analyzer::for_lint();
+        analyzer.analyze_script(
+            r#"
+export const foo = 'bar'
+export let count = 0
+export function hello() {}
+export class MyClass {}
+export default { foo: 'bar' }
+const valid = ref(0)
+        "#,
+        );
+
+        let summary = analyzer.finish();
+        assert_eq!(summary.invalid_exports.len(), 5);
+
+        let kinds: Vec<_> = summary.invalid_exports.iter().map(|e| e.kind).collect();
+        assert!(kinds.contains(&InvalidExportKind::Const));
+        assert!(kinds.contains(&InvalidExportKind::Let));
+        assert!(kinds.contains(&InvalidExportKind::Function));
+        assert!(kinds.contains(&InvalidExportKind::Class));
+        assert!(kinds.contains(&InvalidExportKind::Default));
+
+        let names: Vec<_> = summary
+            .invalid_exports
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(names.contains(&"foo"));
+        assert!(names.contains(&"count"));
+        assert!(names.contains(&"hello"));
+        assert!(names.contains(&"MyClass"));
+    }
+
+    #[test]
+    fn test_mixed_exports() {
+        let mut analyzer = Analyzer::for_lint();
+        analyzer.analyze_script(
+            r#"
+export type MyType = string
+export const invalid = 123
+export interface MyInterface { name: string }
+        "#,
+        );
+
+        let summary = analyzer.finish();
+        // Valid type exports
+        assert_eq!(summary.type_exports.len(), 2);
+        // Invalid value exports
+        assert_eq!(summary.invalid_exports.len(), 1);
+        assert_eq!(summary.invalid_exports[0].name.as_str(), "invalid");
     }
 }

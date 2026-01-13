@@ -47,6 +47,17 @@ pub enum ScopeKind {
     VSlot,
     EventHandler,
     Callback,
+    ScriptSetup,
+    NonScriptSetup,
+    Universal,
+    ClientOnly,
+    JsGlobalUniversal,
+    JsGlobalBrowser,
+    JsGlobalNode,
+    JsGlobalDeno,
+    JsGlobalBun,
+    VueGlobal,
+    ExternalModule,
 }
 
 impl From<crate::scope::ScopeKind> for ScopeKind {
@@ -59,6 +70,99 @@ impl From<crate::scope::ScopeKind> for ScopeKind {
             crate::scope::ScopeKind::VSlot => Self::VSlot,
             crate::scope::ScopeKind::EventHandler => Self::EventHandler,
             crate::scope::ScopeKind::Callback => Self::Callback,
+            crate::scope::ScopeKind::ScriptSetup => Self::ScriptSetup,
+            crate::scope::ScopeKind::NonScriptSetup => Self::NonScriptSetup,
+            crate::scope::ScopeKind::Universal => Self::Universal,
+            crate::scope::ScopeKind::ClientOnly => Self::ClientOnly,
+            crate::scope::ScopeKind::JsGlobalUniversal => Self::JsGlobalUniversal,
+            crate::scope::ScopeKind::JsGlobalBrowser => Self::JsGlobalBrowser,
+            crate::scope::ScopeKind::JsGlobalNode => Self::JsGlobalNode,
+            crate::scope::ScopeKind::JsGlobalDeno => Self::JsGlobalDeno,
+            crate::scope::ScopeKind::JsGlobalBun => Self::JsGlobalBun,
+            crate::scope::ScopeKind::VueGlobal => Self::VueGlobal,
+            crate::scope::ScopeKind::ExternalModule => Self::ExternalModule,
+        }
+    }
+}
+
+impl ScopeKind {
+    /// Get the display prefix for this scope kind
+    ///
+    /// - `~` = universal (works on both client and server)
+    /// - `!` = client only (requires client API: window, document, etc.)
+    /// - `#` = server private (reserved for future Server Components)
+    #[inline]
+    pub const fn prefix(&self) -> &'static str {
+        match self {
+            // Client-only (requires client API)
+            Self::ClientOnly | Self::JsGlobalBrowser => "!",
+            // Server private (reserved for future Server Components)
+            Self::JsGlobalNode | Self::JsGlobalDeno | Self::JsGlobalBun => "#",
+            // Universal (works on both)
+            _ => "~",
+        }
+    }
+
+    /// Get the display name for this scope kind
+    #[inline]
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            Self::Module => "mod",
+            Self::Function => "fn",
+            Self::Block => "block",
+            Self::VFor => "v-for",
+            Self::VSlot => "v-slot",
+            Self::EventHandler => "event",
+            Self::Callback => "callback",
+            Self::ScriptSetup => "setup",
+            Self::NonScriptSetup => "plain",
+            Self::Universal => "universal",
+            Self::ClientOnly => "client",
+            Self::JsGlobalUniversal => "universal",
+            Self::JsGlobalBrowser => "client",
+            Self::JsGlobalNode => "server",
+            Self::JsGlobalDeno => "server",
+            Self::JsGlobalBun => "server",
+            Self::VueGlobal => "vue",
+            Self::ExternalModule => "extern",
+        }
+    }
+
+    /// Format for VIR display (zero allocation)
+    #[inline]
+    pub const fn to_display(&self) -> &'static str {
+        match self {
+            Self::Module => "mod",
+            Self::Function => "fn",
+            Self::Block => "block",
+            Self::VFor => "v-for",
+            Self::VSlot => "v-slot",
+            Self::EventHandler => "event",
+            Self::Callback => "callback",
+            Self::ScriptSetup => "setup",
+            Self::NonScriptSetup => "plain",
+            Self::Universal => "universal",
+            Self::ClientOnly => "client",
+            Self::JsGlobalUniversal => "universal",
+            Self::JsGlobalBrowser => "client",
+            Self::JsGlobalNode => "server",
+            Self::JsGlobalDeno => "server",
+            Self::JsGlobalBun => "server",
+            Self::VueGlobal => "vue",
+            Self::ExternalModule => "extern",
+        }
+    }
+
+    /// Get reference prefix for parent scope references
+    /// - `~` = universal (works on both client and server)
+    /// - `!` = client only (requires client API)
+    /// - `#` = server private (reserved for future Server Components)
+    #[inline]
+    pub const fn ref_prefix(&self) -> &'static str {
+        match self {
+            Self::ClientOnly | Self::JsGlobalBrowser => "!",
+            Self::JsGlobalNode | Self::JsGlobalDeno | Self::JsGlobalBun => "#",
+            _ => "~",
         }
     }
 }
@@ -90,7 +194,9 @@ pub struct BindingMetadata {
 pub struct ScopeDisplay {
     pub id: u32,
     pub kind: ScopeKind,
-    pub parent_id: Option<u32>,
+    pub parent_ids: Vec<u32>,
+    pub start: u32,
+    pub end: u32,
     pub bindings: Vec<(String, BindingMetadata)>,
 }
 
@@ -445,6 +551,74 @@ impl AnalysisSummary {
         output.push_str(&format!("scope_count = {}\n", self.stats.scope_count));
         output.push_str(&format!("binding_count = {}\n", self.stats.binding_count));
         output.push('\n');
+
+        // Scopes
+        if !self.scopes.is_empty() {
+            output.push_str("[scopes]\n");
+
+            // Assign display IDs per prefix type (separate counters for #, ~, !)
+            use std::collections::HashMap;
+            let mut prefix_counters: HashMap<&str, u32> = HashMap::new();
+            prefix_counters.insert("#", 0);
+            prefix_counters.insert("~", 0);
+            prefix_counters.insert("!", 0);
+
+            // Map internal id -> (prefix, display_id)
+            let mut display_id_map: HashMap<u32, (String, u32)> = HashMap::new();
+            for scope in &self.scopes {
+                let prefix = scope.kind.prefix();
+                let counter = prefix_counters.entry(prefix).or_insert(0);
+                let display_id = *counter;
+                *counter += 1;
+                display_id_map.insert(scope.id, (prefix.to_string(), display_id));
+            }
+
+            for scope in &self.scopes {
+                let (prefix, display_id) = display_id_map.get(&scope.id).unwrap();
+                // Format: prefix+display_id kind @start:end {bindings} $ parent_refs
+                output.push_str(&format!(
+                    "{}{} {} @{}:{}",
+                    prefix,
+                    display_id,
+                    scope.kind.to_display(),
+                    scope.start,
+                    scope.end
+                ));
+
+                // Bindings
+                if !scope.bindings.is_empty() {
+                    output.push_str(" {");
+                    let mut first = true;
+                    for (name, _) in &scope.bindings {
+                        if !first {
+                            output.push_str(", ");
+                        }
+                        output.push_str(name);
+                        first = false;
+                    }
+                    output.push('}');
+                }
+
+                // Parent references (at the end)
+                if !scope.parent_ids.is_empty() {
+                    output.push_str(" $ ");
+                    let mut first = true;
+                    for parent_id in &scope.parent_ids {
+                        if !first {
+                            output.push_str(", ");
+                        }
+                        if let Some((p_prefix, p_display_id)) = display_id_map.get(parent_id) {
+                            output.push_str(&format!("{}{}", p_prefix, p_display_id));
+                        } else {
+                            output.push_str(&format!("#{}", parent_id));
+                        }
+                        first = false;
+                    }
+                }
+                output.push('\n');
+            }
+            output.push('\n');
+        }
 
         // Props
         if !self.props.is_empty() {

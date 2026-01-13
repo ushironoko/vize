@@ -99,6 +99,11 @@ impl RuleRegistry {
         self.rules.push(rule);
     }
 
+    /// Add a rule (alias for register)
+    pub fn add(&mut self, rule: Box<dyn Rule>) {
+        self.register(rule);
+    }
+
     /// Get all registered rules
     pub fn rules(&self) -> &[Box<dyn Rule>] {
         &self.rules
@@ -202,6 +207,14 @@ impl RuleRegistry {
         registry.register(Box::new(crate::rules::a11y::TabindexNoPositive));
         registry.register(Box::new(crate::rules::a11y::ClickEventsHaveKeyEvents));
         registry.register(Box::new(crate::rules::a11y::FormControlHasLabel));
+
+        // ============================================
+        // SSR Rules (Warning)
+        // ============================================
+        // These rules help detect SSR-unfriendly code patterns.
+
+        registry.register(Box::new(crate::rules::ssr::NoBrowserGlobalsInSsr));
+        registry.register(Box::new(crate::rules::ssr::NoHydrationMismatch));
 
         registry
     }

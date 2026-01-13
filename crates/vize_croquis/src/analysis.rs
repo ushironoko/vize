@@ -84,6 +84,12 @@ pub struct AnalysisSummary {
 
     /// Unused bindings (defined but not referenced in template)
     pub unused_bindings: Vec<CompactString>,
+
+    /// Type exports from script setup (hoisted to module level)
+    pub type_exports: Vec<TypeExport>,
+
+    /// Invalid non-type exports in script setup
+    pub invalid_exports: Vec<InvalidExport>,
 }
 
 /// Binding metadata extracted from script analysis.
@@ -170,6 +176,52 @@ pub struct UndefinedRef {
     pub offset: u32,
     /// Context (e.g., "v-if expression", "interpolation")
     pub context: CompactString,
+}
+
+/// Type export from script setup (hoisted to module level)
+#[derive(Debug, Clone)]
+pub struct TypeExport {
+    /// The type/interface name
+    pub name: CompactString,
+    /// Kind of export (type or interface)
+    pub kind: TypeExportKind,
+    /// Source offset
+    pub start: u32,
+    pub end: u32,
+    /// Whether this is hoisted from script setup
+    pub hoisted: bool,
+}
+
+/// Kind of type export
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TypeExportKind {
+    Type = 0,
+    Interface = 1,
+}
+
+/// Invalid export in script setup
+#[derive(Debug, Clone)]
+pub struct InvalidExport {
+    /// The export name
+    pub name: CompactString,
+    /// Kind of invalid export
+    pub kind: InvalidExportKind,
+    /// Source offset
+    pub start: u32,
+    pub end: u32,
+}
+
+/// Kind of invalid export
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum InvalidExportKind {
+    Const = 0,
+    Let = 1,
+    Var = 2,
+    Function = 3,
+    Class = 4,
+    Default = 5,
 }
 
 impl AnalysisSummary {

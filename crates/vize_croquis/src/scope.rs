@@ -26,7 +26,7 @@ pub type ParamNames = SmallVec<[CompactString; PARAM_INLINE_CAP]>;
 pub struct ScopeId(u32);
 
 impl ScopeId {
-    /// The root scope (module level)
+    /// The root scope (SFC level)
     pub const ROOT: Self = Self(0);
 
     /// Create a new scope ID
@@ -46,7 +46,8 @@ impl ScopeId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ScopeKind {
-    /// Module-level scope (top-level of script setup)
+    /// SFC (Single File Component) level scope
+    /// This is the root scope that contains script setup/non-script-setup scopes
     Module = 0,
     /// Function scope
     Function = 1,
@@ -60,6 +61,112 @@ pub enum ScopeKind {
     EventHandler = 5,
     /// Callback/arrow function scope in expressions
     Callback = 6,
+    /// Script setup scope (`<script setup>`)
+    ScriptSetup = 7,
+    /// Non-script setup scope (Options API, regular `<script>`)
+    NonScriptSetup = 8,
+    /// Universal scope (SSR - runs on both server and client)
+    Universal = 9,
+    /// Client-only scope (onMounted, onBeforeUnmount, etc.)
+    ClientOnly = 10,
+    /// Universal JavaScript global scope (console, Math, Object, Array, etc.)
+    /// Works in all runtimes
+    JsGlobalUniversal = 11,
+    /// Browser-only JavaScript global scope (window, document, navigator, localStorage, etc.)
+    /// WARNING: Not available in SSR server context
+    JsGlobalBrowser = 12,
+    /// Node.js-only JavaScript global scope (process, Buffer, __dirname, require, etc.)
+    /// WARNING: Not available in browser context
+    JsGlobalNode = 13,
+    /// Deno-only JavaScript global scope (Deno namespace)
+    JsGlobalDeno = 14,
+    /// Bun-only JavaScript global scope (Bun namespace)
+    JsGlobalBun = 15,
+    /// Vue global scope ($refs, $emit, $slots, $attrs, etc.)
+    VueGlobal = 16,
+    /// External module scope (imported modules)
+    ExternalModule = 17,
+}
+
+impl ScopeKind {
+    /// Get the display prefix for this scope kind
+    /// - `~` = universal (works on both client and server)
+    /// - `!` = client only (requires client API: window, document, etc.)
+    /// - `#` = server private (reserved for future Server Components)
+    #[inline]
+    pub const fn prefix(&self) -> &'static str {
+        match self {
+            // Client-only (requires client API)
+            Self::ClientOnly | Self::JsGlobalBrowser => "!",
+            // Server private (reserved for future Server Components)
+            Self::JsGlobalNode | Self::JsGlobalDeno | Self::JsGlobalBun => "#",
+            // Universal (works on both)
+            _ => "~",
+        }
+    }
+
+    /// Get the display name for this scope kind
+    #[inline]
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            Self::Module => "mod",
+            Self::Function => "fn",
+            Self::Block => "block",
+            Self::VFor => "v-for",
+            Self::VSlot => "v-slot",
+            Self::EventHandler => "event",
+            Self::Callback => "callback",
+            Self::ScriptSetup => "setup",
+            Self::NonScriptSetup => "plain",
+            Self::Universal => "universal",
+            Self::ClientOnly => "client",
+            Self::JsGlobalUniversal => "universal",
+            Self::JsGlobalBrowser => "client",
+            Self::JsGlobalNode => "server",
+            Self::JsGlobalDeno => "server",
+            Self::JsGlobalBun => "server",
+            Self::VueGlobal => "vue",
+            Self::ExternalModule => "extern",
+        }
+    }
+
+    /// Format for VIR display (zero allocation)
+    #[inline]
+    pub const fn to_display(&self) -> &'static str {
+        match self {
+            Self::Module => "mod",
+            Self::Function => "fn",
+            Self::Block => "block",
+            Self::VFor => "v-for",
+            Self::VSlot => "v-slot",
+            Self::EventHandler => "event",
+            Self::Callback => "callback",
+            Self::ScriptSetup => "setup",
+            Self::NonScriptSetup => "plain",
+            Self::Universal => "universal",
+            Self::ClientOnly => "client",
+            Self::JsGlobalUniversal => "universal",
+            Self::JsGlobalBrowser => "client",
+            Self::JsGlobalNode => "server",
+            Self::JsGlobalDeno => "server",
+            Self::JsGlobalBun => "server",
+            Self::VueGlobal => "vue",
+            Self::ExternalModule => "extern",
+        }
+    }
+
+    /// Get reference prefix for parent scope references
+    /// - `~` = universal (works on both client and server)
+    /// - `!` = client only (requires client API)
+    /// - `#` = server private (reserved for future Server Components)
+    #[inline]
+    pub const fn ref_prefix(&self) -> &'static str {
+        match self {
+            Self::ClientOnly | Self::JsGlobalBrowser => "!",
+            Self::JsGlobalNode | Self::JsGlobalDeno | Self::JsGlobalBun => "#",
+            _ => "~",
+        }
+    }
 }
 
 /// Data specific to v-for scope
@@ -106,6 +213,79 @@ pub struct CallbackScopeData {
     pub context: CompactString,
 }
 
+/// Data specific to script setup scope
+#[derive(Debug, Clone)]
+pub struct ScriptSetupScopeData {
+    /// Whether this is TypeScript
+    pub is_ts: bool,
+    /// Whether async setup
+    pub is_async: bool,
+}
+
+/// Data specific to non-script-setup scope (Options API, regular script)
+#[derive(Debug, Clone)]
+pub struct NonScriptSetupScopeData {
+    /// Whether this is TypeScript
+    pub is_ts: bool,
+    /// Whether using defineComponent
+    pub has_define_component: bool,
+}
+
+/// Data specific to client-only scope (onMounted, onBeforeUnmount, etc.)
+#[derive(Debug, Clone)]
+pub struct ClientOnlyScopeData {
+    /// The lifecycle hook name (e.g., "onMounted", "onBeforeUnmount")
+    pub hook_name: CompactString,
+}
+
+/// Data specific to universal scope (SSR - runs on both server and client)
+#[derive(Debug, Clone)]
+pub struct UniversalScopeData {
+    /// Context description
+    pub context: CompactString,
+}
+
+/// Runtime environment for JavaScript globals
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum JsRuntime {
+    /// Universal - works in all runtimes (console, Math, Object, Array, JSON, etc.)
+    Universal = 0,
+    /// Browser - window, document, navigator, localStorage, etc.
+    Browser = 1,
+    /// Node.js - process, Buffer, __dirname, __filename, require, etc.
+    Node = 2,
+    /// Deno - Deno namespace
+    Deno = 3,
+    /// Bun - Bun namespace
+    Bun = 4,
+}
+
+/// Data specific to JavaScript global scope
+#[derive(Debug, Clone)]
+pub struct JsGlobalScopeData {
+    /// Runtime environment
+    pub runtime: JsRuntime,
+    /// Known JS globals for this runtime
+    pub globals: ParamNames,
+}
+
+/// Data specific to Vue global scope
+#[derive(Debug, Clone)]
+pub struct VueGlobalScopeData {
+    /// Known Vue globals ($refs, $emit, $slots, $attrs, $el, etc.)
+    pub globals: ParamNames,
+}
+
+/// Data specific to external module scope
+#[derive(Debug, Clone)]
+pub struct ExternalModuleScopeData {
+    /// Module source path
+    pub source: CompactString,
+    /// Whether this is a type-only import
+    pub is_type_only: bool,
+}
+
 /// Scope-specific data
 #[derive(Debug, Clone)]
 pub enum ScopeData {
@@ -119,6 +299,46 @@ pub enum ScopeData {
     EventHandler(EventHandlerScopeData),
     /// Callback specific data
     Callback(CallbackScopeData),
+    /// Script setup specific data
+    ScriptSetup(ScriptSetupScopeData),
+    /// Non-script-setup specific data
+    NonScriptSetup(NonScriptSetupScopeData),
+    /// Client-only specific data
+    ClientOnly(ClientOnlyScopeData),
+    /// Universal scope specific data
+    Universal(UniversalScopeData),
+    /// JavaScript global specific data (with runtime info)
+    JsGlobal(JsGlobalScopeData),
+    /// Vue global specific data
+    VueGlobal(VueGlobalScopeData),
+    /// External module specific data
+    ExternalModule(ExternalModuleScopeData),
+}
+
+impl JsRuntime {
+    /// Get the corresponding ScopeKind for this runtime
+    #[inline]
+    pub const fn to_scope_kind(self) -> ScopeKind {
+        match self {
+            JsRuntime::Universal => ScopeKind::JsGlobalUniversal,
+            JsRuntime::Browser => ScopeKind::JsGlobalBrowser,
+            JsRuntime::Node => ScopeKind::JsGlobalNode,
+            JsRuntime::Deno => ScopeKind::JsGlobalDeno,
+            JsRuntime::Bun => ScopeKind::JsGlobalBun,
+        }
+    }
+
+    /// Get the corresponding BindingType for this runtime
+    #[inline]
+    pub const fn to_binding_type(self) -> BindingType {
+        match self {
+            JsRuntime::Universal => BindingType::JsGlobalUniversal,
+            JsRuntime::Browser => BindingType::JsGlobalBrowser,
+            JsRuntime::Node => BindingType::JsGlobalNode,
+            JsRuntime::Deno => BindingType::JsGlobalDeno,
+            JsRuntime::Bun => BindingType::JsGlobalBun,
+        }
+    }
 }
 
 impl Default for ScopeData {
@@ -319,7 +539,7 @@ impl Default for ScopeChain {
 }
 
 impl ScopeChain {
-    /// Create a new scope chain with a root module scope
+    /// Create a new scope chain with a root SFC scope
     #[inline]
     pub fn new() -> Self {
         let root = Scope::new(ScopeId::ROOT, None, ScopeKind::Module);
@@ -387,6 +607,12 @@ impl ScopeChain {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.scopes.len() == 1
+    }
+
+    /// Iterate over all scopes
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = &Scope> {
+        self.scopes.iter()
     }
 
     /// Enter a new scope
@@ -511,6 +737,141 @@ impl ScopeChain {
         }
 
         scope.set_data(ScopeData::Callback(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a script setup scope
+    pub fn enter_script_setup_scope(
+        &mut self,
+        data: ScriptSetupScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut scope =
+            Scope::with_span(id, Some(self.current), ScopeKind::ScriptSetup, start, end);
+        scope.set_data(ScopeData::ScriptSetup(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a non-script-setup scope (Options API, regular script)
+    pub fn enter_non_script_setup_scope(
+        &mut self,
+        data: NonScriptSetupScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut scope = Scope::with_span(
+            id,
+            Some(self.current),
+            ScopeKind::NonScriptSetup,
+            start,
+            end,
+        );
+        scope.set_data(ScopeData::NonScriptSetup(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a universal scope (SSR - runs on both server and client)
+    pub fn enter_universal_scope(
+        &mut self,
+        data: UniversalScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::Universal, start, end);
+        scope.set_data(ScopeData::Universal(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a client-only scope (onMounted, onBeforeUnmount, etc.)
+    pub fn enter_client_only_scope(
+        &mut self,
+        data: ClientOnlyScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::ClientOnly, start, end);
+        scope.set_data(ScopeData::ClientOnly(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a JavaScript global scope with specific runtime
+    pub fn enter_js_global_scope(
+        &mut self,
+        data: JsGlobalScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let scope_kind = data.runtime.to_scope_kind();
+        let binding_type = data.runtime.to_binding_type();
+        let mut scope = Scope::with_span(id, Some(self.current), scope_kind, start, end);
+
+        // Add JS globals as bindings with runtime-specific type
+        for global in &data.globals {
+            scope.add_binding(global.clone(), ScopeBinding::new(binding_type, start));
+        }
+
+        scope.set_data(ScopeData::JsGlobal(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter a Vue global scope
+    pub fn enter_vue_global_scope(
+        &mut self,
+        data: VueGlobalScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut scope = Scope::with_span(id, Some(self.current), ScopeKind::VueGlobal, start, end);
+
+        // Add Vue globals as bindings
+        for global in &data.globals {
+            scope.add_binding(
+                global.clone(),
+                ScopeBinding::new(BindingType::VueGlobal, start),
+            );
+        }
+
+        scope.set_data(ScopeData::VueGlobal(data));
+        self.scopes.push(scope);
+        self.current = id;
+        id
+    }
+
+    /// Enter an external module scope
+    pub fn enter_external_module_scope(
+        &mut self,
+        data: ExternalModuleScopeData,
+        start: u32,
+        end: u32,
+    ) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len() as u32);
+        let mut scope = Scope::with_span(
+            id,
+            Some(self.current),
+            ScopeKind::ExternalModule,
+            start,
+            end,
+        );
+        scope.set_data(ScopeData::ExternalModule(data));
         self.scopes.push(scope);
         self.current = id;
         id
@@ -835,5 +1196,361 @@ mod tests {
         binding.mark_mutated();
         assert!(binding.is_used());
         assert!(binding.is_mutated());
+    }
+
+    #[test]
+    fn test_script_setup_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_script_setup_scope(
+            ScriptSetupScopeData {
+                is_ts: true,
+                is_async: false,
+            },
+            0,
+            500,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::ScriptSetup);
+
+        // Add some bindings in script setup
+        chain.add_binding(
+            CompactString::new("counter"),
+            ScopeBinding::new(BindingType::SetupRef, 10),
+        );
+        chain.add_binding(
+            CompactString::new("message"),
+            ScopeBinding::new(BindingType::SetupConst, 20),
+        );
+
+        assert!(chain.is_defined("counter"));
+        assert!(chain.is_defined("message"));
+    }
+
+    #[test]
+    fn test_non_script_setup_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_non_script_setup_scope(
+            NonScriptSetupScopeData {
+                is_ts: false,
+                has_define_component: true,
+            },
+            0,
+            500,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::NonScriptSetup);
+    }
+
+    #[test]
+    fn test_universal_scope() {
+        let mut chain = ScopeChain::new();
+
+        // Script setup scope (runs on both server and client)
+        chain.enter_script_setup_scope(
+            ScriptSetupScopeData {
+                is_ts: true,
+                is_async: false,
+            },
+            0,
+            500,
+        );
+
+        // Enter universal scope (e.g., setup() content before lifecycle hooks)
+        chain.enter_universal_scope(
+            UniversalScopeData {
+                context: CompactString::new("setup"),
+            },
+            10,
+            400,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::Universal);
+
+        // Universal code should be able to access parent script setup bindings
+        chain.exit_scope(); // Exit universal
+        chain.add_binding(
+            CompactString::new("sharedData"),
+            ScopeBinding::new(BindingType::SetupReactiveConst, 50),
+        );
+        chain.enter_universal_scope(
+            UniversalScopeData {
+                context: CompactString::new("setup"),
+            },
+            60,
+            400,
+        );
+
+        assert!(chain.is_defined("sharedData"));
+    }
+
+    #[test]
+    fn test_client_only_scope() {
+        let mut chain = ScopeChain::new();
+
+        // Script setup scope
+        chain.enter_script_setup_scope(
+            ScriptSetupScopeData {
+                is_ts: true,
+                is_async: false,
+            },
+            0,
+            500,
+        );
+
+        // Add binding in script setup
+        chain.add_binding(
+            CompactString::new("count"),
+            ScopeBinding::new(BindingType::SetupRef, 10),
+        );
+
+        // Enter onMounted (client-only)
+        chain.enter_client_only_scope(
+            ClientOnlyScopeData {
+                hook_name: CompactString::new("onMounted"),
+            },
+            100,
+            200,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::ClientOnly);
+
+        // Should be able to access parent bindings
+        assert!(chain.is_defined("count"));
+
+        chain.exit_scope();
+
+        // Enter onBeforeUnmount (client-only)
+        chain.enter_client_only_scope(
+            ClientOnlyScopeData {
+                hook_name: CompactString::new("onBeforeUnmount"),
+            },
+            250,
+            300,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::ClientOnly);
+        assert!(chain.is_defined("count"));
+    }
+
+    #[test]
+    fn test_js_global_universal_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_js_global_scope(
+            JsGlobalScopeData {
+                runtime: JsRuntime::Universal,
+                globals: vize_carton::smallvec![
+                    CompactString::new("console"),
+                    CompactString::new("Math"),
+                    CompactString::new("Object"),
+                    CompactString::new("Array"),
+                ],
+            },
+            0,
+            0,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::JsGlobalUniversal);
+
+        // All JS globals should be defined
+        assert!(chain.is_defined("console"));
+        assert!(chain.is_defined("Math"));
+        assert!(chain.is_defined("Object"));
+        assert!(chain.is_defined("Array"));
+
+        // Check binding type
+        let (_, binding) = chain.lookup("console").unwrap();
+        assert_eq!(binding.binding_type, BindingType::JsGlobalUniversal);
+    }
+
+    #[test]
+    fn test_js_global_browser_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_js_global_scope(
+            JsGlobalScopeData {
+                runtime: JsRuntime::Browser,
+                globals: vize_carton::smallvec![
+                    CompactString::new("window"),
+                    CompactString::new("document"),
+                    CompactString::new("navigator"),
+                    CompactString::new("localStorage"),
+                ],
+            },
+            0,
+            0,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::JsGlobalBrowser);
+
+        // All browser globals should be defined
+        assert!(chain.is_defined("window"));
+        assert!(chain.is_defined("document"));
+        assert!(chain.is_defined("navigator"));
+        assert!(chain.is_defined("localStorage"));
+
+        // Check binding type - should be browser-specific
+        let (_, binding) = chain.lookup("window").unwrap();
+        assert_eq!(binding.binding_type, BindingType::JsGlobalBrowser);
+    }
+
+    #[test]
+    fn test_js_global_node_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_js_global_scope(
+            JsGlobalScopeData {
+                runtime: JsRuntime::Node,
+                globals: vize_carton::smallvec![
+                    CompactString::new("process"),
+                    CompactString::new("Buffer"),
+                    CompactString::new("__dirname"),
+                    CompactString::new("require"),
+                ],
+            },
+            0,
+            0,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::JsGlobalNode);
+
+        // All Node.js globals should be defined
+        assert!(chain.is_defined("process"));
+        assert!(chain.is_defined("Buffer"));
+        assert!(chain.is_defined("__dirname"));
+        assert!(chain.is_defined("require"));
+
+        // Check binding type - should be Node-specific
+        let (_, binding) = chain.lookup("process").unwrap();
+        assert_eq!(binding.binding_type, BindingType::JsGlobalNode);
+    }
+
+    #[test]
+    fn test_vue_global_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_vue_global_scope(
+            VueGlobalScopeData {
+                globals: vize_carton::smallvec![
+                    CompactString::new("$refs"),
+                    CompactString::new("$emit"),
+                    CompactString::new("$slots"),
+                    CompactString::new("$attrs"),
+                ],
+            },
+            0,
+            0,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::VueGlobal);
+
+        // All Vue globals should be defined
+        assert!(chain.is_defined("$refs"));
+        assert!(chain.is_defined("$emit"));
+        assert!(chain.is_defined("$slots"));
+        assert!(chain.is_defined("$attrs"));
+
+        // Check binding type
+        let (_, binding) = chain.lookup("$refs").unwrap();
+        assert_eq!(binding.binding_type, BindingType::VueGlobal);
+    }
+
+    #[test]
+    fn test_external_module_scope() {
+        let mut chain = ScopeChain::new();
+
+        chain.enter_external_module_scope(
+            ExternalModuleScopeData {
+                source: CompactString::new("vue"),
+                is_type_only: false,
+            },
+            0,
+            50,
+        );
+
+        assert_eq!(chain.current_scope().kind, ScopeKind::ExternalModule);
+
+        // Add imports from external module
+        chain.add_binding(
+            CompactString::new("ref"),
+            ScopeBinding::new(BindingType::ExternalModule, 10),
+        );
+        chain.add_binding(
+            CompactString::new("computed"),
+            ScopeBinding::new(BindingType::ExternalModule, 15),
+        );
+
+        assert!(chain.is_defined("ref"));
+        assert!(chain.is_defined("computed"));
+
+        let (_, binding) = chain.lookup("ref").unwrap();
+        assert_eq!(binding.binding_type, BindingType::ExternalModule);
+    }
+
+    #[test]
+    fn test_nested_ssr_scopes() {
+        let mut chain = ScopeChain::new();
+
+        // Root: Universal JS Global
+        chain.enter_js_global_scope(
+            JsGlobalScopeData {
+                runtime: JsRuntime::Universal,
+                globals: vize_carton::smallvec![CompactString::new("console")],
+            },
+            0,
+            0,
+        );
+
+        // Vue global
+        chain.enter_vue_global_scope(
+            VueGlobalScopeData {
+                globals: vize_carton::smallvec![CompactString::new("$emit")],
+            },
+            0,
+            0,
+        );
+
+        // Script setup
+        chain.enter_script_setup_scope(
+            ScriptSetupScopeData {
+                is_ts: true,
+                is_async: false,
+            },
+            0,
+            500,
+        );
+
+        chain.add_binding(
+            CompactString::new("count"),
+            ScopeBinding::new(BindingType::SetupRef, 10),
+        );
+
+        // Universal scope (setup logic)
+        chain.enter_universal_scope(
+            UniversalScopeData {
+                context: CompactString::new("setup-body"),
+            },
+            20,
+            400,
+        );
+
+        // Client-only scope (onMounted)
+        chain.enter_client_only_scope(
+            ClientOnlyScopeData {
+                hook_name: CompactString::new("onMounted"),
+            },
+            100,
+            200,
+        );
+
+        // All scopes should be accessible
+        assert!(chain.is_defined("console")); // JS global
+        assert!(chain.is_defined("$emit")); // Vue global
+        assert!(chain.is_defined("count")); // Script setup binding
+
+        // Current scope is client-only
+        assert_eq!(chain.current_scope().kind, ScopeKind::ClientOnly);
     }
 }

@@ -11,10 +11,18 @@ export interface Diagnostic {
   severity: 'error' | 'warning' | 'info';
 }
 
+export interface ScopeDecoration {
+  start: number;  // Character offset
+  end: number;    // Character offset
+  kind: string;   // Scope kind for styling
+  kindStr?: string; // Human-readable description
+}
+
 const props = defineProps<{
   modelValue: string;
   language: string;
   diagnostics?: Diagnostic[];
+  scopes?: ScopeDecoration[];
 }>();
 
 const emit = defineEmits<{
@@ -251,6 +259,109 @@ watch(() => props.diagnostics, (diagnostics) => {
 
   monaco.editor.setModelMarkers(model, 'vize', markers);
 }, { immediate: true });
+
+// Scope decoration IDs
+let scopeDecorationIds: string[] = [];
+
+// Scope kind to CSS class mapping (O(1) lookup for exact matches)
+const SCOPE_CLASS_MAP: Record<string, string> = {
+  'setup': 'scope-decoration-setup',
+  'plain': 'scope-decoration-plain',
+  'extern': 'scope-decoration-extern',
+  'extmod': 'scope-decoration-extern',
+  'vue': 'scope-decoration-vue',
+  'universal': 'scope-decoration-universal',
+  'server': 'scope-decoration-server',
+  'client': 'scope-decoration-client',
+  'vfor': 'scope-decoration-vFor',
+  'vslot': 'scope-decoration-vSlot',
+  'function': 'scope-decoration-function',
+  'arrowfunction': 'scope-decoration-function',
+  'block': 'scope-decoration-function',
+  'mod': 'scope-decoration-mod',
+};
+
+// Get scope decoration class based on kind
+function getScopeDecorationClass(kind: string): string {
+  const kindLower = kind.toLowerCase();
+  // Fast path: exact match
+  const exact = SCOPE_CLASS_MAP[kindLower];
+  if (exact) return exact;
+  // Fallback: pattern matching for compound kinds
+  if (kindLower.includes('clientonly') || kindLower.includes('mounted')) return 'scope-decoration-client';
+  if (kindLower.includes('computed')) return 'scope-decoration-computed';
+  if (kindLower.includes('watch')) return 'scope-decoration-watch';
+  return 'scope-decoration-default';
+}
+
+// Convert offset to position
+function offsetToPosition(model: monaco.editor.ITextModel, offset: number): monaco.IPosition {
+  const content = model.getValue();
+  const safeOffset = Math.min(offset, content.length);
+  let line = 1;
+  let column = 1;
+
+  for (let i = 0; i < safeOffset; i++) {
+    if (content[i] === '\n') {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+
+  return { lineNumber: line, column };
+}
+
+// Update scope decorations
+watch(() => props.scopes, (scopes) => {
+  if (!editorInstance.value) return;
+  const model = editorInstance.value.getModel();
+  if (!model) return;
+
+  if (!scopes || scopes.length === 0) {
+    scopeDecorationIds = editorInstance.value.deltaDecorations(scopeDecorationIds, []);
+    return;
+  }
+
+  const newDecorations: monaco.editor.IModelDeltaDecoration[] = scopes.map(scope => {
+    const startPos = offsetToPosition(model, scope.start);
+    const endPos = offsetToPosition(model, scope.end);
+    const className = getScopeDecorationClass(scope.kindStr || scope.kind);
+
+    return {
+      range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+      options: {
+        className,
+        hoverMessage: { value: `**Scope:** ${scope.kindStr || scope.kind}` },
+        isWholeLine: false,
+        overviewRuler: {
+          color: getOverviewRulerColor(scope.kind),
+          position: monaco.editor.OverviewRulerLane.Right,
+        },
+      },
+    };
+  });
+
+  scopeDecorationIds = editorInstance.value.deltaDecorations(scopeDecorationIds, newDecorations);
+}, { immediate: true });
+
+// Overview ruler color mapping (O(1) lookup)
+const RULER_COLOR_MAP: Record<string, string> = {
+  'setup': '#22c55e40',
+  'vue': '#42b88340',
+  'client': '#f97316a0',
+  'server': '#3b82f6a0',
+  'universal': '#8b5cf640',
+  'vfor': '#a78bfa40',
+  'vslot': '#f472b640',
+};
+
+// Get overview ruler color based on scope kind
+function getOverviewRulerColor(kind: string): string {
+  const kindLower = kind.toLowerCase();
+  return RULER_COLOR_MAP[kindLower] || '#9ca3b020';
+}
 </script>
 
 <template>
@@ -261,5 +372,79 @@ watch(() => props.diagnostics, (diagnostics) => {
 .monaco-container {
   width: 100%;
   height: 100%;
+}
+</style>
+
+<!-- Global styles for Monaco decorations (must not be scoped) -->
+<style>
+/* Scope decoration styles - using abbreviated names with better visibility */
+.scope-decoration-setup {
+  background: rgba(34, 197, 94, 0.2);
+  border-left: 3px solid #22c55e;
+}
+
+.scope-decoration-plain {
+  background: rgba(251, 191, 36, 0.2);
+  border-left: 3px solid #fbbf24;
+}
+
+.scope-decoration-extern {
+  background: rgba(96, 165, 250, 0.2);
+  border-left: 3px solid #60a5fa;
+}
+
+.scope-decoration-vue {
+  background: rgba(66, 184, 131, 0.25);
+  border-left: 3px solid #42b883;
+}
+
+.scope-decoration-client {
+  background: rgba(249, 115, 22, 0.25);
+  border-left: 3px solid #f97316;
+}
+
+.scope-decoration-server {
+  background: rgba(59, 130, 246, 0.25);
+  border-left: 3px solid #3b82f6;
+}
+
+.scope-decoration-universal {
+  background: rgba(139, 92, 246, 0.2);
+  border-left: 3px solid #8b5cf6;
+}
+
+.scope-decoration-vFor {
+  background: rgba(167, 139, 250, 0.2);
+  border-left: 3px solid #a78bfa;
+}
+
+.scope-decoration-vSlot {
+  background: rgba(244, 114, 182, 0.2);
+  border-left: 3px solid #f472b6;
+}
+
+.scope-decoration-function {
+  background: rgba(45, 212, 191, 0.15);
+  border-left: 3px solid #2dd4bf;
+}
+
+.scope-decoration-computed {
+  background: rgba(251, 146, 60, 0.2);
+  border-left: 3px solid #fb923c;
+}
+
+.scope-decoration-watch {
+  background: rgba(99, 102, 241, 0.2);
+  border-left: 3px solid #6366f1;
+}
+
+.scope-decoration-mod {
+  background: rgba(156, 163, 175, 0.1);
+  border-left: 3px solid #9ca3af;
+}
+
+.scope-decoration-default {
+  background: rgba(156, 163, 175, 0.1);
+  border-left: 3px solid #6b7280;
 }
 </style>

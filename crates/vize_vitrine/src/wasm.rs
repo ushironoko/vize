@@ -965,6 +965,104 @@ pub fn get_locales_wasm() -> Result<JsValue, JsValue> {
 }
 
 // ============================================================================
+// Croquis (Semantic Analyzer) WASM bindings
+// ============================================================================
+
+/// Analyze Vue SFC for semantic information (scopes, bindings, etc.)
+#[wasm_bindgen(js_name = "analyzeSfc")]
+pub fn analyze_sfc_wasm(source: &str, options: JsValue) -> Result<JsValue, JsValue> {
+    use vize_atelier_sfc::{parse_sfc, SfcParseOptions};
+    use vize_croquis::{Analyzer, AnalyzerOptions};
+
+    let filename: String = js_sys::Reflect::get(&options, &JsValue::from_str("filename"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_else(|| "anonymous.vue".to_string());
+
+    // Parse SFC first
+    let parse_opts = SfcParseOptions {
+        filename: filename.clone(),
+        ..Default::default()
+    };
+
+    let descriptor = match parse_sfc(source, parse_opts) {
+        Ok(d) => d,
+        Err(e) => return Err(JsValue::from_str(&e.message)),
+    };
+
+    // Create analyzer with full options
+    let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
+
+    // Analyze script if present
+    if let Some(ref script_setup) = descriptor.script_setup {
+        analyzer.analyze_script(&script_setup.content);
+    } else if let Some(ref script) = descriptor.script {
+        analyzer.analyze_script(&script.content);
+    }
+
+    // Get analysis summary
+    let summary = analyzer.finish();
+
+    // Convert scopes to JSON with span information
+    let scopes: Vec<serde_json::Value> = summary
+        .scopes
+        .iter()
+        .map(|scope| {
+            let bindings: Vec<serde_json::Value> = scope
+                .bindings()
+                .map(|(name, binding)| {
+                    serde_json::json!({
+                        "name": name,
+                        "type": format!("{:?}", binding.binding_type),
+                        "offset": binding.declaration_offset,
+                    })
+                })
+                .collect();
+
+            serde_json::json!({
+                "id": scope.id.as_u32(),
+                "kind": format!("{:?}", scope.kind),
+                "parentId": scope.parent.map(|p| p.as_u32()),
+                "start": scope.span.start,
+                "end": scope.span.end,
+                "bindings": bindings,
+            })
+        })
+        .collect();
+
+    // Convert binding metadata
+    let bindings: Vec<serde_json::Value> = summary
+        .bindings
+        .bindings
+        .iter()
+        .map(|(name, binding_type)| {
+            serde_json::json!({
+                "name": name.as_str(),
+                "type": format!("{:?}", binding_type),
+            })
+        })
+        .collect();
+
+    // Build result
+    let result = serde_json::json!({
+        "filename": filename,
+        "scopes": scopes,
+        "bindings": bindings,
+        "isScriptSetup": summary.bindings.is_script_setup,
+        "usedComponents": summary.used_components.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+        "usedDirectives": summary.used_directives.iter().map(|d| d.as_str()).collect::<Vec<_>>(),
+        "undefinedRefs": summary.undefined_refs.iter().map(|r| serde_json::json!({
+            "name": r.name.as_str(),
+            "offset": r.offset,
+            "context": r.context.as_str(),
+        })).collect::<Vec<serde_json::Value>>(),
+        "unusedBindings": summary.unused_bindings.iter().map(|b| b.as_str()).collect::<Vec<_>>(),
+    });
+
+    to_js_value(&result)
+}
+
+// ============================================================================
 // Glyph (Formatter) WASM bindings
 // ============================================================================
 

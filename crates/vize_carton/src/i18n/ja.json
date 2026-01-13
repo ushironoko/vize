@@ -206,5 +206,14 @@
   "cli.warning_count": "{count}個の警告が見つかりました",
   "cli.slow_file_warning": "{file}のコンパイルが遅いです（{time}ms）",
   "cli.suggest_split": "大きなコンポーネントを小さなものに分割することを検討してください",
-  "cli.suggest_template": "大きなテンプレートが検出されました（{size}バイト）。一部を子コンポーネントに抽出することを検討してください"
+  "cli.suggest_template": "大きなテンプレートが検出されました（{size}バイト）。一部を子コンポーネントに抽出することを検討してください",
+
+  "ssr/no-browser-globals-in-ssr.description": "SSRコンテキストでブラウザ専用グローバルを禁止する",
+  "ssr/no-browser-globals-in-ssr.message": "'{name}'はブラウザ専用グローバルであり、SSRでは利用できません",
+  "ssr/no-browser-globals-in-ssr.help": "ブラウザ専用のコードはonMounted()などのクライアントライフサイクルフックに移動するか、<ClientOnly>を使用してください",
+
+  "ssr/no-hydration-mismatch.description": "ハイドレーションミスマッチを引き起こす非決定的な値を禁止する",
+  "ssr/no-hydration-mismatch.message": "'{pattern}'はサーバーとクライアント間でハイドレーションミスマッチを引き起こす可能性があります",
+  "ssr/no-hydration-mismatch.message-attr": "属性バインディングの'{pattern}'はハイドレーションミスマッチを引き起こす可能性があります",
+  "ssr/no-hydration-mismatch.help": "一意のIDにはuseId()を使用するか、クライアント専用の値には<ClientOnly>でラップしてください"
 }

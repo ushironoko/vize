@@ -206,5 +206,14 @@
   "cli.warning_count": "{count} warning(s) found",
   "cli.slow_file_warning": "Slow compilation detected for {file} ({time}ms)",
   "cli.suggest_split": "Consider splitting large components into smaller ones",
-  "cli.suggest_template": "Large template detected ({size} bytes). Consider extracting parts into child components"
+  "cli.suggest_template": "Large template detected ({size} bytes). Consider extracting parts into child components",
+
+  "ssr/no-browser-globals-in-ssr.description": "Disallow browser-only globals in SSR context",
+  "ssr/no-browser-globals-in-ssr.message": "'{name}' is a browser-only global and is not available in SSR",
+  "ssr/no-browser-globals-in-ssr.help": "Move browser-only code to client lifecycle hooks like onMounted() or use <ClientOnly>",
+
+  "ssr/no-hydration-mismatch.description": "Disallow non-deterministic values that cause hydration mismatch",
+  "ssr/no-hydration-mismatch.message": "'{pattern}' may cause hydration mismatch between server and client",
+  "ssr/no-hydration-mismatch.message-attr": "'{pattern}' in attribute binding may cause hydration mismatch",
+  "ssr/no-hydration-mismatch.help": "Use useId() for unique IDs, or wrap in <ClientOnly> for client-only values"
 }

@@ -173,6 +173,22 @@ pub enum BindingType {
     Options = 8,
     /// Literal constant (string, number, boolean literals)
     LiteralConst = 9,
+    /// Universal JavaScript global (works in all runtimes: console, Math, Object, Array, JSON, etc.)
+    JsGlobalUniversal = 10,
+    /// Browser-only JavaScript global (window, document, navigator, localStorage, etc.)
+    /// WARNING: Not available in SSR server context
+    JsGlobalBrowser = 11,
+    /// Node.js-only JavaScript global (process, Buffer, __dirname, __filename, require, etc.)
+    /// WARNING: Not available in browser context
+    JsGlobalNode = 12,
+    /// Deno-only JavaScript global (Deno namespace)
+    JsGlobalDeno = 13,
+    /// Bun-only JavaScript global (Bun namespace)
+    JsGlobalBun = 14,
+    /// Vue global ($refs, $emit, $slots, $attrs, $el, etc.)
+    VueGlobal = 15,
+    /// Imported from external module
+    ExternalModule = 16,
 }
 
 /// Codegen options

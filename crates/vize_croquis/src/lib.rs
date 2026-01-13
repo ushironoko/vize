@@ -60,7 +60,10 @@ pub use scope::*;
 pub use symbol::*;
 
 // Re-export analysis types
-pub use analysis::{AnalysisStats, AnalysisSummary, BindingMetadata, UndefinedRef};
+pub use analysis::{
+    AnalysisStats, AnalysisSummary, BindingMetadata, InvalidExport, InvalidExportKind, TypeExport,
+    TypeExportKind, UndefinedRef,
+};
 pub use analyzer::{Analyzer, AnalyzerOptions};
 
 // Re-export common types

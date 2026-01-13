@@ -52,6 +52,14 @@ pub(crate) fn compile_template_block(
                 BindingType::SetupRef => "setup-ref",
                 BindingType::Options => "options",
                 BindingType::LiteralConst => "literal-const",
+                // Scope analysis types - not used in template compilation
+                BindingType::JsGlobalUniversal
+                | BindingType::JsGlobalBrowser
+                | BindingType::JsGlobalNode
+                | BindingType::JsGlobalDeno
+                | BindingType::JsGlobalBun
+                | BindingType::VueGlobal
+                | BindingType::ExternalModule => continue, // Skip these in binding metadata
             };
             binding_map.insert(
                 vize_carton::String::from(name.as_str()),
