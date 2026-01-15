@@ -52,7 +52,10 @@ mod no_unsafe_url;
 mod no_v_html;
 
 // Semantic analysis rules (require AnalysisSummary)
+mod no_mutating_props;
 mod no_undefined_refs;
+mod no_unused_components;
+mod no_unused_properties;
 
 // Accessibility rules
 mod a11y_img_alt;
@@ -112,7 +115,10 @@ pub use no_unsafe_url::NoUnsafeUrl;
 pub use no_v_html::NoVHtml;
 
 // Semantic analysis rules exports
+pub use no_mutating_props::NoMutatingProps;
 pub use no_undefined_refs::NoUndefinedRefs;
+pub use no_unused_components::NoUnusedComponents;
+pub use no_unused_properties::NoUnusedProperties;
 
 // Accessibility rules exports
 pub use a11y_img_alt::A11yImgAlt;

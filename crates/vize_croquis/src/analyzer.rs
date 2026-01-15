@@ -831,7 +831,7 @@ impl Analyzer {
         vars
     }
 
-    /// Check expression for undefined references
+    /// Check expression for undefined references and mark used variables
     fn check_expression_refs(
         &mut self,
         expr: &ExpressionNode<'_>,
@@ -845,15 +845,24 @@ impl Analyzer {
 
         // Fast identifier extraction with position tracking
         for ident in extract_identifiers_fast(content) {
-            // Check if defined
-            let is_defined = scope_vars.iter().any(|v| v.as_str() == ident)
-                || self.summary.bindings.contains(ident)
-                || crate::builtins::is_js_global(ident)
+            // Check if defined in local scope vars
+            let in_scope_vars = scope_vars.iter().any(|v| v.as_str() == ident);
+
+            // Check if defined in bindings or scope chain
+            let in_bindings = self.summary.bindings.contains(ident);
+            let in_scope_chain = self.summary.scopes.is_defined(ident);
+
+            let is_builtin = crate::builtins::is_js_global(ident)
                 || crate::builtins::is_vue_builtin(ident)
                 || crate::builtins::is_event_local(ident)
                 || is_keyword(ident);
 
-            if !is_defined {
+            let is_defined = in_scope_vars || in_bindings || in_scope_chain || is_builtin;
+
+            if is_defined && !is_builtin {
+                // Mark the variable as used in scope chain
+                self.summary.scopes.mark_used(ident);
+            } else if !is_defined {
                 // Find the identifier's position within content
                 let ident_offset_in_content = content.find(ident).unwrap_or(0) as u32;
                 self.summary.undefined_refs.push(UndefinedRef {

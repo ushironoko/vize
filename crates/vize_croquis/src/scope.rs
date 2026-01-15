@@ -1356,6 +1356,16 @@ impl ScopeChain {
         }
     }
 
+    /// Check if a binding has been marked as used (searches through all scopes)
+    pub fn is_used(&self, name: &str) -> bool {
+        for scope in &self.scopes {
+            if let Some(binding) = scope.get_binding(name) {
+                return binding.is_used();
+            }
+        }
+        false
+    }
+
     /// Mark a binding as mutated (searches through all parent scopes)
     pub fn mark_mutated(&mut self, name: &str) {
         let mut visited: SmallVec<[ScopeId; 8]> = SmallVec::new();

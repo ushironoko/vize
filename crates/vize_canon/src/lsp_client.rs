@@ -1,0 +1,369 @@
+//! LSP Client for tsgo
+//!
+//! Communicates with tsgo LSP server to perform type checking on virtual files
+//! without writing them to disk.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+
+/// LSP Client for tsgo
+pub struct TsgoLspClient {
+    process: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    request_id: AtomicI64,
+    /// Pending diagnostics received via publishDiagnostics
+    diagnostics: HashMap<String, Vec<LspDiagnostic>>,
+}
+
+/// LSP Diagnostic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspDiagnostic {
+    pub range: LspRange,
+    pub severity: Option<i32>,
+    pub code: Option<Value>,
+    pub source: Option<String>,
+    pub message: String,
+}
+
+/// LSP Range
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspRange {
+    pub start: LspPosition,
+    pub end: LspPosition,
+}
+
+/// LSP Position
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspPosition {
+    pub line: u32,
+    pub character: u32,
+}
+
+impl TsgoLspClient {
+    /// Start tsgo LSP server
+    pub fn new(tsgo_path: Option<&str>, working_dir: Option<&str>) -> Result<Self, String> {
+        let tsgo = tsgo_path.unwrap_or("tsgo");
+
+        let mut cmd = Command::new(tsgo);
+        cmd.arg("--lsp")
+            .arg("--stdio")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(wd) = working_dir {
+            cmd.current_dir(wd);
+        }
+
+        let mut process = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to start tsgo lsp: {}", e))?;
+
+        let stdin = process
+            .stdin
+            .take()
+            .ok_or("Failed to get stdin of tsgo lsp")?;
+        let stdout = process
+            .stdout
+            .take()
+            .ok_or("Failed to get stdout of tsgo lsp")?;
+
+        let mut client = Self {
+            process,
+            stdin,
+            stdout: BufReader::new(stdout),
+            request_id: AtomicI64::new(1),
+            diagnostics: HashMap::new(),
+        };
+
+        // Initialize LSP
+        client.initialize()?;
+
+        Ok(client)
+    }
+
+    /// Initialize LSP connection
+    fn initialize(&mut self) -> Result<(), String> {
+        let params = serde_json::json!({
+            "processId": std::process::id(),
+            "capabilities": {
+                "textDocument": {
+                    "publishDiagnostics": {
+                        "relatedInformation": true
+                    }
+                }
+            },
+            "rootUri": null,
+            "workspaceFolders": null
+        });
+
+        let _response = self.send_request("initialize", params)?;
+
+        // Send initialized notification
+        self.send_notification("initialized", serde_json::json!({}))?;
+
+        Ok(())
+    }
+
+    /// Open a virtual document
+    pub fn did_open(&mut self, uri: &str, content: &str) -> Result<(), String> {
+        let params = serde_json::json!({
+            "textDocument": {
+                "uri": uri,
+                "languageId": "typescript",
+                "version": 1,
+                "text": content
+            }
+        });
+
+        self.send_notification("textDocument/didOpen", params)?;
+
+        // Read any diagnostics that might be published
+        self.read_notifications()?;
+
+        Ok(())
+    }
+
+    /// Close a virtual document
+    pub fn did_close(&mut self, uri: &str) -> Result<(), String> {
+        let params = serde_json::json!({
+            "textDocument": {
+                "uri": uri
+            }
+        });
+
+        self.send_notification("textDocument/didClose", params)?;
+
+        // Remove cached diagnostics
+        self.diagnostics.remove(uri);
+
+        Ok(())
+    }
+
+    /// Get diagnostics for a URI
+    pub fn get_diagnostics(&self, uri: &str) -> Vec<LspDiagnostic> {
+        self.diagnostics.get(uri).cloned().unwrap_or_default()
+    }
+
+    /// Send a JSON-RPC request and wait for response
+    fn send_request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let id = self.request_id.fetch_add(1, Ordering::SeqCst);
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params
+        });
+
+        self.send_message(&request)?;
+
+        // Read response (and any notifications)
+        loop {
+            let msg = self.read_message()?;
+
+            // Check if this is our response
+            if let Some(msg_id) = msg.get("id") {
+                if msg_id.as_i64() == Some(id) {
+                    if let Some(error) = msg.get("error") {
+                        return Err(format!("LSP error: {:?}", error));
+                    }
+                    return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
+                }
+            }
+
+            // Handle notification
+            self.handle_notification(&msg);
+        }
+    }
+
+    /// Send a JSON-RPC notification (no response expected)
+    fn send_notification(&mut self, method: &str, params: Value) -> Result<(), String> {
+        let notification = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        });
+
+        self.send_message(&notification)
+    }
+
+    /// Send a message with Content-Length header
+    fn send_message(&mut self, msg: &Value) -> Result<(), String> {
+        let content = serde_json::to_string(msg).map_err(|e| format!("JSON error: {}", e))?;
+        let header = format!("Content-Length: {}\r\n\r\n", content.len());
+
+        self.stdin
+            .write_all(header.as_bytes())
+            .map_err(|e| format!("Write error: {}", e))?;
+        self.stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("Write error: {}", e))?;
+        self.stdin
+            .flush()
+            .map_err(|e| format!("Flush error: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Read a single LSP message
+    fn read_message(&mut self) -> Result<Value, String> {
+        // Read headers
+        let mut content_length: usize = 0;
+        let mut headers_read = Vec::new();
+
+        loop {
+            let mut line = String::new();
+            let bytes_read = self
+                .stdout
+                .read_line(&mut line)
+                .map_err(|e| format!("Read error: {}", e))?;
+
+            if bytes_read == 0 {
+                // EOF - process may have exited
+                return Err(format!(
+                    "EOF while reading headers. Headers read so far: {:?}",
+                    headers_read
+                ));
+            }
+
+            headers_read.push(line.clone());
+            let line = line.trim();
+
+            if line.is_empty() {
+                break;
+            }
+
+            if let Some(len_str) = line.strip_prefix("Content-Length: ") {
+                content_length = len_str
+                    .parse()
+                    .map_err(|e| format!("Invalid Content-Length: {}", e))?;
+            }
+        }
+
+        if content_length == 0 {
+            return Err(format!(
+                "No Content-Length header. Headers: {:?}",
+                headers_read
+            ));
+        }
+
+        // Read content
+        let mut content = vec![0u8; content_length];
+        self.stdout
+            .read_exact(&mut content)
+            .map_err(|e| format!("Read error: {}", e))?;
+
+        let msg: Value =
+            serde_json::from_slice(&content).map_err(|e| format!("JSON parse error: {}", e))?;
+
+        Ok(msg)
+    }
+
+    /// Read notifications with timeout using a background thread
+    fn read_notifications(&mut self) -> Result<(), String> {
+        // Create channel for timeout
+        let (tx, rx) = mpsc::channel();
+
+        // Spawn a thread to signal after timeout
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(500));
+            let _ = tx.send(());
+        });
+
+        // Try to read messages until we get diagnostics or timeout
+        loop {
+            // Check for timeout
+            if rx.try_recv().is_ok() {
+                break;
+            }
+
+            // Try reading a message
+            match self.try_read_message_nonblocking() {
+                Some(Ok(msg)) => {
+                    let method = msg.get("method").and_then(|m| m.as_str());
+                    self.handle_notification(&msg);
+                    // If we got diagnostics, we can stop
+                    if method == Some("textDocument/publishDiagnostics") {
+                        break;
+                    }
+                }
+                Some(Err(_)) => break,
+                None => {
+                    // No data available, wait a bit
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Try to read a message without blocking forever
+    fn try_read_message_nonblocking(&mut self) -> Option<Result<Value, String>> {
+        // Check if there's data available using fill_buf
+        match self.stdout.fill_buf() {
+            Ok([]) => None,
+            Ok(_) => Some(self.read_message()),
+            Err(_) => None,
+        }
+    }
+
+    /// Handle a notification or request message
+    fn handle_notification(&mut self, msg: &Value) {
+        if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
+            // Check if this is a request (has id) that needs a response
+            if let Some(id) = msg.get("id") {
+                // This is a request from the server, send an empty response
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": null
+                });
+                let _ = self.send_message(&response);
+                return;
+            }
+
+            // Handle notification
+            if method == "textDocument/publishDiagnostics" {
+                if let Some(params) = msg.get("params") {
+                    if let (Some(uri), Some(diagnostics)) =
+                        (params.get("uri"), params.get("diagnostics"))
+                    {
+                        if let (Some(uri_str), Some(diag_array)) =
+                            (uri.as_str(), diagnostics.as_array())
+                        {
+                            let diags: Vec<LspDiagnostic> = diag_array
+                                .iter()
+                                .filter_map(|d| serde_json::from_value(d.clone()).ok())
+                                .collect();
+                            self.diagnostics.insert(uri_str.to_string(), diags);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shutdown the LSP server
+    pub fn shutdown(&mut self) -> Result<(), String> {
+        let _ = self.send_request("shutdown", Value::Null);
+        self.send_notification("exit", Value::Null)?;
+        let _ = self.process.wait();
+        Ok(())
+    }
+}
+
+impl Drop for TsgoLspClient {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}

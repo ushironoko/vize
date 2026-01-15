@@ -579,6 +579,30 @@ pub struct UndefinedRef {
     pub context: CompactString,
 }
 
+/// An unused template variable (v-for or v-slot)
+#[derive(Debug, Clone)]
+pub struct UnusedTemplateVar {
+    /// The variable name
+    pub name: CompactString,
+    /// Source offset of the declaration
+    pub offset: u32,
+    /// Context where the variable is defined
+    pub context: UnusedVarContext,
+}
+
+/// Context for unused template variable
+#[derive(Debug, Clone)]
+pub enum UnusedVarContext {
+    /// Value variable in v-for (e.g., "item" in v-for="item in items")
+    VForValue,
+    /// Key variable in v-for (e.g., "key" in v-for="(item, key) in items")
+    VForKey,
+    /// Index variable in v-for (e.g., "index" in v-for="(item, index) in items")
+    VForIndex,
+    /// Slot prop in v-slot (e.g., "item" in v-slot="{ item }")
+    VSlot { slot_name: String },
+}
+
 /// Type export from script setup (hoisted to module level)
 #[derive(Debug, Clone)]
 pub struct TypeExport {
@@ -699,6 +723,55 @@ impl AnalysisSummary {
     #[inline]
     pub fn is_async(&self) -> bool {
         self.macros.is_async()
+    }
+
+    /// Get unused template variables (v-for, v-slot variables that are not used)
+    pub fn unused_template_vars(&self) -> Vec<UnusedTemplateVar> {
+        use crate::scope::{ScopeData, ScopeKind};
+
+        let mut unused = Vec::new();
+
+        for scope in self.scopes.iter() {
+            // Only check v-for and v-slot scopes
+            if !matches!(scope.kind, ScopeKind::VFor | ScopeKind::VSlot) {
+                continue;
+            }
+
+            for (name, binding) in scope.bindings() {
+                if !binding.is_used() {
+                    let context = match scope.data() {
+                        ScopeData::VFor(data) => {
+                            // Determine which kind of variable this is
+                            if data.value_alias.as_str() == name {
+                                UnusedVarContext::VForValue
+                            } else if data.key_alias.as_ref().is_some_and(|k| k.as_str() == name) {
+                                UnusedVarContext::VForKey
+                            } else if data
+                                .index_alias
+                                .as_ref()
+                                .is_some_and(|i| i.as_str() == name)
+                            {
+                                UnusedVarContext::VForIndex
+                            } else {
+                                UnusedVarContext::VForValue
+                            }
+                        }
+                        ScopeData::VSlot(data) => UnusedVarContext::VSlot {
+                            slot_name: data.name.to_string(),
+                        },
+                        _ => continue,
+                    };
+
+                    unused.push(UnusedTemplateVar {
+                        name: CompactString::new(name),
+                        offset: binding.declaration_offset,
+                        context,
+                    });
+                }
+            }
+        }
+
+        unused
     }
 
     /// Get analysis statistics for debugging

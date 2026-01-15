@@ -66,6 +66,7 @@ pub use symbol::*;
 pub use analysis::{
     AnalysisStats, AnalysisSummary, BindingMetadata, InvalidExport, InvalidExportKind,
     TemplateExpression, TemplateExpressionKind, TypeExport, TypeExportKind, UndefinedRef,
+    UnusedTemplateVar, UnusedVarContext,
 };
 pub use analyzer::{Analyzer, AnalyzerOptions};
 
