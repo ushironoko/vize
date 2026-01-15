@@ -185,6 +185,8 @@ pub struct VForScopeData {
     pub index_alias: Option<CompactString>,
     /// The source expression (e.g., "items")
     pub source: CompactString,
+    /// The :key expression if present (e.g., "item.id")
+    pub key_expression: Option<CompactString>,
 }
 
 /// Data specific to v-slot scope
@@ -207,6 +209,8 @@ pub struct EventHandlerScopeData {
     pub has_implicit_event: bool,
     /// Explicit parameter names (stack-allocated for typical cases)
     pub param_names: ParamNames,
+    /// The handler expression (e.g., "handleClick" or "handleClick($event)")
+    pub handler_expression: Option<CompactString>,
 }
 
 /// Data specific to callback scope
@@ -1459,6 +1463,7 @@ mod tests {
                 key_alias: Some(CompactString::new("key")),
                 index_alias: Some(CompactString::new("index")),
                 source: CompactString::new("items"),
+                key_expression: Some(CompactString::new("item.id")),
             },
             0,
             100,
@@ -1500,6 +1505,7 @@ mod tests {
                 event_name: CompactString::new("click"),
                 has_implicit_event: true,
                 param_names: vize_carton::smallvec![],
+                handler_expression: None,
             },
             0,
             50,
@@ -1522,6 +1528,7 @@ mod tests {
                     CompactString::new("e"),
                     CompactString::new("extra")
                 ],
+                handler_expression: None,
             },
             0,
             50,
@@ -1563,6 +1570,7 @@ mod tests {
                 key_alias: None,
                 index_alias: Some(CompactString::new("rowIndex")),
                 source: CompactString::new("rows"),
+                key_expression: None,
             },
             0,
             200,
@@ -1575,6 +1583,7 @@ mod tests {
                 key_alias: None,
                 index_alias: Some(CompactString::new("cellIndex")),
                 source: CompactString::new("row.cells"),
+                key_expression: None,
             },
             50,
             150,
@@ -1607,6 +1616,7 @@ mod tests {
                 key_alias: None,
                 index_alias: Some(CompactString::new("index")),
                 source: CompactString::new("items"),
+                key_expression: None,
             },
             0,
             200,
@@ -1618,6 +1628,7 @@ mod tests {
                 event_name: CompactString::new("click"),
                 has_implicit_event: false,
                 param_names: vize_carton::smallvec![CompactString::new("e")],
+                handler_expression: None,
             },
             50,
             100,

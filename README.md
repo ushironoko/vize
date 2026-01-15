@@ -208,7 +208,7 @@ cargo install wasm-bindgen-cli
 
 # Build WASM
 cargo build --release -p vize_vitrine --no-default-features --features wasm --target wasm32-unknown-unknown
-wasm-bindgen target/wasm32-unknown-unknown/release/vize_bindings.wasm --out-dir npm/vize-wasm --target web
+wasm-bindgen target/wasm32-unknown-unknown/release/vize_vitrine.wasm --out-dir npm/vize-wasm --target web
 ```
 
 </details>

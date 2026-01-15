@@ -9,7 +9,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "vize-bindings",
+    "name": "vize-vitrine",
     "triples": {
       "defaults": true,
       "additional": [
@@ -26,8 +26,8 @@
     "index.d.ts"
   ],
   "scripts": {
-    "build": "napi build --platform --release --cargo-cwd=../../crates/vize_vitrine --cargo-name=vize_bindings",
-    "build:debug": "napi build --platform --cargo-cwd=../../crates/vize_vitrine --cargo-name=vize_bindings",
+    "build": "napi build --platform --release --cargo-cwd=../../crates/vize_vitrine --cargo-name=vize_vitrine --features napi",
+    "build:debug": "napi build --platform --cargo-cwd=../../crates/vize_vitrine --cargo-name=vize_vitrine --features napi",
     "prepublishOnly": "napi prepublish -t npm"
   },
   "repository": {

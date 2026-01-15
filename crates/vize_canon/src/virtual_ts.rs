@@ -190,7 +190,12 @@ pub fn generate_virtual_ts(
         ts.push_str("function __verifyTemplateTypes() {\n");
 
         // Verify all bindings are accessible with proper types
+        // Skip Props/PropsAliased as they are properties of the props object, not standalone variables
         for (name, binding_type) in summary.bindings.iter() {
+            // Props bindings are accessed via props.name, not as standalone variables
+            if matches!(binding_type, BindingType::Props | BindingType::PropsAliased) {
+                continue;
+            }
             let access = match binding_type {
                 BindingType::SetupRef | BindingType::Data => {
                     format!("  const __{}_value = {}.value;", name, name)

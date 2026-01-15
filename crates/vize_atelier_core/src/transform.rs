@@ -341,6 +341,7 @@ impl<'a> TransformContext<'a> {
                 key_alias: key_alias.map(CompactString::new),
                 index_alias: index_alias.map(CompactString::new),
                 source: CompactString::new(source),
+                key_expression: None,
             },
             0,
             0,

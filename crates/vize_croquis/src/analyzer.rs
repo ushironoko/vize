@@ -270,13 +270,18 @@ impl Analyzer {
             u32,
         )> = None;
 
-        // Collect v-for scope to create (value, key, index, source, start, end)
+        // Collect v-for scope to create (vars, source, start, end, key_expression)
+        #[allow(clippy::type_complexity)]
         let mut for_scope: Option<(
             vize_carton::SmallVec<[CompactString; 3]>,
             CompactString,
             u32,
             u32,
+            Option<CompactString>,
         )> = None;
+
+        // Collect :key expression if present
+        let mut key_expression: Option<CompactString> = None;
 
         // Check directives
         for prop in &el.props {
@@ -301,8 +306,31 @@ impl Analyzer {
                         // Parse v-for expression: "item in items" or "(item, index) in items"
                         let (vars, source) = parse_v_for_expression(content);
                         if !vars.is_empty() {
-                            for_scope =
-                                Some((vars, source, el.loc.start.offset, el.loc.end.offset));
+                            for_scope = Some((
+                                vars,
+                                source,
+                                el.loc.start.offset,
+                                el.loc.end.offset,
+                                None, // key_expression will be set below
+                            ));
+                        }
+                    }
+                }
+                // Extract :key expression (v-bind:key or :key)
+                else if dir.name == "bind" {
+                    if let Some(ref arg) = dir.arg {
+                        let arg_name = match arg {
+                            ExpressionNode::Simple(s) => s.content.as_str(),
+                            ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                        };
+                        if arg_name == "key" {
+                            if let Some(ref exp) = dir.exp {
+                                let content = match exp {
+                                    ExpressionNode::Simple(s) => s.content.as_str(),
+                                    ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                                };
+                                key_expression = Some(CompactString::new(content));
+                            }
                         }
                     }
                 }
@@ -361,6 +389,7 @@ impl Analyzer {
                                     event_name,
                                     has_implicit_event: false,
                                     param_names: params.into_iter().collect(),
+                                    handler_expression: Some(CompactString::new(content)),
                                 },
                                 dir.loc.start.offset,
                                 dir.loc.end.offset,
@@ -415,6 +444,7 @@ impl Analyzer {
                                             .unwrap_or_else(|| CompactString::const_new("unknown")),
                                         has_implicit_event: true,
                                         param_names: smallvec![],
+                                        handler_expression: Some(CompactString::new(content)),
                                     },
                                     dir.loc.start.offset,
                                     dir.loc.end.offset,
@@ -497,19 +527,11 @@ impl Analyzer {
                         }
                     }
                 }
-                // Check other expressions for undefined refs
-                else if self.options.detect_undefined && self.script_analyzed {
-                    if let Some(ref exp) = dir.exp {
-                        // Skip v-for (analyzed separately)
-                        if dir.name != "for" {
-                            self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
-                        }
-                    }
-                }
+                // Other directive expressions will be checked after v-for scope is entered
             }
         }
 
-        // If we have a v-slot scope, enter it before visiting children
+        // If we have a v-slot scope, enter it before checking expressions
         let slot_vars_count = if let Some((slot_name, prop_names, offset)) = slot_scope {
             let count = prop_names.len();
 
@@ -535,7 +557,7 @@ impl Analyzer {
         };
 
         // If we have a v-for scope, enter it before visiting children
-        let for_vars_count = if let Some((vars, source, start, end)) = for_scope {
+        let for_vars_count = if let Some((vars, source, start, end, _)) = for_scope {
             let count = vars.len();
 
             if count > 0 {
@@ -550,6 +572,7 @@ impl Analyzer {
                         key_alias: vars.get(1).cloned(),
                         index_alias: vars.get(2).cloned(),
                         source,
+                        key_expression,
                     },
                     start,
                     end,
@@ -567,6 +590,20 @@ impl Analyzer {
         } else {
             0
         };
+
+        // Now check directive expressions for undefined refs (after v-for scope is entered)
+        if self.options.detect_undefined && self.script_analyzed {
+            for prop in &el.props {
+                if let PropNode::Directive(dir) = prop {
+                    if let Some(ref exp) = dir.exp {
+                        // Skip v-for (source already checked) and event handlers (checked separately)
+                        if dir.name != "for" && dir.name != "on" {
+                            self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
+                        }
+                    }
+                }
+            }
+        }
 
         // Visit children
         for child in el.children.iter() {
@@ -597,6 +634,15 @@ impl Analyzer {
             if self.options.detect_undefined && self.script_analyzed {
                 if let Some(ref cond) = branch.condition {
                     self.check_expression_refs(cond, scope_vars, branch.loc.start.offset);
+                }
+            }
+
+            // Check user_key (:key directive expression)
+            if self.options.detect_undefined && self.script_analyzed {
+                if let Some(PropNode::Directive(dir)) = &branch.user_key {
+                    if let Some(ref exp) = dir.exp {
+                        self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
+                    }
                 }
             }
 
@@ -632,6 +678,7 @@ impl Analyzer {
                     key_alias: vars_added.get(1).cloned(),
                     index_alias: vars_added.get(2).cloned(),
                     source: source_content,
+                    key_expression: None, // ForNode doesn't store key expression
                 },
                 for_node.loc.start.offset,
                 for_node.loc.end.offset,
@@ -807,7 +854,10 @@ fn is_keyword(s: &str) -> bool {
     )
 }
 
-/// Fast identifier extraction from expression string
+/// Fast identifier extraction from expression string.
+/// Only extracts "root" identifiers - identifiers that are references, not property accesses.
+/// For example, in "item.name + user.id", only "item" and "user" are extracted,
+/// not "name" or "id" (which are property accesses).
 #[inline]
 fn extract_identifiers_fast(expr: &str) -> Vec<&str> {
     let mut identifiers = Vec::with_capacity(4);
@@ -829,7 +879,29 @@ fn extract_identifiers_fast(expr: &str) -> Vec<&str> {
                 i += 1;
             }
 
-            identifiers.push(&expr[start..i]);
+            // Check if this identifier is a property access (preceded by '.')
+            // Look backwards from start to find the previous non-whitespace character
+            let is_property_access = if start > 0 {
+                let mut j = start - 1;
+                loop {
+                    let prev = bytes[j];
+                    if prev == b' ' || prev == b'\t' || prev == b'\n' || prev == b'\r' {
+                        if j == 0 {
+                            break false;
+                        }
+                        j -= 1;
+                    } else {
+                        break prev == b'.';
+                    }
+                }
+            } else {
+                false
+            };
+
+            // Only add root identifiers (not property accesses)
+            if !is_property_access {
+                identifiers.push(&expr[start..i]);
+            }
         } else {
             i += 1;
         }
@@ -1325,11 +1397,26 @@ mod tests {
         let ids = extract_identifiers_fast("count + 1");
         assert_eq!(ids, vec!["count"]);
 
+        // Only root identifiers should be extracted, not property accesses
         let ids = extract_identifiers_fast("user.name + item.value");
-        assert_eq!(ids, vec!["user", "name", "item", "value"]);
+        assert_eq!(ids, vec!["user", "item"]);
+
+        let ids = extract_identifiers_fast("item.name");
+        assert_eq!(ids, vec!["item"]);
+
+        let ids = extract_identifiers_fast("a.b.c.d");
+        assert_eq!(ids, vec!["a"]);
 
         let ids = extract_identifiers_fast("");
         assert!(ids.is_empty());
+
+        // Multiple root identifiers
+        let ids = extract_identifiers_fast("foo + bar - baz");
+        assert_eq!(ids, vec!["foo", "bar", "baz"]);
+
+        // With method calls
+        let ids = extract_identifiers_fast("items.map(x => x.name)");
+        assert_eq!(ids, vec!["items", "x", "x"]);
     }
 
     #[test]

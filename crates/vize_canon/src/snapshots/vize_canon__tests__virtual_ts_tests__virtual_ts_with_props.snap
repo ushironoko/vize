@@ -85,11 +85,21 @@ function __setup<
   // ========== Template Function ==========
   function __template() {
     // Vue instance context (template-scoped)
-    const $attrs = __ctx.attrs;
-    const $slots = __ctx.slots;
-    const $emit = __ctx.emit;
-    const $refs: Record<string, any> = {};
+    // Properties
+    const $data: Record<string, unknown> = {};
+    const $props = __props;
     const $el: HTMLElement | undefined = undefined;
+    const $options: Record<string, unknown> = {};
+    const $parent: any = undefined;
+    const $root: any = undefined;
+    const $slots = __ctx.slots;
+    const $refs: Record<string, any> = {};
+    const $attrs = __ctx.attrs;
+    // Methods
+    const $emit = __ctx.emit;
+    const $watch: (source: string | (() => any), callback: (newVal: any, oldVal: any) => void, options?: { immediate?: boolean; deep?: boolean }) => () => void = undefined!;
+    const $forceUpdate: () => void = undefined!;
+    const $nextTick: (callback?: () => void) => Promise<void> = undefined!;
 
     // Script setup bindings (mark as used for unused detection)
     void props;
@@ -98,20 +108,4 @@ function __setup<
 
   // Component render return
   return __template;
-}
-
-// ========== Undefined Reference Errors ==========
-function __undefinedReferenceErrors() {
-  // @ts-expect-error TS2304: 'title' is not defined
-  // Context: template expression @[151:156]
-  void title;
-
-  // @ts-expect-error TS2304: 'count' is not defined
-  // Context: template expression @[176:181]
-  void count;
-
-  // @ts-expect-error TS2304: 'count' is not defined
-  // Context: template expression @[205:210]
-  void count;
-
 }

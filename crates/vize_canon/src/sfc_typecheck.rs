@@ -614,17 +614,34 @@ fn generate_virtual_ts_with_scopes(
     ts.push_str("  // ========== Template Function ==========\n");
     ts.push_str("  function __template() {\n");
     ts.push_str("    // Vue instance context (template-scoped)\n");
-    ts.push_str("    const $attrs = __ctx.attrs;\n");
+    ts.push_str("    // Properties\n");
+    ts.push_str("    const $data: Record<string, unknown> = {};\n");
+    ts.push_str("    const $props = __props;\n");
+    ts.push_str("    const $el: HTMLElement | undefined = undefined;\n");
+    ts.push_str("    const $options: Record<string, unknown> = {};\n");
+    ts.push_str("    const $parent: any = undefined;\n");
+    ts.push_str("    const $root: any = undefined;\n");
     ts.push_str("    const $slots = __ctx.slots;\n");
-    ts.push_str("    const $emit = __ctx.emit;\n");
     ts.push_str("    const $refs: Record<string, any> = {};\n");
-    ts.push_str("    const $el: HTMLElement | undefined = undefined;\n\n");
+    ts.push_str("    const $attrs = __ctx.attrs;\n");
+    ts.push_str("    // Methods\n");
+    ts.push_str("    const $emit = __ctx.emit;\n");
+    ts.push_str("    const $watch: (source: string | (() => any), callback: (newVal: any, oldVal: any) => void, options?: { immediate?: boolean; deep?: boolean }) => () => void = undefined!;\n");
+    ts.push_str("    const $forceUpdate: () => void = undefined!;\n");
+    ts.push_str("    const $nextTick: (callback?: () => void) => Promise<void> = undefined!;\n\n");
 
     // Mark script setup bindings as used (for unused variable detection)
     // This ensures bindings used in template don't trigger "unused" warnings
+    // Skip Props/PropsAliased as they are properties of the props object, not standalone variables
     ts.push_str("    // Script setup bindings (mark as used for unused detection)\n");
-    for name in summary.bindings.bindings.keys() {
-        ts.push_str(&format!("    void {};\n", name));
+    for (name, binding_type) in summary.bindings.bindings.iter() {
+        // Props bindings are accessed via props.name, not as standalone variables
+        if !matches!(
+            binding_type,
+            vize_croquis::BindingType::Props | vize_croquis::BindingType::PropsAliased
+        ) {
+            ts.push_str(&format!("    void {};\n", name));
+        }
     }
     ts.push('\n');
 
@@ -640,11 +657,34 @@ fn generate_virtual_ts_with_scopes(
     ts.push_str("}\n\n");
 
     // ========== Undefined Reference Errors ==========
-    if !summary.undefined_refs.is_empty() {
+    // Filter out refs that are defined in a v-for scope (false positives from :key on v-for elements)
+    let filtered_refs: Vec<_> = summary
+        .undefined_refs
+        .iter()
+        .filter(|undef| {
+            let ref_offset = undef.offset;
+            // Check if this ref is within a v-for scope and matches the v-for variable
+            !summary.scopes.iter().any(|scope| {
+                if let vize_croquis::ScopeData::VFor(data) = scope.data() {
+                    // Check if the ref is within the v-for scope span
+                    let in_scope = ref_offset >= scope.span.start && ref_offset <= scope.span.end;
+                    // Check if the ref name matches any v-for variable
+                    let matches_var = data.value_alias == undef.name
+                        || data.key_alias.as_ref() == Some(&undef.name)
+                        || data.index_alias.as_ref() == Some(&undef.name);
+                    in_scope && matches_var
+                } else {
+                    false
+                }
+            })
+        })
+        .collect();
+
+    if !filtered_refs.is_empty() {
         ts.push_str("// ========== Undefined Reference Errors ==========\n");
         ts.push_str("function __undefinedReferenceErrors() {\n");
 
-        for undef in &summary.undefined_refs {
+        for undef in &filtered_refs {
             let src_start = template_offset + undef.offset;
             let src_end = src_start + undef.name.len() as u32;
 
@@ -665,6 +705,33 @@ fn generate_virtual_ts_with_scopes(
     ts
 }
 
+/// Check if a scope is inside a Vue directive scope (v-for, v-slot, event handler).
+/// Returns true if the scope's span is contained within any Vue directive scope.
+fn is_inside_vue_directive(
+    scope: &vize_croquis::Scope,
+    summary: &vize_croquis::AnalysisSummary,
+) -> bool {
+    use vize_croquis::ScopeKind;
+
+    let vue_directive_kinds = [
+        ScopeKind::VFor,
+        ScopeKind::VSlot,
+        ScopeKind::EventHandler,
+        ScopeKind::ClientOnly,
+    ];
+
+    // Check if this scope's span is contained within any Vue directive scope
+    for other in summary.scopes.iter() {
+        if vue_directive_kinds.contains(&other.kind) {
+            // Check span containment (other contains scope)
+            if other.span.start <= scope.span.start && scope.span.end <= other.span.end {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Generate nested template scopes with proper JavaScript scoping.
 /// Uses croquis scope chain to define identifiers in their correct scopes.
 fn generate_template_scopes(
@@ -679,6 +746,12 @@ fn generate_template_scopes(
 
     // Generate template-specific scopes (v-for, v-slot, event handlers, etc.)
     for scope in summary.scopes.iter() {
+        // Skip closures that are not inside a Vue directive scope
+        // (e.g., top-level closures in interpolations don't need separate output)
+        if scope.kind == ScopeKind::Closure && !is_inside_vue_directive(scope, summary) {
+            continue;
+        }
+
         match (scope.kind, scope.data()) {
             // v-for: Real for-of loop with type inference
             (ScopeKind::VFor, ScopeData::VFor(data)) => {
@@ -722,6 +795,15 @@ fn generate_template_scopes(
                             indent, name, binding.binding_type
                         ));
                     }
+                }
+
+                // Output :key expression for type checking
+                // Key must be string | number for Vue's reconciliation
+                if let Some(ref key_expr) = data.key_expression {
+                    ts.push_str(&format!(
+                        "{}  const __key: string | number = {}; // :key type constraint\n",
+                        indent, key_expr
+                    ));
                 }
 
                 // Use the iterator value
@@ -794,7 +876,23 @@ fn generate_template_scopes(
 
                 if data.has_implicit_event {
                     ts.push_str(&format!("{}(($event: {}) => {{\n", indent, event_type));
-                    ts.push_str(&format!("{}  void $event;\n", indent));
+
+                    // Output the handler expression with $event
+                    if let Some(ref expr) = data.handler_expression {
+                        let expr_str = expr.as_str();
+                        // Check if it's a simple identifier (method reference)
+                        let is_simple_identifier = expr_str
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '_' || c == '.');
+
+                        if is_simple_identifier && !expr_str.contains('(') {
+                            // Simple method reference like "handleClick" -> "handleClick($event)"
+                            ts.push_str(&format!("{}  {}($event);\n", indent, expr_str));
+                        } else {
+                            // Expression already has parens or is complex, output as-is
+                            ts.push_str(&format!("{}  {};\n", indent, expr_str));
+                        }
+                    }
                 } else if !data.param_names.is_empty() {
                     ts.push_str(&format!("{}((", indent));
                     for (i, param) in data.param_names.iter().enumerate() {
@@ -811,26 +909,21 @@ fn generate_template_scopes(
                         }
                     }
                     ts.push_str(") => {\n");
-                    for param in &data.param_names {
-                        ts.push_str(&format!("{}  void {};\n", indent, param));
+
+                    // Output the handler expression
+                    if let Some(ref expr) = data.handler_expression {
+                        ts.push_str(&format!("{}  {};\n", indent, expr.as_str()));
                     }
                 } else {
                     ts.push_str(&format!("{}(() => {{\n", indent));
-                }
 
-                // Output additional bindings from croquis scope
-                for (name, binding) in scope.bindings() {
-                    let is_param = data.param_names.iter().any(|p| p.as_str() == name);
-                    let is_event = name == "$event";
-                    if !is_param && !is_event {
-                        ts.push_str(&format!(
-                            "{}  void {}; // {:?}\n",
-                            indent, name, binding.binding_type
-                        ));
+                    // Output the handler expression
+                    if let Some(ref expr) = data.handler_expression {
+                        ts.push_str(&format!("{}  {};\n", indent, expr.as_str()));
                     }
                 }
 
-                ts.push_str(&format!("{}}})(undefined!);\n\n", indent));
+                ts.push_str(&format!("{}}})();\n\n", indent));
             }
 
             // Callback: Arrow function

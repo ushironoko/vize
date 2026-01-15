@@ -7,11 +7,11 @@ repository.workspace = true
 description = "Vitrine - The display case for Vize (Node.js/WASM bindings)"
 
 [lib]
-name = "vize_bindings"
+name = "vize_vitrine"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["napi"]
+default = []
 napi = ["dep:napi", "dep:napi-derive", "dep:glob", "dep:rayon", "vize_atelier_sfc/native"]
 wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:js-sys"]
 

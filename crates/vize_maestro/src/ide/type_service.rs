@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
     CodeDescription, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location,
     NumberOrString, Position, Range, Url,
 };
-use vize_bindings::{type_check_sfc, TypeCheckOptions, TypeSeverity};
+use vize_vitrine::{type_check_sfc, TypeCheckOptions, TypeSeverity};
 
 use super::IdeContext;
 use crate::server::ServerState;
