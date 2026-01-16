@@ -19,12 +19,87 @@ declare function defineModel<T>(name?: string, options?: any): any;
 declare function withDefaults<T, D>(props: T, defaults: D): T & D;"#;
 
 /// Vue template context - available inside template expressions
+/// Note: $event is declared in event handler closures, not here
 const VUE_TEMPLATE_CONTEXT: &str = r#"  // Vue instance context (available in template)
   const $attrs: Record<string, unknown> = {} as any;
   const $slots: Record<string, (...args: any[]) => any> = {} as any;
   const $refs: Record<string, any> = {} as any;
-  const $emit: (...args: any[]) => void = (() => {}) as any;
-  const $event: Event = {} as Event;"#;
+  const $emit: (...args: any[]) => void = (() => {}) as any;"#;
+
+/// Get the TypeScript event type for a DOM event name.
+/// Returns the specific event interface (MouseEvent, KeyboardEvent, etc.)
+fn get_dom_event_type(event_name: &str) -> &'static str {
+    match event_name {
+        // Mouse events
+        "click" | "dblclick" | "mousedown" | "mouseup" | "mousemove" | "mouseenter"
+        | "mouseleave" | "mouseover" | "mouseout" | "contextmenu" => "MouseEvent",
+
+        // Pointer events
+        "pointerdown" | "pointerup" | "pointermove" | "pointerenter" | "pointerleave"
+        | "pointerover" | "pointerout" | "pointercancel" | "gotpointercapture"
+        | "lostpointercapture" => "PointerEvent",
+
+        // Touch events
+        "touchstart" | "touchend" | "touchmove" | "touchcancel" => "TouchEvent",
+
+        // Keyboard events
+        "keydown" | "keyup" | "keypress" => "KeyboardEvent",
+
+        // Focus events
+        "focus" | "blur" | "focusin" | "focusout" => "FocusEvent",
+
+        // Input events
+        "input" | "beforeinput" => "InputEvent",
+
+        // Composition events
+        "compositionstart" | "compositionend" | "compositionupdate" => "CompositionEvent",
+
+        // Form events
+        "submit" => "SubmitEvent",
+        "change" => "Event",
+        "reset" => "Event",
+
+        // Drag events
+        "drag" | "dragstart" | "dragend" | "dragenter" | "dragleave" | "dragover" | "drop" => {
+            "DragEvent"
+        }
+
+        // Clipboard events
+        "cut" | "copy" | "paste" => "ClipboardEvent",
+
+        // Wheel events
+        "wheel" => "WheelEvent",
+
+        // Animation events
+        "animationstart" | "animationend" | "animationiteration" | "animationcancel" => {
+            "AnimationEvent"
+        }
+
+        // Transition events
+        "transitionstart" | "transitionend" | "transitionrun" | "transitioncancel" => {
+            "TransitionEvent"
+        }
+
+        // UI events
+        "scroll" | "resize" => "Event",
+
+        // Media events
+        "play" | "pause" | "ended" | "loadeddata" | "loadedmetadata" | "timeupdate"
+        | "volumechange" | "waiting" | "seeking" | "seeked" | "ratechange" | "durationchange"
+        | "canplay" | "canplaythrough" | "playing" | "progress" | "stalled" | "suspend"
+        | "emptied" | "abort" => "Event",
+
+        // Error/Load events
+        "error" => "ErrorEvent",
+        "load" => "Event",
+
+        // Selection events
+        "select" | "selectionchange" | "selectstart" => "Event",
+
+        // Default fallback
+        _ => "Event",
+    }
+}
 
 /// Generate virtual TypeScript from Vue SFC analysis.
 ///
@@ -315,19 +390,11 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
             ScopeData::EventHandler(data) => {
                 if generated_scopes.insert(scope_id) {
                     // Generate event handler closure
+                    let event_type = get_dom_event_type(data.event_name.as_str());
                     ts.push_str(&format!("\n  // @{} handler\n", data.event_name));
 
-                    if data.has_implicit_event {
-                        ts.push_str("  const __handler = ($event: Event) => {\n");
-                    } else if !data.param_names.is_empty() {
-                        let params: Vec<_> = data.param_names.iter().map(|s| s.as_str()).collect();
-                        ts.push_str(&format!(
-                            "  const __handler = ({}: any) => {{\n",
-                            params.join(", ")
-                        ));
-                    } else {
-                        ts.push_str("  const __handler = () => {\n");
-                    }
+                    // Use $event as parameter with proper event type
+                    ts.push_str(&format!("  (($event: {}) => {{\n", event_type));
 
                     // Generate expressions in this scope
                     if let Some(exprs) = expressions_by_scope.get(&scope_id) {
@@ -336,7 +403,7 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                         }
                     }
 
-                    ts.push_str("  };\n");
+                    ts.push_str(&format!("  }})({{}} as {});\n", event_type));
                 }
             }
             _ => {
@@ -401,5 +468,63 @@ mod tests {
         // Template context (moved from VUE_RUNTIME_TYPES to VUE_TEMPLATE_CONTEXT)
         assert!(VUE_TEMPLATE_CONTEXT.contains("$attrs"));
         assert!(VUE_TEMPLATE_CONTEXT.contains("$slots"));
+    }
+
+    #[test]
+    fn test_dom_event_type_mapping() {
+        // Mouse events
+        assert_eq!(get_dom_event_type("click"), "MouseEvent");
+        assert_eq!(get_dom_event_type("dblclick"), "MouseEvent");
+        assert_eq!(get_dom_event_type("mousedown"), "MouseEvent");
+        assert_eq!(get_dom_event_type("mouseup"), "MouseEvent");
+        assert_eq!(get_dom_event_type("mousemove"), "MouseEvent");
+        assert_eq!(get_dom_event_type("contextmenu"), "MouseEvent");
+
+        // Pointer events
+        assert_eq!(get_dom_event_type("pointerdown"), "PointerEvent");
+        assert_eq!(get_dom_event_type("pointerup"), "PointerEvent");
+
+        // Touch events
+        assert_eq!(get_dom_event_type("touchstart"), "TouchEvent");
+        assert_eq!(get_dom_event_type("touchend"), "TouchEvent");
+
+        // Keyboard events
+        assert_eq!(get_dom_event_type("keydown"), "KeyboardEvent");
+        assert_eq!(get_dom_event_type("keyup"), "KeyboardEvent");
+        assert_eq!(get_dom_event_type("keypress"), "KeyboardEvent");
+
+        // Focus events
+        assert_eq!(get_dom_event_type("focus"), "FocusEvent");
+        assert_eq!(get_dom_event_type("blur"), "FocusEvent");
+
+        // Input events
+        assert_eq!(get_dom_event_type("input"), "InputEvent");
+        assert_eq!(get_dom_event_type("beforeinput"), "InputEvent");
+
+        // Form events
+        assert_eq!(get_dom_event_type("submit"), "SubmitEvent");
+        assert_eq!(get_dom_event_type("change"), "Event");
+
+        // Drag events
+        assert_eq!(get_dom_event_type("drag"), "DragEvent");
+        assert_eq!(get_dom_event_type("drop"), "DragEvent");
+
+        // Clipboard events
+        assert_eq!(get_dom_event_type("copy"), "ClipboardEvent");
+        assert_eq!(get_dom_event_type("paste"), "ClipboardEvent");
+
+        // Wheel events
+        assert_eq!(get_dom_event_type("wheel"), "WheelEvent");
+
+        // Animation events
+        assert_eq!(get_dom_event_type("animationstart"), "AnimationEvent");
+        assert_eq!(get_dom_event_type("animationend"), "AnimationEvent");
+
+        // Transition events
+        assert_eq!(get_dom_event_type("transitionend"), "TransitionEvent");
+
+        // Unknown/custom events fallback to Event
+        assert_eq!(get_dom_event_type("customEvent"), "Event");
+        assert_eq!(get_dom_event_type("unknown"), "Event");
     }
 }
