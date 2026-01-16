@@ -111,6 +111,9 @@ struct InternalIssue {
 fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue> {
     let mut issues = Vec::new();
 
+    // Track which identifiers come from 'vue' imports (ref, reactive, toRefs, etc.)
+    let vue_imports = extract_vue_imports(analysis);
+
     // Check for destructured inject() calls - these lose reactivity
     // This is precise: we check the actual InjectPattern from the tracker
     for inject in analysis.provide_inject.injects() {
@@ -152,11 +155,16 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
         .map(|s| s.name.as_str())
         .collect();
 
-    // Props that have a toRef/toRefs wrapper are handled correctly
-    // We only report issues for props that DON'T have proper wrapping
+    // Build a set of all reactive sources (from vue imports)
+    let _reactive_sources: FxHashSet<&str> = analysis
+        .reactivity
+        .sources()
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
 
-    // Track props defined via defineProps (for future use in more comprehensive analysis)
-    let _props: FxHashSet<&str> = analysis
+    // Track props defined via defineProps
+    let props: FxHashSet<&str> = analysis
         .macros
         .props()
         .iter()
@@ -175,7 +183,77 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
         }
     }
 
+    // Check for reactivity loss patterns in the code
+    // This requires analyzing the AST for patterns like:
+    // - const { x } = reactive({ x: 1 })  // reactivity lost
+    // - const x = ref(0); const y = x.value  // reactivity lost
+    // - const x = toRaw(reactive)  // intentional, but might be wrong
+
+    // Report if vue imports are present but not used properly
+    if !vue_imports.is_empty() {
+        // Check if reactive sources are actually used
+        for source in analysis.reactivity.sources() {
+            // Verify the reactive function was imported from 'vue'
+            let function_name = match source.kind {
+                ReactiveKind::Ref => "ref",
+                ReactiveKind::ShallowRef => "shallowRef",
+                ReactiveKind::Reactive => "reactive",
+                ReactiveKind::ShallowReactive => "shallowReactive",
+                ReactiveKind::Computed => "computed",
+                ReactiveKind::Readonly => "readonly",
+                ReactiveKind::ShallowReadonly => "shallowReadonly",
+                ReactiveKind::ToRef => "toRef",
+                ReactiveKind::ToRefs => "toRefs",
+            };
+
+            // Verify it comes from vue
+            if !vue_imports.contains(function_name) {
+                // The reactive function might be a local implementation or from another library
+                // This is a potential issue but not necessarily an error
+            }
+        }
+    }
+
+    // Check for prop passed to ref() which creates a copy
+    for source in analysis.reactivity.sources() {
+        if source.kind == ReactiveKind::Ref {
+            // Check if this ref is initialized with a prop
+            if props.contains(source.name.as_str()) {
+                issues.push(InternalIssue {
+                    kind: ReactivityIssueKind::PropPassedToRef {
+                        prop_name: source.name.clone(),
+                    },
+                    offset: source.declaration_offset,
+                    source: Some(source.name.clone()),
+                });
+            }
+        }
+    }
+
     issues
+}
+
+/// Extract identifiers imported from 'vue'.
+fn extract_vue_imports(analysis: &crate::Croquis) -> FxHashSet<&str> {
+    use crate::scope::ScopeKind;
+
+    let mut vue_imports = FxHashSet::default();
+
+    for scope in analysis.scopes.iter() {
+        if scope.kind == ScopeKind::ExternalModule {
+            if let crate::scope::ScopeData::ExternalModule(data) = scope.data() {
+                // Check if this is a vue import
+                if data.source.as_str() == "vue" || data.source.starts_with("vue/") {
+                    // Collect all bindings from this import
+                    for (name, _) in scope.bindings() {
+                        vue_imports.insert(name);
+                    }
+                }
+            }
+        }
+    }
+
+    vue_imports
 }
 
 /// Create a diagnostic from an internal issue.

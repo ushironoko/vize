@@ -2,15 +2,29 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import MonacoEditor from './MonacoEditor.vue';
 import type { Diagnostic } from './MonacoEditor.vue';
-import type { WasmModule, AnalysisResult } from '../wasm/index';
+import type { WasmModule, CroquisResult } from '../wasm/index';
 
 const props = defineProps<{
   compiler: WasmModule | null;
 }>();
 
-// === Sample Project Files ===
-const SAMPLE_PROJECT: Record<string, string> = {
-  'App.vue': `<script setup lang="ts">
+// === Presets ===
+interface Preset {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  files: Record<string, string>;
+}
+
+const PRESETS: Preset[] = [
+  {
+    id: 'default',
+    name: 'Overview',
+    description: 'General cross-file analysis patterns',
+    icon: '◈',
+    files: {
+      'App.vue': `<script setup lang="ts">
 import { provide, ref } from 'vue'
 import ParentComponent from './ParentComponent.vue'
 
@@ -33,28 +47,24 @@ function handleUpdate(value: number) {
   </div>
 </template>`,
 
-  'ParentComponent.vue': `<script setup lang="ts">
+      'ParentComponent.vue': `<script setup lang="ts">
 import { inject, ref, onMounted } from 'vue'
 import ChildComponent from './ChildComponent.vue'
 
-// Props
 const props = defineProps<{
   title: string
 }>()
 
-// Emits - 'unused-event' is declared but never called
 const emit = defineEmits<{
   update: [value: number]
   'unused-event': []
 }>()
 
-// Inject theme from App
 const theme = inject<Ref<'light' | 'dark'>>('theme')
 
 // ISSUE: Destructuring inject loses reactivity!
 const { name } = inject('user') as { name: string; id: number }
 
-// Browser API usage
 const width = ref(0)
 onMounted(() => {
   width.value = window.innerWidth
@@ -65,29 +75,23 @@ onMounted(() => {
   <div :class="['parent', theme]">
     <h2>{{ title }}</h2>
     <p>User: {{ name }}</p>
-    <p>Width: {{ width }}px</p>
     <ChildComponent
       :theme="theme"
       custom-attr="value"
-      data-test="child"
       @change="emit('update', $event)"
-      @unhandled-event="() => {}"
     />
   </div>
 </template>`,
 
-  'ChildComponent.vue': `<script setup lang="ts">
+      'ChildComponent.vue': `<script setup lang="ts">
 import { ref, toRefs } from 'vue'
 
 const props = defineProps<{
   theme?: string
-  message?: string
 }>()
 
-// Correct: using toRefs
 const { theme } = toRefs(props)
 
-// Emits
 const emit = defineEmits<{
   change: [value: number]
 }>()
@@ -95,7 +99,6 @@ const emit = defineEmits<{
 const items = ref([
   { id: 1, name: 'Item 1' },
   { id: 2, name: 'Item 2' },
-  { id: 3, name: 'Item 3' },
 ])
 
 function handleClick(item: { id: number; name: string }) {
@@ -109,28 +112,107 @@ function handleClick(item: { id: number; name: string }) {
     <span>Theme: {{ theme }}</span>
   </div>
   <ul class="child-list">
-    <li
-      v-for="item in items"
-      :key="item.id"
-      :id="\`item-\${item.id}\`"
-      @click="handleClick(item)"
-    >
+    <li v-for="item in items" :key="item.id" @click="handleClick(item)">
       {{ item.name }}
     </li>
   </ul>
 </template>`,
+    },
+  },
 
-  'StoreExample.vue': `<script setup lang="ts">
+  {
+    id: 'reactivity-loss',
+    name: 'Reactivity Loss',
+    description: 'Patterns that break Vue reactivity',
+    icon: '⚡',
+    files: {
+      'App.vue': `<script setup lang="ts">
+import { reactive, ref, provide } from 'vue'
+import ChildComponent from './ChildComponent.vue'
+
+// === Correct Usage ===
+const state = reactive({
+  count: 0,
+  user: { name: 'Alice', age: 25 }
+})
+
+// === ANTI-PATTERNS: Reactivity Loss ===
+
+// 1. Destructuring reactive object breaks reactivity
+const { count, user } = state  // ❌ count is now a plain number
+
+// 2. Spreading reactive object breaks reactivity
+const copiedState = { ...state }  // ❌ No longer reactive
+
+// 3. Reassigning reactive variable breaks reactivity
+let dynamicState = reactive({ value: 1 })
+dynamicState = reactive({ value: 2 })  // ❌ Original tracking lost
+
+// 4. Extracting primitive from ref
+const countRef = ref(10)
+const primitiveValue = countRef.value  // ❌ Just a number, not reactive
+
+provide('state', state)
+<\/script>
+
+<template>
+  <div>
+    <h1>Reactivity Loss Patterns</h1>
+    <p>Count: {{ count }}</p>
+    <p>User: {{ user.name }}</p>
+    <ChildComponent />
+  </div>
+</template>`,
+
+      'ChildComponent.vue': `<script setup lang="ts">
+import { inject, computed, toRefs, toRef } from 'vue'
+
+const state = inject('state') as { count: number; user: { name: string } }
+
+// === ANTI-PATTERNS ===
+
+// 1. Destructuring inject result (this will trigger a warning)
+const { count } = state  // ❌ Loses reactivity
+
+// 2. This one is intentionally suppressed with @vize forget
+// @vize forget: intentionally reading one-time value
+const userName = state.user.name  // This warning is suppressed
+
+// === CORRECT PATTERNS ===
+
+// Use toRef for single property
+const countRef = toRef(state, 'count')
+
+// Use toRefs for multiple properties
+const { user } = toRefs(state as any)
+
+// Use computed for derived values
+const displayName = computed(() => state.user.name.toUpperCase())
+<\/script>
+
+<template>
+  <div>
+    <h2>Child Component</h2>
+    <p>Broken count: {{ count }}</p>
+    <p>Reactive count: {{ countRef }}</p>
+    <p>Display name: {{ displayName }}</p>
+  </div>
+</template>`,
+
+      'StoreExample.vue': `<script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useUserStore } from './stores/user'
 
 const userStore = useUserStore()
 
-// ISSUE: Destructuring store loses reactivity
+// ❌ WRONG: Destructuring Pinia store loses reactivity for state/getters
 const { username, email } = userStore
 
-// Correct way:
+// ✓ CORRECT: Use storeToRefs for reactive state/getters
 // const { username, email } = storeToRefs(userStore)
+
+// ✓ Actions can be destructured directly (they're just functions)
+// const { updateUser } = userStore
 <\/script>
 
 <template>
@@ -139,12 +221,687 @@ const { username, email } = userStore
     <p>Email: {{ email }}</p>
   </div>
 </template>`,
-};
+
+      'SpreadPattern.vue': `<script setup lang="ts">
+import { reactive, ref, toRaw } from 'vue'
+
+interface User {
+  id: number
+  name: string
+  settings: { theme: string }
+}
+
+const user = reactive<User>({
+  id: 1,
+  name: 'Bob',
+  settings: { theme: 'dark' }
+})
+
+// === SPREAD ANTI-PATTERNS ===
+
+// ❌ Spreading reactive object
+const userCopy = { ...user }
+
+// ❌ Spreading in function call
+function logUser(u: User) {
+  console.log(u)
+}
+logUser({ ...user })
+
+// ❌ Array spread on reactive array
+const items = reactive([1, 2, 3])
+const itemsCopy = [...items]
+
+// === CORRECT PATTERNS ===
+
+// ✓ Use toRaw if you need plain object
+const rawUser = toRaw(user)
+
+// ✓ Clone with structuredClone for deep copy
+const deepCopy = structuredClone(toRaw(user))
+
+// ✓ Pass reactive object directly
+logUser(user)
+<\/script>
+
+<template>
+  <div>
+    <p>Original: {{ user.name }}</p>
+    <p>Copy (not reactive): {{ userCopy.name }}</p>
+  </div>
+</template>`,
+    },
+  },
+
+  {
+    id: 'setup-context',
+    name: 'Setup Context',
+    description: 'Vue APIs called outside setup (CSRP/Memory Leak)',
+    icon: '⚠',
+    files: {
+      'App.vue': `<script setup lang="ts">
+import ComponentWithLeaks from './ComponentWithLeaks.vue'
+import SafeComponent from './SafeComponent.vue'
+<\/script>
+
+<template>
+  <div>
+    <h1>Setup Context Violations</h1>
+    <p>CSRP = Cross-request State Pollution (SSR)</p>
+    <p>Memory Leaks from watchers created outside setup</p>
+    <ComponentWithLeaks />
+    <SafeComponent />
+  </div>
+</template>`,
+
+      'ComponentWithLeaks.vue': `<script setup lang="ts">
+import { ref, watch, onMounted, computed, provide, inject } from 'vue'
+import { createGlobalState } from './utils/state'
+<\/script>
+
+<script lang="ts">
+// ⚠️ WARNING: Module-level Vue APIs cause issues!
+
+import { ref, reactive, watch, computed, provide } from 'vue'
+
+// ❌ CSRP Risk: Module-level reactive state is shared across requests in SSR
+const globalCounter = ref(0)
+
+// ❌ CSRP Risk: Module-level reactive object
+const sharedState = reactive({
+  users: [],
+  settings: {}
+})
+
+// ❌ Memory Leak: Watch created outside setup is never cleaned up
+watch(globalCounter, (val) => {
+  console.log('Counter changed:', val)
+})
+
+// ❌ Memory Leak: Computed outside setup
+const doubledCounter = computed(() => globalCounter.value * 2)
+
+// ❌ Invalid: Provide outside setup
+// provide('counter', globalCounter)  // This would throw!
+
+export default {
+  name: 'ComponentWithLeaks'
+}
+<\/script>
+
+<template>
+  <div class="warning-box">
+    <h2>Component with Issues</h2>
+    <p>Global counter: {{ globalCounter }}</p>
+    <p>This component has CSRP risks and memory leaks!</p>
+  </div>
+</template>`,
+
+      'SafeComponent.vue': `<script setup lang="ts">
+import { ref, reactive, watch, computed, provide, onUnmounted } from 'vue'
+
+// ✓ CORRECT: All Vue APIs inside setup context
+
+// ✓ Component-scoped reactive state
+const counter = ref(0)
+const state = reactive({
+  items: [] as string[]
+})
+
+// ✓ Watch inside setup - auto-cleaned up
+watch(counter, (val) => {
+  console.log('Counter changed:', val)
+})
+
+// ✓ Computed inside setup
+const doubled = computed(() => counter.value * 2)
+
+// ✓ Provide inside setup
+provide('counter', counter)
+
+// ✓ If you need manual cleanup
+const customEffect = () => {
+  // some side effect
+}
+onUnmounted(() => {
+  // cleanup
+})
+
+function increment() {
+  counter.value++
+}
+<\/script>
+
+<template>
+  <div class="safe-box">
+    <h2>Safe Component</h2>
+    <p>Counter: {{ counter }} (doubled: {{ doubled }})</p>
+    <button @click="increment">Increment</button>
+    <p>All Vue APIs properly scoped to setup context</p>
+  </div>
+</template>`,
+
+      'utils/state.ts': `import { ref, reactive, computed, watch } from 'vue'
+
+// ❌ DANGEROUS: Factory function that creates reactive state at module level
+// Each import shares the same state!
+
+// This file demonstrates why you should NOT do this:
+
+const moduleState = reactive({
+  value: 0
+})
+
+// ❌ Module-level watch - memory leak!
+watch(() => moduleState.value, (v) => console.log(v))
+
+// ✓ CORRECT: Factory function that creates fresh state per call
+export function createGlobalState() {
+  const state = reactive({
+    value: 0
+  })
+
+  // This watch will only be created when the function is called
+  // inside a setup context, ensuring proper cleanup
+  return {
+    state,
+    increment: () => state.value++
+  }
+}
+
+// ✓ CORRECT: Use VueUse's createGlobalState for shared state
+// import { createGlobalState } from '@vueuse/core'
+// export const useGlobalState = createGlobalState(() => reactive({ count: 0 }))
+`,
+    },
+  },
+
+  {
+    id: 'reference-escape',
+    name: 'Reference Escape',
+    description: 'Reactive references escaping scope (Rust-like tracking)',
+    icon: '↗',
+    files: {
+      'App.vue': `<script setup lang="ts">
+import { reactive, ref, provide } from 'vue'
+import ChildComponent from './ChildComponent.vue'
+import { useExternalStore } from './stores/external'
+
+// === REFERENCE ESCAPE PATTERNS ===
+
+const state = reactive({
+  user: { name: 'Alice', permissions: ['read'] },
+  items: [] as string[]
+})
+
+// ❌ ESCAPE: Passing reactive object to external function
+// The external function may store a reference
+useExternalStore().registerState(state)
+
+// ❌ ESCAPE: Assigning to window/global
+;(window as any).appState = state
+
+// ❌ ESCAPE: Returning from setup to be used elsewhere
+// (This is often intentional via provide, but needs awareness)
+provide('state', state)
+
+function addItem(item: string) {
+  state.items.push(item)
+}
+<\/script>
+
+<template>
+  <div>
+    <h1>Reference Escape Tracking</h1>
+    <p>User: {{ state.user.name }}</p>
+    <ChildComponent :state="state" @add="addItem" />
+  </div>
+</template>`,
+
+      'ChildComponent.vue': `<script setup lang="ts">
+import { inject, watch, onUnmounted } from 'vue'
+
+const props = defineProps<{
+  state: { user: { name: string }; items: string[] }
+}>()
+
+const emit = defineEmits<{
+  add: [item: string]
+}>()
+
+// ❌ ESCAPE: Storing prop reference in external location
+let cachedState: typeof props.state | null = null
+function cacheState() {
+  cachedState = props.state  // Reference escapes!
+}
+
+// ❌ ESCAPE: setTimeout/setInterval with reactive reference
+setTimeout(() => {
+  // This closure captures props.state
+  console.log(props.state.user.name)
+}, 1000)
+
+// ❌ ESCAPE: Event listener with reactive reference
+function setupListener() {
+  document.addEventListener('click', () => {
+    // Reference escapes to global event listener!
+    console.log(props.state.items.length)
+  })
+}
+
+// ✓ CORRECT: Use local copy or computed if needed
+import { computed, readonly } from 'vue'
+const userName = computed(() => props.state.user.name)
+const readonlyState = readonly(props.state)  // Prevent accidental mutations
+<\/script>
+
+<template>
+  <div>
+    <h2>Child Component</h2>
+    <p>User: {{ userName }}</p>
+    <button @click="emit('add', 'new item')">Add Item</button>
+  </div>
+</template>`,
+
+      'stores/external.ts': `import { reactive } from 'vue'
+
+interface State {
+  user: { name: string; permissions: string[] }
+  items: string[]
+}
+
+// This simulates an external store that holds references
+class ExternalStore {
+  // Using object type to store states by key
+  private states: { [key: string]: State } = {}
+
+  // ❌ This stores a reference to reactive object
+  registerState(state: State) {
+    // The reactive object is now stored externally
+    // Mutations here affect the original!
+    this.states['main'] = state
+
+    // ❌ DANGER: External code can mutate your reactive state
+    setTimeout(() => {
+      state.user.name = 'Modified externally!'
+    }, 5000)
+  }
+
+  getState(key: string) {
+    return this.states[key]
+  }
+}
+
+// Singleton - state persists across component lifecycle
+const store = new ExternalStore()
+
+export function useExternalStore() {
+  return store
+}
+`,
+
+      'SafePattern.vue': `<script setup lang="ts">
+import { reactive, toRaw, readonly, shallowRef, markRaw, onUnmounted } from 'vue'
+
+// === SAFE PATTERNS FOR REFERENCE MANAGEMENT ===
+
+const state = reactive({
+  data: { value: 1 }
+})
+
+// ✓ SAFE: Pass raw copy to external APIs
+function sendToAnalytics() {
+  const raw = toRaw(state)
+  const copy = structuredClone(raw)
+  // analytics.track(copy)  // Safe - no reactive reference
+}
+
+// ✓ SAFE: Use readonly for external exposure
+const publicState = readonly(state)
+
+// ✓ SAFE: Use markRaw for data that shouldn't be reactive
+const heavyObject = markRaw({
+  largeArray: new Array(10000).fill(0),
+  canvas: null as HTMLCanvasElement | null
+})
+
+// ✓ SAFE: Proper cleanup for external references
+let cleanupFn: (() => void) | null = null
+
+function setupExternalListener() {
+  const handler = () => {
+    // Use state here
+  }
+  document.addEventListener('scroll', handler)
+  cleanupFn = () => document.removeEventListener('scroll', handler)
+}
+
+onUnmounted(() => {
+  cleanupFn?.()
+})
+<\/script>
+
+<template>
+  <div>
+    <h2>Safe Reference Patterns</h2>
+    <p>Value: {{ state.data.value }}</p>
+  </div>
+</template>`,
+    },
+  },
+
+  {
+    id: 'provide-inject',
+    name: 'Provide/Inject Tree',
+    description: 'Complex dependency injection patterns',
+    icon: '🌳',
+    files: {
+      'App.vue': `<script setup lang="ts">
+import { provide, ref, reactive, readonly } from 'vue'
+import type { InjectionKey } from 'vue'
+import ThemeProvider from './ThemeProvider.vue'
+
+// === TYPED INJECTION KEYS ===
+export const UserKey: InjectionKey<{ name: string; role: string }> = Symbol('user')
+export const ConfigKey: InjectionKey<{ apiUrl: string }> = Symbol('config')
+
+// ✓ Provide typed values
+const user = reactive({ name: 'Admin', role: 'admin' })
+provide(UserKey, readonly(user))
+
+// ✓ Provide config
+provide(ConfigKey, { apiUrl: 'https://api.example.com' })
+
+// ❌ Untyped provide - consumers may use wrong type
+provide('legacyData', { foo: 'bar' })
+
+// ❌ Provide without consumer
+provide('unusedKey', 'this is never injected')
+<\/script>
+
+<template>
+  <div>
+    <h1>Provide/Inject Patterns</h1>
+    <ThemeProvider>
+      <slot />
+    </ThemeProvider>
+  </div>
+</template>`,
+
+      'ThemeProvider.vue': `<script setup lang="ts">
+import { provide, ref, computed, inject } from 'vue'
+import type { InjectionKey, Ref, ComputedRef } from 'vue'
+import SettingsPanel from './SettingsPanel.vue'
+
+// === THEME INJECTION KEY ===
+export interface ThemeContext {
+  theme: Ref<'light' | 'dark'>
+  toggleTheme: () => void
+  isDark: ComputedRef<boolean>
+}
+export const ThemeKey: InjectionKey<ThemeContext> = Symbol('theme')
+
+const theme = ref<'light' | 'dark'>('dark')
+const toggleTheme = () => {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+}
+const isDark = computed(() => theme.value === 'dark')
+
+provide(ThemeKey, {
+  theme,
+  toggleTheme,
+  isDark,
+})
+
+// Also provide CSS variables approach
+provide('cssVars', computed(() => ({
+  '--bg-color': isDark.value ? '#1a1a1a' : '#ffffff',
+  '--text-color': isDark.value ? '#ffffff' : '#1a1a1a',
+})))
+<\/script>
+
+<template>
+  <div :class="['theme-provider', theme]">
+    <SettingsPanel />
+    <slot />
+  </div>
+</template>`,
+
+      'SettingsPanel.vue': `<script setup lang="ts">
+import { inject } from 'vue'
+import { ThemeKey, type ThemeContext } from './ThemeProvider.vue'
+import { UserKey, ConfigKey } from './App.vue'
+
+// ✓ Typed inject with Symbol key
+const theme = inject(ThemeKey)
+if (!theme) {
+  throw new Error('ThemeProvider not found')
+}
+
+// ✓ Inject user with type safety
+const user = inject(UserKey)
+
+// ❌ Inject with default - may hide missing provider
+const config = inject(ConfigKey, { apiUrl: 'http://localhost:3000' })
+
+// ❌ Untyped inject - no type safety
+const legacyData = inject('legacyData') as { foo: string }
+
+// ❌ Inject key that doesn't exist (without default)
+// const missing = inject('nonExistentKey')  // Would be undefined!
+
+// ❌ Destructuring inject loses reactivity!
+const { foo } = inject('legacyData') as { foo: string }
+<\/script>
+
+<template>
+  <div class="settings-panel">
+    <h2>Settings</h2>
+    <p>Theme: {{ theme.theme.value }}</p>
+    <p>User: {{ user?.name ?? 'Unknown' }}</p>
+    <p>API: {{ config.apiUrl }}</p>
+    <button @click="theme.toggleTheme">Toggle Theme</button>
+  </div>
+</template>`,
+
+      'DeepChild.vue': `<script setup lang="ts">
+import { inject, computed } from 'vue'
+import { ThemeKey } from './ThemeProvider.vue'
+import { UserKey } from './App.vue'
+
+// ✓ Inject works at any depth
+const theme = inject(ThemeKey)
+const user = inject(UserKey)
+
+// ✓ Create computed from injected values
+const greeting = computed(() => {
+  if (!user) return 'Hello!'
+  return \`Hello, \${user.name}! You are \${user.role}\`
+})
+
+const themeClass = computed(() => theme?.isDark.value ? 'dark-mode' : 'light-mode')
+<\/script>
+
+<template>
+  <div :class="['deep-child', themeClass]">
+    <h3>Deep Child Component</h3>
+    <p>{{ greeting }}</p>
+    <p v-if="theme">Current theme: {{ theme.theme.value }}</p>
+  </div>
+</template>`,
+    },
+  },
+
+  {
+    id: 'fallthrough-attrs',
+    name: 'Fallthrough Attrs',
+    description: '$attrs, useAttrs(), and inheritAttrs patterns',
+    icon: '⬇',
+    files: {
+      'App.vue': `<script setup lang="ts">
+import BaseButton from './BaseButton.vue'
+import MultiRootComponent from './MultiRootComponent.vue'
+import UseAttrsComponent from './UseAttrsComponent.vue'
+<\/script>
+
+<template>
+  <div>
+    <h1>Fallthrough Attributes</h1>
+
+    <!-- Passing class, style, and event to child -->
+    <BaseButton
+      class="custom-class"
+      style="color: red"
+      data-testid="main-button"
+      @click="console.log('clicked')"
+    >
+      Click me
+    </BaseButton>
+
+    <!-- Multi-root needs explicit $attrs binding -->
+    <MultiRootComponent
+      class="passed-class"
+      aria-label="Multiple roots"
+    />
+
+    <!-- Component using useAttrs() -->
+    <UseAttrsComponent
+      class="attrs-class"
+      custom-attr="value"
+    />
+  </div>
+</template>`,
+
+      'BaseButton.vue': `<script setup lang="ts">
+// Single root element - $attrs automatically applied
+
+defineProps<{
+  variant?: 'primary' | 'secondary'
+}>()
+<\/script>
+
+<template>
+  <!-- ✓ $attrs (class, style, listeners) auto-applied to single root -->
+  <button class="base-button">
+    <slot />
+  </button>
+</template>`,
+
+      'MultiRootComponent.vue': `<script setup lang="ts">
+// ❌ Multiple root elements - $attrs not auto-applied!
+// Need to explicitly bind $attrs to intended element
+<\/script>
+
+<template>
+  <!-- ❌ Which element gets class="passed-class"? Neither! -->
+  <header class="header">
+    Header content
+  </header>
+  <main class="main">
+    Main content
+  </main>
+  <footer class="footer">
+    Footer content
+  </footer>
+</template>`,
+
+      'MultiRootFixed.vue': `<script setup lang="ts">
+// ✓ Multiple roots with explicit $attrs binding
+<\/script>
+
+<template>
+  <header class="header">
+    Header content
+  </header>
+  <!-- ✓ Explicitly bind $attrs to main element -->
+  <main v-bind="$attrs" class="main">
+    Main content
+  </main>
+  <footer class="footer">
+    Footer content
+  </footer>
+</template>`,
+
+      'UseAttrsComponent.vue': `<script setup lang="ts">
+import { useAttrs, computed } from 'vue'
+
+// ✓ useAttrs() for programmatic access
+const attrs = useAttrs()
+
+// Access specific attributes
+const customAttr = computed(() => attrs['custom-attr'])
+
+// ❌ useAttrs() called but attrs not bound in template!
+// This means passed attributes are lost
+<\/script>
+
+<template>
+  <div>
+    <p>Custom attr value: {{ customAttr }}</p>
+    <!-- ❌ attrs not bound - class="attrs-class" is lost! -->
+  </div>
+</template>`,
+
+      'UseAttrsFixed.vue': `<script setup lang="ts">
+import { useAttrs, computed } from 'vue'
+
+const attrs = useAttrs()
+const customAttr = computed(() => attrs['custom-attr'])
+
+// ✓ Can filter/transform attrs
+const filteredAttrs = computed(() => {
+  const { class: _, ...rest } = attrs
+  return rest
+})
+<\/script>
+
+<template>
+  <!-- ✓ Explicitly bind attrs -->
+  <div v-bind="attrs">
+    <p>Custom attr: {{ customAttr }}</p>
+  </div>
+</template>`,
+
+      'InheritAttrsFalse.vue': `<script setup lang="ts">
+// ❌ inheritAttrs: false but $attrs not used!
+// Passed attributes are completely lost
+
+defineOptions({
+  inheritAttrs: false
+})
+<\/script>
+
+<template>
+  <div class="wrapper">
+    <input type="text" />
+    <!-- $attrs should be bound to input, not wrapper -->
+  </div>
+</template>`,
+
+      'InheritAttrsFixed.vue': `<script setup lang="ts">
+// ✓ inheritAttrs: false with explicit $attrs binding
+
+defineOptions({
+  inheritAttrs: false
+})
+<\/script>
+
+<template>
+  <div class="wrapper">
+    <!-- ✓ Bind $attrs to the actual input -->
+    <input v-bind="$attrs" type="text" />
+  </div>
+</template>`,
+    },
+  },
+];
 
 // === State ===
-const files = ref<Record<string, string>>({ ...SAMPLE_PROJECT });
-const activeFile = ref<string>('ParentComponent.vue');
-const analysisResults = ref<Record<string, AnalysisResult | null>>({});
+const currentPreset = ref<string>('default');
+const currentPresetData = computed(() => PRESETS.find(p => p.id === currentPreset.value) || PRESETS[0]);
+const files = ref<Record<string, string>>({ ...currentPresetData.value.files });
+const activeFile = ref<string>(Object.keys(currentPresetData.value.files)[0]);
+const croquisResults = ref<Record<string, CroquisResult | null>>({});
 const crossFileIssues = ref<CrossFileIssue[]>([]);
 const analysisTime = ref<number>(0);
 const isAnalyzing = ref(false);
@@ -268,6 +1025,25 @@ const stats = computed(() => ({
   infos: crossFileIssues.value.filter(i => i.severity === 'info').length,
 }));
 
+const editorLanguage = computed(() => {
+  const ext = activeFile.value.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'ts':
+      return 'typescript';
+    case 'js':
+      return 'javascript';
+    case 'css':
+      return 'css';
+    case 'scss':
+      return 'scss';
+    case 'json':
+      return 'json';
+    case 'vue':
+    default:
+      return 'vue';
+  }
+});
+
 const dependencyGraph = computed(() => {
   // Build simple dependency graph from imports
   const graph: Record<string, string[]> = {};
@@ -318,6 +1094,102 @@ function createIssue(
   };
 }
 
+// Strip comments from source code to prevent regex matching comment content
+function stripComments(source: string): string {
+  // Remove single-line comments (// ...)
+  // Remove multi-line comments (/* ... */)
+  // Preserve string literals
+  let result = '';
+  let i = 0;
+  while (i < source.length) {
+    // Check for string literals
+    if (source[i] === '"' || source[i] === "'" || source[i] === '`') {
+      const quote = source[i];
+      result += source[i++];
+      while (i < source.length && source[i] !== quote) {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          result += source[i++];
+        }
+        result += source[i++];
+      }
+      if (i < source.length) result += source[i++];
+    }
+    // Check for single-line comment
+    else if (source[i] === '/' && source[i + 1] === '/') {
+      // Replace with spaces to preserve offsets
+      while (i < source.length && source[i] !== '\n') {
+        result += ' ';
+        i++;
+      }
+    }
+    // Check for multi-line comment
+    else if (source[i] === '/' && source[i + 1] === '*') {
+      result += '  '; // Replace /* with spaces
+      i += 2;
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
+        result += source[i] === '\n' ? '\n' : ' ';
+        i++;
+      }
+      if (i < source.length) {
+        result += '  '; // Replace */ with spaces
+        i += 2;
+      }
+    }
+    else {
+      result += source[i++];
+    }
+  }
+  return result;
+}
+
+// Parse @vize forget suppression directives from source code
+// Returns a set of line numbers that are suppressed (1-based)
+function parseSuppressions(source: string): Set<number> {
+  const suppressedLines = new Set<number>();
+  const lines = source.split('\n');
+  let pendingSuppression = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+    const lineNumber = i + 1; // 1-based
+
+    // Check for @vize forget directive (supports both // and /* */ comments)
+    // Patterns: // @vize forget: reason  OR  /* @vize forget: reason */
+    const singleLineMatch = trimmedLine.match(/^\/\/\s*@vize\s+forget\s*:\s*(.+)/);
+    const blockMatch = trimmedLine.match(/^\/\*\s*@vize\s+forget\s*:\s*(.+?)\s*\*\//);
+
+    if ((singleLineMatch && singleLineMatch[1].trim()) || (blockMatch && blockMatch[1].trim())) {
+      // Valid suppression - will apply to next non-comment, non-empty line
+      pendingSuppression = true;
+    } else if (pendingSuppression && trimmedLine && !trimmedLine.startsWith('//') && !trimmedLine.startsWith('/*')) {
+      // This is a code line - apply pending suppression
+      suppressedLines.add(lineNumber);
+      pendingSuppression = false;
+    }
+  }
+
+  return suppressedLines;
+}
+
+// Build suppression map for all files
+function buildSuppressionMap(): Map<string, Set<number>> {
+  const map = new Map<string, Set<number>>();
+  for (const [filename, source] of Object.entries(files.value)) {
+    map.set(filename, parseSuppressions(source));
+  }
+  return map;
+}
+
+// Filter issues based on suppression directives
+function filterSuppressedIssues(issues: CrossFileIssue[], suppressionMap: Map<string, Set<number>>): CrossFileIssue[] {
+  return issues.filter(issue => {
+    const suppressedLines = suppressionMap.get(issue.file);
+    if (!suppressedLines) return true;
+    return !suppressedLines.has(issue.line);
+  });
+}
+
 // Convert character offset to line/column (1-based for Monaco)
 function offsetToLineColumn(source: string, offset: number): { line: number; column: number } {
   const beforeOffset = source.substring(0, offset);
@@ -366,7 +1238,7 @@ async function analyzeAll() {
   issueIdCounter = 0;
 
   // First pass: analyze each file
-  const results: Record<string, AnalysisResult | null> = {};
+  const results: Record<string, CroquisResult | null> = {};
   for (const [filename, source] of Object.entries(files.value)) {
     try {
       results[filename] = props.compiler.analyzeSfc(source, { filename });
@@ -374,7 +1246,7 @@ async function analyzeAll() {
       results[filename] = null;
     }
   }
-  analysisResults.value = results;
+  croquisResults.value = results;
 
   // Second pass: cross-file analysis
   if (options.value.provideInject) {
@@ -396,7 +1268,11 @@ async function analyzeAll() {
     issues.push(...analyzeSSRBoundary());
   }
 
-  crossFileIssues.value = issues;
+  // Apply @vize forget suppression directives
+  const suppressionMap = buildSuppressionMap();
+  const filteredIssues = filterSuppressedIssues(issues, suppressionMap);
+
+  crossFileIssues.value = filteredIssues;
   analysisTime.value = performance.now() - startTime;
   isAnalyzing.value = false;
 }
@@ -404,59 +1280,55 @@ async function analyzeAll() {
 function analyzeProvideInject(): CrossFileIssue[] {
   const issues: CrossFileIssue[] = [];
   const provides: Map<string, { file: string; line: number; column: number; endLine: number; endColumn: number; isSymbol: boolean }> = new Map();
-  const injects: Array<{ key: string; file: string; line: number; column: number; endLine: number; endColumn: number; hasDefault: boolean; isSymbol: boolean }> = [];
+  const injects: Array<{ key: string; file: string; line: number; column: number; endLine: number; endColumn: number; hasDefault: boolean; isSymbol: boolean; pattern?: string; destructuredProps?: string[] }> = [];
 
-  // Collect provides - support both string keys and Symbol keys
+  // Use Rust analysis results instead of regex
   for (const [filename, source] of Object.entries(files.value)) {
-    // String keys: provide('key', value) or provide("key", value)
-    const stringProvideRegex = /provide\s*\(\s*['"]([^'"]+)['"]/g;
-    let match;
-    while ((match = stringProvideRegex.exec(source)) !== null) {
-      const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-      provides.set(match[1], { file: filename, isSymbol: false, ...loc });
+    const result = croquisResults.value[filename];
+    if (!result?.croquis) continue;
+
+    // Collect provides from Rust analysis
+    for (const p of result.croquis.provides || []) {
+      const keyValue = p.key.type === 'symbol' ? `Symbol:${p.key.value}` : p.key.value;
+      const loc = findLineAndColumnAtOffset(source, p.start, p.end - p.start);
+      provides.set(keyValue, { file: filename, isSymbol: p.key.type === 'symbol', ...loc });
     }
 
-    // Symbol keys: provide(MySymbol, value) or provide(InjectionKey, value)
-    const symbolProvideRegex = /provide\s*\(\s*(\w+)\s*,/g;
-    while ((match = symbolProvideRegex.exec(source)) !== null) {
-      const symbolName = match[1];
-      // Skip if it looks like a string literal call we already matched
-      if (symbolName === 'inject' || symbolName === 'provide') continue;
-      const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-      provides.set(`Symbol:${symbolName}`, { file: filename, isSymbol: true, ...loc });
+    // Collect injects from Rust analysis
+    for (const i of result.croquis.injects || []) {
+      const keyValue = i.key.type === 'symbol' ? `Symbol:${i.key.value}` : i.key.value;
+      const loc = findLineAndColumnAtOffset(source, i.start, i.end - i.start);
+      injects.push({
+        key: keyValue,
+        file: filename,
+        hasDefault: !!i.defaultValue,
+        isSymbol: i.key.type === 'symbol',
+        pattern: i.pattern,
+        destructuredProps: i.destructuredProps,
+        ...loc,
+      });
     }
   }
 
-  // Collect injects - support both string keys and Symbol keys
-  for (const [filename, source] of Object.entries(files.value)) {
-    // String keys: inject('key') or inject('key', defaultValue)
-    // Use [^(]* to skip over any generic type params like <Ref<'light' | 'dark'>>
-    const stringInjectRegex = /inject[^(]*\(\s*['"]([^'"]+)['"](?:\s*,\s*([^)]+))?\)/g;
-    let match;
-    while ((match = stringInjectRegex.exec(source)) !== null) {
-      const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-      injects.push({
-        key: match[1],
-        file: filename,
-        hasDefault: !!match[2],
-        isSymbol: false,
-        ...loc,
-      });
-    }
-
-    // Symbol keys: inject(MySymbol) or inject(InjectionKey)
-    // Match inject followed by optional generics and then identifier (not string)
-    const symbolInjectRegex = /inject[^(]*\(\s*([A-Z]\w*)\s*(?:,\s*([^)]+))?\)/g;
-    while ((match = symbolInjectRegex.exec(source)) !== null) {
-      const symbolName = match[1];
-      const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-      injects.push({
-        key: `Symbol:${symbolName}`,
-        file: filename,
-        hasDefault: !!match[2],
-        isSymbol: true,
-        ...loc,
-      });
+  // Check for destructured injects (reactivity loss)
+  for (const inject of injects) {
+    if (inject.pattern === 'objectDestructure' || inject.pattern === 'arrayDestructure') {
+      const displayKey = inject.isSymbol ? inject.key.replace('Symbol:', '') : `'${inject.key}'`;
+      const propsStr = inject.destructuredProps?.join(', ') || '';
+      issues.push(createIssue(
+        'provide-inject',
+        'cross-file/destructured-inject',
+        'error',
+        `Destructuring inject(${displayKey}) into { ${propsStr} } breaks reactivity`,
+        inject.file,
+        inject.line,
+        inject.column,
+        {
+          endLine: inject.endLine,
+          endColumn: inject.endColumn,
+          suggestion: `Store inject result first, then access properties: const data = inject(${displayKey})`,
+        }
+      ));
     }
   }
 
@@ -491,15 +1363,20 @@ function analyzeProvideInject(): CrossFileIssue[] {
   for (const [key, loc] of provides.entries()) {
     const hasConsumer = injects.some(i => i.key === key);
     if (!hasConsumer) {
+      const displayKey = key.startsWith('Symbol:') ? key.replace('Symbol:', '') : `'${key}'`;
       issues.push(createIssue(
         'provide-inject',
         'cross-file/unused-provide',
         'info',
-        `provide('${key}') is not consumed by any descendant component`,
+        `provide(${displayKey}) is not consumed by any descendant component`,
         loc.file,
         loc.line,
         loc.column,
-        { suggestion: 'Remove if not needed, or add inject() in a child component' }
+        {
+          endLine: loc.endLine,
+          endColumn: loc.endColumn,
+          suggestion: 'Remove if not needed, or add inject() in a child component',
+        }
       ));
     }
   }
@@ -511,38 +1388,55 @@ function analyzeComponentEmits(): CrossFileIssue[] {
   const issues: CrossFileIssue[] = [];
 
   for (const [filename, source] of Object.entries(files.value)) {
-    // Extract declared emits - support both syntax styles:
-    // 1. defineEmits<{ eventName: [PayloadType] }>()  (shorthand)
-    // 2. defineEmits<{ (e: 'eventName', payload: Type): void }>()  (callback)
-    const emitDeclRegex = /defineEmits\s*<\s*\{([^}]+)\}\s*>/s;
-    const emitDeclMatch = emitDeclRegex.exec(source);
-    if (!emitDeclMatch || emitDeclMatch.index === undefined) continue;
+    const result = croquisResults.value[filename];
+    const codeOnly = stripComments(source);
 
+    // Use Rust analysis for declared emits
     const declaredEmits: Array<{ name: string; loc: { line: number; column: number; endLine: number; endColumn: number } }> = [];
-    const emitContent = emitDeclMatch[1];
-    const emitContentOffset = emitDeclMatch.index + emitDeclMatch[0].indexOf(emitContent);
 
-    // Style 1: Shorthand syntax - { eventName: [Type], eventName2: [] }
-    const shorthandRegex = /(\w+)\s*:\s*\[/g;
-    let match;
-    while ((match = shorthandRegex.exec(emitContent)) !== null) {
-      const absoluteOffset = emitContentOffset + match.index;
-      const loc = findLineAndColumnAtOffset(source, absoluteOffset, match[1].length);
-      declaredEmits.push({ name: match[1], loc });
+    if (result?.croquis?.emits) {
+      // Get emit declarations from Rust analysis
+      for (const emit of result.croquis.emits) {
+        // Find location in source using defineEmits macro info
+        const defineEmitsMacro = result.croquis.macros?.find(m => m.name === 'defineEmits');
+        if (defineEmitsMacro) {
+          const loc = findLineAndColumnAtOffset(source, defineEmitsMacro.start, defineEmitsMacro.end - defineEmitsMacro.start);
+          declaredEmits.push({ name: emit.name, loc });
+        }
+      }
+    } else {
+      // Fallback to regex if Rust analysis not available
+      const emitDeclRegex = /defineEmits\s*<\s*\{([^}]+)\}\s*>/s;
+      const emitDeclMatch = emitDeclRegex.exec(source);
+      if (emitDeclMatch && emitDeclMatch.index !== undefined) {
+        const emitContent = emitDeclMatch[1];
+        const emitContentOffset = emitDeclMatch.index + emitDeclMatch[0].indexOf(emitContent);
+
+        // Style 1: Shorthand syntax
+        const shorthandRegex = /(\w+)\s*:\s*\[/g;
+        let match;
+        while ((match = shorthandRegex.exec(emitContent)) !== null) {
+          const absoluteOffset = emitContentOffset + match.index;
+          const loc = findLineAndColumnAtOffset(source, absoluteOffset, match[1].length);
+          declaredEmits.push({ name: match[1], loc });
+        }
+
+        // Style 2: Callback syntax
+        const callbackRegex = /\(\s*e:\s*['"]([^'"]+)['"]/g;
+        while ((match = callbackRegex.exec(emitContent)) !== null) {
+          const absoluteOffset = emitContentOffset + match.index;
+          const loc = findLineAndColumnAtOffset(source, absoluteOffset, match[0].length);
+          declaredEmits.push({ name: match[1], loc });
+        }
+      }
     }
 
-    // Style 2: Callback syntax - { (e: 'eventName', ...): void }
-    const callbackRegex = /\(\s*e:\s*['"]([^'"]+)['"]/g;
-    while ((match = callbackRegex.exec(emitContent)) !== null) {
-      const absoluteOffset = emitContentOffset + match.index;
-      const loc = findLineAndColumnAtOffset(source, absoluteOffset, match[0].length);
-      declaredEmits.push({ name: match[1], loc });
-    }
+    if (declaredEmits.length === 0) continue;
 
-    // Check if each declared emit is called
+    // Check if each declared emit is called (using regex on code without comments)
     for (const emit of declaredEmits) {
       const emitCallRegex = new RegExp(`emit\\s*\\(\\s*['"]${emit.name}['"]`, 'g');
-      if (!emitCallRegex.test(source)) {
+      if (!emitCallRegex.test(codeOnly)) {
         issues.push(createIssue(
           'component-emit',
           'cross-file/unused-emit',
@@ -562,7 +1456,8 @@ function analyzeComponentEmits(): CrossFileIssue[] {
 
     // Check for undeclared emits
     const emitCallRegex = /emit\s*\(\s*['"]([^'"]+)['"]/g;
-    while ((match = emitCallRegex.exec(source)) !== null) {
+    let match;
+    while ((match = emitCallRegex.exec(codeOnly)) !== null) {
       const emitName = match[1];
       if (!declaredEmits.some(e => e.name === emitName)) {
         const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
@@ -636,7 +1531,10 @@ function analyzeFallthroughAttrs(): CrossFileIssue[] {
     const rootElementCount = countRootElements(template);
     const hasMultipleRoots = rootElementCount > 1;
 
-    if (hasMultipleRoots && !source.includes('v-bind="$attrs"') && !source.includes(':="$attrs"')) {
+    // Check various ways $attrs can be used
+    const attrsUsage = analyzeAttrsUsage(source, template);
+
+    if (hasMultipleRoots && !attrsUsage.bindsExplicitly) {
       // Check if component receives any non-prop attributes from parents
       const componentName = filename.replace('.vue', '');
       let hasPassedAttrs = false;
@@ -651,25 +1549,127 @@ function analyzeFallthroughAttrs(): CrossFileIssue[] {
         }
       }
 
-      const loc = findLineAndColumn(source, '<template>');
+      const loc = findLineAndColumn(source, /<template[^>]*>/);
       if (loc) {
-        issues.push(createIssue(
-          'fallthrough-attrs',
-          'cross-file/multi-root-attrs',
-          hasPassedAttrs ? 'warning' : 'info',
-          `Component has ${rootElementCount} root elements but $attrs is not explicitly bound`,
-          filename,
-          loc.line + 1,
-          1,
-          {
-            suggestion: 'Add v-bind="$attrs" to the intended root element, or wrap in a single root',
-          }
-        ));
+        // If useAttrs() is used, provide more specific guidance
+        if (attrsUsage.usesUseAttrs && !attrsUsage.usesInTemplate) {
+          issues.push(createIssue(
+            'fallthrough-attrs',
+            'cross-file/useattrs-not-bound',
+            'warning',
+            `useAttrs() is called but attrs are not bound to any element in template`,
+            filename,
+            loc.line,
+            loc.column,
+            {
+              endLine: loc.endLine,
+              endColumn: loc.endColumn,
+              suggestion: 'Use v-bind="attrs" or bind specific properties like :class="attrs.class"',
+            }
+          ));
+        } else {
+          issues.push(createIssue(
+            'fallthrough-attrs',
+            'cross-file/multi-root-attrs',
+            hasPassedAttrs ? 'warning' : 'info',
+            `Component has ${rootElementCount} root elements but $attrs is not explicitly bound`,
+            filename,
+            loc.line,
+            loc.column,
+            {
+              endLine: loc.endLine,
+              endColumn: loc.endColumn,
+              suggestion: attrsUsage.usesUseAttrs
+                ? 'Bind attrs from useAttrs() to the intended root element'
+                : 'Add v-bind="$attrs" to the intended root element, or use useAttrs() composable',
+            }
+          ));
+        }
+      }
+    }
+
+    // Check for inheritAttrs: false without $attrs usage
+    if (source.includes('inheritAttrs: false') || source.includes('inheritAttrs:false')) {
+      if (!attrsUsage.usesInTemplate && !attrsUsage.usesUseAttrs) {
+        const loc = findLineAndColumn(source, /inheritAttrs\s*:\s*false/);
+        if (loc) {
+          issues.push(createIssue(
+            'fallthrough-attrs',
+            'cross-file/inheritattrs-disabled-unused',
+            'warning',
+            `inheritAttrs is disabled but $attrs is not used anywhere`,
+            filename,
+            loc.line,
+            loc.column,
+            {
+              suggestion: 'Use v-bind="$attrs", useAttrs(), or $attrs properties in template',
+            }
+          ));
+        }
       }
     }
   }
 
   return issues;
+}
+
+// Analyze how $attrs is used in a component
+function analyzeAttrsUsage(source: string, template: string): {
+  bindsExplicitly: boolean;      // v-bind="$attrs" or v-bind="attrs"
+  usesUseAttrs: boolean;         // useAttrs() composable
+  usesInTemplate: boolean;       // $attrs.* or attrs.* in template
+  usedProperties: string[];      // Specific properties accessed
+} {
+  const result = {
+    bindsExplicitly: false,
+    usesUseAttrs: false,
+    usesInTemplate: false,
+    usedProperties: [] as string[],
+  };
+
+  // Check for useAttrs() in script
+  if (/useAttrs\s*\(\s*\)/.test(source)) {
+    result.usesUseAttrs = true;
+    // Find the variable name: const attrs = useAttrs()
+    const useAttrsMatch = source.match(/(?:const|let)\s+(\w+)\s*=\s*useAttrs\s*\(\s*\)/);
+    if (useAttrsMatch) {
+      const varName = useAttrsMatch[1];
+      // Check if this variable is used in template
+      const varBindPattern = new RegExp(`v-bind=["']${varName}["']|:=["']${varName}["']`);
+      if (varBindPattern.test(template)) {
+        result.bindsExplicitly = true;
+        result.usesInTemplate = true;
+      }
+      // Check for property access: attrs.class, attrs.style, etc.
+      const propAccessPattern = new RegExp(`${varName}\\.(\\w+)`, 'g');
+      let match;
+      while ((match = propAccessPattern.exec(template)) !== null) {
+        result.usedProperties.push(match[1]);
+        result.usesInTemplate = true;
+      }
+    }
+  }
+
+  // Check for direct $attrs usage in template
+  if (/v-bind=["']\$attrs["']|:=["']\$attrs["']/.test(template)) {
+    result.bindsExplicitly = true;
+    result.usesInTemplate = true;
+  }
+
+  // Check for $attrs property access in template
+  const attrsPropertyPattern = /\$attrs\.(\w+)/g;
+  let match;
+  while ((match = attrsPropertyPattern.exec(template)) !== null) {
+    result.usedProperties.push(match[1]);
+    result.usesInTemplate = true;
+  }
+
+  // Check for $attrs in interpolation or v-bind
+  if (/\{\{\s*\$attrs\b|\$attrs\s*\}\}|:\w+=['"]\$attrs\./.test(template)) {
+    result.usesInTemplate = true;
+  }
+
+  return result;
 }
 
 // Count root-level elements in a template (depth 0 elements only)
@@ -715,74 +1715,169 @@ function countRootElements(template: string): number {
 function analyzeReactivity(): CrossFileIssue[] {
   const issues: CrossFileIssue[] = [];
 
+  // Collect all provides with their values to check if they contain refs
+  const provideValueIsReactive = new Map<string, boolean>();
+  for (const [_filename, source] of Object.entries(files.value)) {
+    const result = croquisResults.value[_filename];
+    if (!result?.croquis) continue;
+
+    for (const p of result.croquis.provides || []) {
+      const keyValue = p.key.type === 'symbol' ? `Symbol:${p.key.value}` : p.key.value;
+      // Check if the provide value contains ref() or reactive()
+      // This is a simple heuristic based on the value string
+      const valueContainsRef = p.value && (
+        p.value.includes('ref(') ||
+        p.value.includes('reactive(') ||
+        /\{\s*\w+\s*:\s*ref\s*\(/.test(p.value)
+      );
+      provideValueIsReactive.set(keyValue, valueContainsRef);
+    }
+  }
+
   for (const [filename, source] of Object.entries(files.value)) {
-    // Detect destructuring of inject result
-    const injectDestructureRegex = /const\s*\{([^}]+)\}\s*=\s*inject\s*\(/g;
+    const result = croquisResults.value[filename];
+    if (!result?.croquis) continue;
+
+    // 1. Check injects with destructured props (from Rust analysis)
+    for (const inj of result.croquis.injects || []) {
+      const keyValue = inj.key.type === 'symbol' ? `Symbol:${inj.key.value}` : inj.key.value;
+
+      // Skip if provide value contains refs (destructuring is safe)
+      if (provideValueIsReactive.get(keyValue)) continue;
+
+      // Check if this inject uses destructuring pattern (objectDestructure or arrayDestructure)
+      if ((inj.pattern === 'objectDestructure' || inj.pattern === 'arrayDestructure') && inj.destructuredProps && inj.destructuredProps.length > 0) {
+        const loc = findLineAndColumnAtOffset(source, inj.start, inj.end - inj.start);
+        issues.push(createIssue(
+          'reactivity',
+          'cross-file/reactivity-loss',
+          'error',
+          `Destructuring inject('${inj.key.value}') loses reactivity for: ${inj.destructuredProps.join(', ')}`,
+          filename,
+          loc.line,
+          loc.column,
+          {
+            endLine: loc.endLine,
+            endColumn: loc.endColumn,
+            suggestion: 'Store inject result in a variable first, then use toRefs() or computed()',
+          }
+        ));
+      }
+    }
+
+    // 2. Check for destructuring of inject result variable (indirect pattern)
+    // Use bindings info from Rust analysis
+    const injectBindings = new Map<string, string>(); // localName -> injectKey
+    for (const inj of result.croquis.injects || []) {
+      if (inj.localName && inj.pattern === 'simple') {
+        const keyValue = inj.key.type === 'symbol' ? `Symbol:${inj.key.value}` : inj.key.value;
+        injectBindings.set(inj.localName, keyValue);
+      }
+    }
+
+    // Look for bindings that are destructured from inject variables
+    for (const binding of result.croquis.bindings || []) {
+      if (binding.source === 'local' && binding.kind === 'SetupConst') {
+        // Check if this binding comes from destructuring an inject variable
+        // by looking at the source code around this binding
+        const bindingStart = binding.start || 0;
+        const lineStart = source.lastIndexOf('\n', bindingStart) + 1;
+        const lineEnd = source.indexOf('\n', bindingStart);
+        const line = source.substring(lineStart, lineEnd === -1 ? undefined : lineEnd);
+
+        // Check for pattern like: const { x } = injectVar
+        for (const [injectVar, injectKey] of injectBindings) {
+          // Skip if provide value contains refs
+          if (provideValueIsReactive.get(injectKey)) continue;
+
+          const destructurePattern = new RegExp(`const\\s*\\{[^}]*\\b${binding.name}\\b[^}]*\\}\\s*=\\s*${injectVar}\\b`);
+          if (destructurePattern.test(line)) {
+            const loc = findLineAndColumnAtOffset(source, bindingStart, binding.name.length);
+            issues.push(createIssue(
+              'reactivity',
+              'cross-file/reactivity-loss',
+              'error',
+              `Destructuring '${injectVar}' (from inject('${injectKey}')) loses reactivity for: ${binding.name}`,
+              filename,
+              loc.line,
+              loc.column,
+              {
+                endLine: loc.endLine,
+                endColumn: loc.endColumn,
+                suggestion: `Use toRefs(${injectVar}) or computed(() => ${injectVar}.${binding.name})`,
+              }
+            ));
+          }
+        }
+      }
+    }
+
+    // 3. Check for destructuring of reactive() result
+    const reactiveBindings = new Set<string>();
+    for (const binding of result.croquis.bindings || []) {
+      if (binding.source === 'reactive') {
+        reactiveBindings.add(binding.name);
+      }
+    }
+
+    // Look for destructuring patterns from reactive bindings
+    for (const binding of result.croquis.bindings || []) {
+      if (binding.source === 'local' && binding.kind === 'SetupConst') {
+        const bindingStart = binding.start || 0;
+        const lineStart = source.lastIndexOf('\n', bindingStart) + 1;
+        const lineEnd = source.indexOf('\n', bindingStart);
+        const line = source.substring(lineStart, lineEnd === -1 ? undefined : lineEnd);
+
+        for (const reactiveVar of reactiveBindings) {
+          // Skip if toRefs is used
+          if (source.includes(`toRefs(${reactiveVar})`)) continue;
+
+          const destructurePattern = new RegExp(`const\\s*\\{[^}]*\\b${binding.name}\\b[^}]*\\}\\s*=\\s*${reactiveVar}\\b`);
+          if (destructurePattern.test(line)) {
+            const loc = findLineAndColumnAtOffset(source, bindingStart, binding.name.length);
+            issues.push(createIssue(
+              'reactivity',
+              'cross-file/reactivity-loss',
+              'warning',
+              `Destructuring reactive object '${reactiveVar}' loses reactivity for: ${binding.name}`,
+              filename,
+              loc.line,
+              loc.column,
+              {
+                endLine: loc.endLine,
+                endColumn: loc.endColumn,
+                suggestion: `Use toRefs(${reactiveVar}) to maintain reactivity`,
+              }
+            ));
+          }
+        }
+      }
+    }
+
+    // 4. Check Pinia store destructuring (still use regex for this pattern)
+    const codeOnly = stripComments(source);
+    const storeDestructureRegex = /const\s*\{([^}]+)\}\s*=\s*(\w+Store)\s*\(\s*\)/g;
     let match;
-    while ((match = injectDestructureRegex.exec(source)) !== null) {
+    while ((match = storeDestructureRegex.exec(codeOnly)) !== null) {
+      // Check for storeToRefs usage
+      if (codeOnly.includes(`storeToRefs(${match[2]}`)) continue;
+
       const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-      const props = match[1].split(',').map(p => p.trim());
+      const props = match[1].split(',').map(p => p.trim().split(':')[0].trim());
       issues.push(createIssue(
         'reactivity',
-        'cross-file/reactivity-loss',
-        'error',
-        `Destructuring inject() result loses reactivity for: ${props.join(', ')}`,
+        'cross-file/store-reactivity-loss',
+        'warning',
+        `Destructuring Pinia store loses reactivity for: ${props.join(', ')}`,
         filename,
         loc.line,
         loc.column,
         {
           endLine: loc.endLine,
           endColumn: loc.endColumn,
-          suggestion: 'Access properties directly from inject result, or use computed()',
+          suggestion: `Use storeToRefs(${match[2]}()) for state and getters`,
         }
       ));
-    }
-
-    // Detect destructuring of reactive/ref without toRefs
-    const reactiveDestructureRegex = /const\s*\{([^}]+)\}\s*=\s*(reactive|ref)\s*\(/g;
-    while ((match = reactiveDestructureRegex.exec(source)) !== null) {
-      // Check if toRefs is used nearby
-      if (!source.includes('toRefs')) {
-        const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-        issues.push(createIssue(
-          'reactivity',
-          'cross-file/reactivity-loss',
-          'warning',
-          `Destructuring ${match[2]}() object loses reactivity`,
-          filename,
-          loc.line,
-          loc.column,
-          {
-            endLine: loc.endLine,
-            endColumn: loc.endColumn,
-            suggestion: `Use toRefs(${match[2]}(...)) to maintain reactivity`,
-          }
-        ));
-      }
-    }
-
-    // Detect Pinia store destructuring without storeToRefs
-    const storeDestructureRegex = /const\s*\{([^}]+)\}\s*=\s*(\w+Store)\s*(?:\(\s*\))?/g;
-    while ((match = storeDestructureRegex.exec(source)) !== null) {
-      // Check for storeToRefs usage
-      if (!source.includes('storeToRefs')) {
-        const loc = findLineAndColumnAtOffset(source, match.index, match[0].length);
-        const props = match[1].split(',').map(p => p.trim());
-        issues.push(createIssue(
-          'reactivity',
-          'cross-file/store-reactivity-loss',
-          'warning',
-          `Destructuring Pinia store loses reactivity for: ${props.join(', ')}`,
-          filename,
-          loc.line,
-          loc.column,
-          {
-            endLine: loc.endLine,
-            endColumn: loc.endColumn,
-            suggestion: `Use storeToRefs(${match[2]}) for state and getters`,
-          }
-        ));
-      }
     }
   }
 
@@ -927,10 +2022,23 @@ function removeFile(name: string) {
 }
 
 function resetProject() {
-  files.value = { ...SAMPLE_PROJECT };
-  activeFile.value = 'ParentComponent.vue';
+  const preset = currentPresetData.value;
+  files.value = { ...preset.files };
+  activeFile.value = Object.keys(preset.files)[0];
   crossFileIssues.value = [];
   selectedIssue.value = null;
+}
+
+function selectPreset(presetId: string) {
+  currentPreset.value = presetId;
+  const preset = PRESETS.find(p => p.id === presetId);
+  if (preset) {
+    files.value = { ...preset.files };
+    activeFile.value = Object.keys(preset.files)[0];
+    crossFileIssues.value = [];
+    selectedIssue.value = null;
+    nextTick(() => analyzeAll());
+  }
 }
 
 function selectIssue(issue: CrossFileIssue) {
@@ -973,8 +2081,17 @@ function getTypeColor(type: string): string {
 }
 
 // === Watchers ===
+let analyzeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedAnalyze() {
+  if (analyzeTimeout) clearTimeout(analyzeTimeout);
+  analyzeTimeout = setTimeout(() => {
+    analyzeAll();
+  }, 300);
+}
+
 watch([files, options], () => {
-  analyzeAll();
+  debouncedAnalyze();
 }, { deep: true });
 
 watch(() => props.compiler, () => {
@@ -990,6 +2107,25 @@ onMounted(() => {
   <div ref="containerRef" class="cross-file-playground" :style="gridStyle" :class="{ resizing: isResizingSidebar || isResizingDiagnostics }">
     <!-- Sidebar: File Tree & Dependency Graph -->
     <aside class="sidebar">
+      <!-- Preset Selector -->
+      <div class="sidebar-section preset-section">
+        <div class="section-header">
+          <h3>Presets</h3>
+        </div>
+        <div class="preset-list">
+          <button
+            v-for="preset in PRESETS"
+            :key="preset.id"
+            :class="['preset-item', { active: currentPreset === preset.id }]"
+            @click="selectPreset(preset.id)"
+            :title="preset.description"
+          >
+            <span class="preset-icon">{{ preset.icon }}</span>
+            <span class="preset-name">{{ preset.name }}</span>
+          </button>
+        </div>
+      </div>
+
       <div class="sidebar-section">
         <div class="section-header">
           <h3>Project Files</h3>
@@ -1094,7 +2230,7 @@ onMounted(() => {
       <div class="editor-content">
         <MonacoEditor
           v-model="currentSource"
-          language="vue"
+          :language="editorLanguage"
           :diagnostics="currentDiagnostics"
         />
       </div>
@@ -1245,6 +2381,58 @@ onMounted(() => {
   color: #fff;
   letter-spacing: 0.5px;
   cursor: help;
+}
+
+/* Preset Selector */
+.preset-section {
+  flex-shrink: 0;
+}
+
+.preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+}
+
+.preset-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  flex: 1;
+  min-width: calc(50% - 4px);
+  justify-content: flex-start;
+}
+
+.preset-item:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.preset-item.active {
+  background: rgba(224, 112, 72, 0.15);
+  border-color: var(--accent-rust);
+  color: var(--accent-rust);
+}
+
+.preset-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.preset-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .section-actions {

@@ -50,6 +50,7 @@ mod analyzer;
 mod diagnostics;
 mod graph;
 mod registry;
+mod suppression;
 
 // Analyzer implementations
 mod analyzers;
@@ -59,6 +60,7 @@ pub use analyzer::{CrossFileAnalyzer, CrossFileOptions, CrossFileResult};
 pub use diagnostics::{CrossFileDiagnostic, CrossFileDiagnosticKind, DiagnosticSeverity};
 pub use graph::{DependencyEdge, DependencyGraph, ModuleNode};
 pub use registry::{FileId, ModuleEntry, ModuleRegistry};
+pub use suppression::{SuppressionDirective, SuppressionError, SuppressionMap};
 
 // Re-export analyzer types
 pub use analyzers::{

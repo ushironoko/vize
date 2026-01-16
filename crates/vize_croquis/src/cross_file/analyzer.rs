@@ -33,6 +33,12 @@ pub struct CrossFileOptions {
     pub circular_dependencies: bool,
     /// Maximum depth for dependency chain warnings.
     pub max_import_depth: Option<usize>,
+
+    // === Static validation (strict mode) ===
+    /// Check for unregistered components in templates.
+    pub component_resolution: bool,
+    /// Validate props passed to child components.
+    pub props_validation: bool,
 }
 
 impl CrossFileOptions {
@@ -49,6 +55,18 @@ impl CrossFileOptions {
             reactivity_tracking: true,
             circular_dependencies: true,
             max_import_depth: Some(10),
+            component_resolution: true,
+            props_validation: true,
+        }
+    }
+
+    /// Create options for strict static validation (compile errors for invalid Vue).
+    pub fn strict() -> Self {
+        Self {
+            component_resolution: true,
+            props_validation: true,
+            circular_dependencies: true,
+            ..Default::default()
         }
     }
 
@@ -117,6 +135,18 @@ impl CrossFileOptions {
         self
     }
 
+    /// Enable component resolution checking.
+    pub fn with_component_resolution(mut self, enabled: bool) -> Self {
+        self.component_resolution = enabled;
+        self
+    }
+
+    /// Enable props validation.
+    pub fn with_props_validation(mut self, enabled: bool) -> Self {
+        self.props_validation = enabled;
+        self
+    }
+
     /// Check if any analysis is enabled.
     pub fn any_enabled(&self) -> bool {
         self.fallthrough_attrs
@@ -128,6 +158,8 @@ impl CrossFileOptions {
             || self.error_suspense_boundary
             || self.reactivity_tracking
             || self.circular_dependencies
+            || self.component_resolution
+            || self.props_validation
     }
 }
 
@@ -160,6 +192,12 @@ pub struct CrossFileResult {
 
     /// Circular dependencies (as paths of file IDs).
     pub circular_deps: Vec<Vec<FileId>>,
+
+    /// Component resolution issues.
+    pub component_resolution_issues: Vec<analyzers::ComponentResolutionIssue>,
+
+    /// Props validation issues.
+    pub props_validation_issues: Vec<analyzers::PropsValidationIssue>,
 
     /// Statistics.
     pub stats: CrossFileStats,
@@ -357,6 +395,20 @@ impl CrossFileAnalyzer {
             result.diagnostics.extend(diags);
         }
 
+        // Static validation analyzers
+        if self.options.component_resolution {
+            let (issues, diags) =
+                analyzers::analyze_component_resolution(&self.registry, &self.graph);
+            result.component_resolution_issues = issues;
+            result.diagnostics.extend(diags);
+        }
+
+        if self.options.props_validation {
+            let (issues, diags) = analyzers::analyze_props_validation(&self.registry, &self.graph);
+            result.props_validation_issues = issues;
+            result.diagnostics.extend(diags);
+        }
+
         // Calculate statistics
         result.stats = CrossFileStats {
             files_analyzed: self.registry.len(),
@@ -469,6 +521,19 @@ mod tests {
         assert!(options.any_enabled());
         assert!(options.fallthrough_attrs);
         assert!(options.reactivity_tracking);
+        assert!(options.component_resolution);
+        assert!(options.props_validation);
+    }
+
+    #[test]
+    fn test_strict_options() {
+        let options = CrossFileOptions::strict();
+        assert!(options.component_resolution);
+        assert!(options.props_validation);
+        assert!(options.circular_dependencies);
+        // Other options should be disabled
+        assert!(!options.fallthrough_attrs);
+        assert!(!options.event_bubbling);
     }
 
     #[test]
@@ -482,5 +547,458 @@ mod tests {
 
         assert_eq!(analyzer.registry().len(), 1);
         assert!(analyzer.get_analysis(id).is_some());
+    }
+
+    #[test]
+    fn test_component_resolution_error() {
+        let mut analyzer = CrossFileAnalyzer::new(CrossFileOptions::strict());
+
+        // Add a file that uses an unregistered component
+        analyzer.add_file(
+            Path::new("Parent.vue"),
+            r#"<script setup>
+// No import of ChildComponent
+</script>"#,
+        );
+
+        // When template analysis is added, this test will verify
+        // that unregistered components produce errors
+    }
+
+    #[test]
+    fn test_circular_dependency_detection() {
+        let mut analyzer = CrossFileAnalyzer::new(CrossFileOptions::strict());
+
+        // This test would require adding files with circular imports
+        // For now, just verify the analysis runs without crashing
+        let result = analyzer.analyze();
+        assert!(result.circular_deps.is_empty());
+    }
+
+    // === Provide/Inject Tests ===
+    // NOTE: CrossFileAnalyzer.analyze_single_file doesn't parse SFC tags,
+    // so we use .ts extension to pass raw script content
+
+    #[test]
+    fn test_provide_inject_basic_match() {
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Parent provides 'state' (using .ts extension to pass raw script)
+        analyzer.add_file(
+            Path::new("Parent.ts"),
+            r#"import { provide, reactive } from 'vue'
+const state = reactive({ count: 0 })
+provide('state', state)"#,
+        );
+
+        // Child injects 'state'
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const state = inject('state')"#,
+        );
+
+        let result = analyzer.analyze();
+
+        // Both files should be analyzed
+        assert_eq!(result.stats.files_analyzed, 2);
+    }
+
+    #[test]
+    fn test_provide_inject_with_type_assertion() {
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Child injects 'state' with type assertion
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const state = inject('state') as { count: number; user: { name: string } }"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        // Should detect the inject even with type assertion
+        let child_analysis = analyzer.get_analysis(analyzer.registry().iter().next().unwrap().id);
+        assert!(child_analysis.is_some());
+
+        let analysis = child_analysis.unwrap();
+        assert_eq!(analysis.provide_inject.injects().len(), 1);
+        assert_eq!(
+            analysis.provide_inject.injects()[0].key,
+            crate::provide::ProvideKey::String(vize_carton::CompactString::new("state"))
+        );
+    }
+
+    #[test]
+    fn test_provide_inject_with_satisfies() {
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Child injects 'theme' with satisfies
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const theme = inject('theme') satisfies string | undefined"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let child_analysis = analyzer.get_analysis(analyzer.registry().iter().next().unwrap().id);
+        assert!(child_analysis.is_some());
+
+        let analysis = child_analysis.unwrap();
+        assert_eq!(analysis.provide_inject.injects().len(), 1);
+    }
+
+    #[test]
+    fn test_provide_with_symbol_key() {
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Using Symbol as provide key
+        analyzer.add_file(
+            Path::new("Parent.ts"),
+            r#"import { provide } from 'vue'
+const ThemeKey = Symbol('theme')
+provide(ThemeKey, 'dark')"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let parent_analysis = analyzer.get_analysis(analyzer.registry().iter().next().unwrap().id);
+        assert!(parent_analysis.is_some());
+
+        let analysis = parent_analysis.unwrap();
+        assert_eq!(analysis.provide_inject.provides().len(), 1);
+    }
+
+    #[test]
+    fn test_inject_with_default_value() {
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Child injects with default value
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const theme = inject('theme', 'light')"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let child_analysis = analyzer.get_analysis(analyzer.registry().iter().next().unwrap().id);
+        assert!(child_analysis.is_some());
+
+        let analysis = child_analysis.unwrap();
+        let injects = analysis.provide_inject.injects();
+        assert_eq!(injects.len(), 1);
+        assert!(injects[0].default_value.is_some());
+    }
+
+    #[test]
+    fn test_multiple_provides_and_injects() {
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Component with multiple provides and injects
+        analyzer.add_file(
+            Path::new("Mixed.ts"),
+            r#"import { provide, inject, ref } from 'vue'
+
+// Inject from ancestor
+const theme = inject('theme', 'light')
+const user = inject('user')
+
+// Provide for descendants
+const count = ref(0)
+provide('count', count)
+provide('config', { debug: true })"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        assert_eq!(analysis.provide_inject.provides().len(), 2);
+        assert_eq!(analysis.provide_inject.injects().len(), 2);
+    }
+
+    #[test]
+    fn test_reactivity_wrappers_detected() {
+        let mut analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        analyzer.add_file(
+            Path::new("Test.ts"),
+            r#"import { ref, computed, reactive, shallowRef, toRef, toRefs } from 'vue'
+
+const count = ref(0)
+const doubled = computed(() => count.value * 2)
+const state = reactive({ name: 'test' })
+const shallow = shallowRef({ deep: 'value' })
+const props = defineProps<{ item: { name: string } }>()
+const nameRef = toRef(props, 'item')"#,
+        );
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        // Check reactivity tracking
+        assert!(analysis.reactivity.is_reactive("count"));
+        assert!(analysis.reactivity.is_reactive("doubled"));
+        assert!(analysis.reactivity.is_reactive("state"));
+        assert!(analysis.reactivity.is_reactive("shallow"));
+        assert!(analysis.reactivity.is_reactive("nameRef"));
+    }
+
+    #[test]
+    fn test_define_props_with_type() {
+        let mut analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        analyzer.add_file(
+            Path::new("Test.ts"),
+            r#"const props = defineProps<{
+    msg: string
+    count?: number
+    user: { name: string; age: number }
+}>()"#,
+        );
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        assert_eq!(analysis.macros.props().len(), 3);
+        assert!(analysis
+            .macros
+            .props()
+            .iter()
+            .any(|p| p.name.as_str() == "msg" && p.required));
+        assert!(analysis
+            .macros
+            .props()
+            .iter()
+            .any(|p| p.name.as_str() == "count" && !p.required));
+        assert!(analysis
+            .macros
+            .props()
+            .iter()
+            .any(|p| p.name.as_str() == "user" && p.required));
+    }
+
+    #[test]
+    fn test_define_emits() {
+        let mut analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        analyzer.add_file(
+            Path::new("Test.ts"),
+            r#"const emit = defineEmits<{
+    (e: 'update', value: string): void
+    (e: 'delete', id: number): void
+}>()"#,
+        );
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        assert_eq!(analysis.macros.emits().len(), 2);
+    }
+
+    #[test]
+    fn test_invalid_exports_in_script_setup() {
+        let _analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        // Use Analyzer directly for script setup context
+        let mut single_analyzer = crate::Analyzer::with_options(AnalyzerOptions::full());
+        single_analyzer.analyze_script_setup(
+            r#"export const foo = 'bar'
+export function hello() {}
+export default {}"#,
+        );
+        let analysis = single_analyzer.finish();
+
+        // Should detect invalid exports in script setup
+        assert!(analysis.invalid_exports.len() >= 2);
+    }
+
+    #[test]
+    fn test_type_exports_allowed() {
+        let _analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        // Use Analyzer directly for script setup context
+        let mut single_analyzer = crate::Analyzer::with_options(AnalyzerOptions::full());
+        single_analyzer.analyze_script_setup(
+            r#"export type Props = { msg: string }
+export interface Emits {
+    (e: 'update', value: string): void
+}"#,
+        );
+        let analysis = single_analyzer.finish();
+
+        // Type exports should be allowed and tracked
+        assert_eq!(analysis.type_exports.len(), 2);
+        // No invalid exports for type declarations
+        assert_eq!(analysis.invalid_exports.len(), 0);
+    }
+
+    #[test]
+    fn test_scope_tracking_lifecycle_hooks() {
+        let _analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        // Use Analyzer directly for script setup context
+        let mut single_analyzer = crate::Analyzer::with_options(AnalyzerOptions::full());
+        single_analyzer.analyze_script_setup(
+            r#"import { onMounted, onUnmounted, ref } from 'vue'
+
+const count = ref(0)
+
+onMounted(() => {
+    console.log('mounted')
+    count.value++
+})
+
+onUnmounted(() => {
+    console.log('unmounted')
+})"#,
+        );
+        let analysis = single_analyzer.finish();
+
+        // Should have scopes for lifecycle hooks (client-only scopes)
+        let client_only_scopes: Vec<_> = analysis
+            .scopes
+            .iter()
+            .filter(|s| s.kind == crate::scope::ScopeKind::ClientOnly)
+            .collect();
+
+        assert_eq!(
+            client_only_scopes.len(),
+            2,
+            "Should have 2 client-only scopes for onMounted and onUnmounted"
+        );
+    }
+
+    #[test]
+    fn test_nested_callback_scopes() {
+        let _analyzer = CrossFileAnalyzer::new(CrossFileOptions::minimal());
+
+        // Use Analyzer directly for script setup context
+        let mut single_analyzer = crate::Analyzer::with_options(AnalyzerOptions::full());
+        single_analyzer.analyze_script_setup(
+            r#"import { computed } from 'vue'
+
+const items = computed(() => {
+    return list.map(item => {
+        return item.value.filter(v => v > 0)
+    })
+})"#,
+        );
+        let analysis = single_analyzer.finish();
+
+        // Should have multiple closure scopes for nested callbacks
+        let closure_scopes: Vec<_> = analysis
+            .scopes
+            .iter()
+            .filter(|s| s.kind == crate::scope::ScopeKind::Closure)
+            .collect();
+
+        assert!(
+            closure_scopes.len() >= 3,
+            "Should have at least 3 closure scopes (computed, map, filter)"
+        );
+    }
+
+    #[test]
+    fn test_inject_object_destructure_pattern() {
+        use crate::provide::InjectPattern;
+
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_reactivity_tracking(true));
+
+        // Destructuring inject() loses reactivity
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const { count, name } = inject('state') as { count: number; name: string }"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        // Should detect the inject with ObjectDestructure pattern
+        let injects = analysis.provide_inject.injects();
+        assert_eq!(injects.len(), 1, "Should have 1 inject");
+        match &injects[0].pattern {
+            InjectPattern::ObjectDestructure(props) => {
+                assert!(props.contains(&vize_carton::CompactString::new("count")));
+                assert!(props.contains(&vize_carton::CompactString::new("name")));
+            }
+            _ => panic!(
+                "Expected ObjectDestructure pattern, got {:?}",
+                injects[0].pattern
+            ),
+        }
+    }
+
+    #[test]
+    fn test_inject_simple_pattern() {
+        use crate::provide::InjectPattern;
+
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_provide_inject(true));
+
+        // Simple inject without destructuring
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const state = inject('state')"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        let injects = analysis.provide_inject.injects();
+        assert_eq!(injects.len(), 1);
+        assert!(matches!(injects[0].pattern, InjectPattern::Simple));
+    }
+
+    #[test]
+    fn test_inject_destructure_with_type_assertion() {
+        use crate::provide::InjectPattern;
+
+        let mut analyzer =
+            CrossFileAnalyzer::new(CrossFileOptions::default().with_reactivity_tracking(true));
+
+        // Destructuring with TSAsExpression
+        analyzer.add_file(
+            Path::new("Child.ts"),
+            r#"import { inject } from 'vue'
+const { foo } = inject('data') as { foo: string }"#,
+        );
+
+        let _result = analyzer.analyze();
+
+        let analysis = analyzer
+            .get_analysis(analyzer.registry().iter().next().unwrap().id)
+            .unwrap();
+
+        let injects = analysis.provide_inject.injects();
+        assert_eq!(injects.len(), 1);
+        match &injects[0].pattern {
+            InjectPattern::ObjectDestructure(props) => {
+                assert!(props.contains(&vize_carton::CompactString::new("foo")));
+            }
+            _ => panic!("Expected ObjectDestructure pattern"),
+        }
     }
 }

@@ -165,6 +165,24 @@ pub struct TopLevelAwait {
     pub expression: CompactString,
 }
 
+/// Expose definition from defineExpose
+#[derive(Debug, Clone)]
+pub struct ExposeDefinition {
+    /// Exposed property name
+    pub name: CompactString,
+    /// Type of the exposed property (if known)
+    pub expose_type: Option<CompactString>,
+}
+
+/// Slots definition from defineSlots
+#[derive(Debug, Clone)]
+pub struct SlotsDefinition {
+    /// Slot name
+    pub name: CompactString,
+    /// Slot props type (if known)
+    pub props_type: Option<CompactString>,
+}
+
 /// Macro binding kind for props destructure
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MacroBindingKind {
@@ -185,12 +203,18 @@ pub struct MacroTracker {
     /// Actual emit() calls in the code (not declarations)
     emit_calls: Vec<EmitCall>,
     models: Vec<ModelDefinition>,
+    /// Exposed properties from defineExpose
+    exposes: Vec<ExposeDefinition>,
+    /// Slots from defineSlots
+    slots: Vec<SlotsDefinition>,
     props_destructure: Option<PropsDestructuredBindings>,
     top_level_awaits: Vec<TopLevelAwait>,
     next_id: u32,
     /// Cached indices for quick lookup
     define_props_idx: Option<usize>,
     define_emits_idx: Option<usize>,
+    define_expose_idx: Option<usize>,
+    define_slots_idx: Option<usize>,
 }
 
 impl MacroTracker {
@@ -214,10 +238,12 @@ impl MacroTracker {
 
         let idx = self.calls.len();
 
-        // Cache defineProps/defineEmits indices
+        // Cache macro indices for quick lookup
         match kind {
             MacroKind::DefineProps => self.define_props_idx = Some(idx),
             MacroKind::DefineEmits => self.define_emits_idx = Some(idx),
+            MacroKind::DefineExpose => self.define_expose_idx = Some(idx),
+            MacroKind::DefineSlots => self.define_slots_idx = Some(idx),
             _ => {}
         }
 
@@ -250,6 +276,18 @@ impl MacroTracker {
     #[inline]
     pub fn define_emits(&self) -> Option<&MacroCall> {
         self.define_emits_idx.map(|idx| &self.calls[idx])
+    }
+
+    /// Get defineExpose call (cached lookup)
+    #[inline]
+    pub fn define_expose(&self) -> Option<&MacroCall> {
+        self.define_expose_idx.map(|idx| &self.calls[idx])
+    }
+
+    /// Get defineSlots call (cached lookup)
+    #[inline]
+    pub fn define_slots(&self) -> Option<&MacroCall> {
+        self.define_slots_idx.map(|idx| &self.calls[idx])
     }
 
     /// Add a prop definition
@@ -327,6 +365,30 @@ impl MacroTracker {
     #[inline]
     pub fn models(&self) -> &[ModelDefinition] {
         &self.models
+    }
+
+    /// Add an expose definition
+    #[inline]
+    pub fn add_expose(&mut self, expose: ExposeDefinition) {
+        self.exposes.push(expose);
+    }
+
+    /// Get all exposes
+    #[inline]
+    pub fn exposes(&self) -> &[ExposeDefinition] {
+        &self.exposes
+    }
+
+    /// Add a slot definition
+    #[inline]
+    pub fn add_slot(&mut self, slot: SlotsDefinition) {
+        self.slots.push(slot);
+    }
+
+    /// Get all slots
+    #[inline]
+    pub fn slots(&self) -> &[SlotsDefinition] {
+        &self.slots
     }
 
     /// Set props destructure

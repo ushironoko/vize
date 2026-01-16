@@ -713,7 +713,7 @@ onMounted(async () => {
           :class="['main-tab', { active: mainTab === 'cross-file' }]"
           @click="mainTab = 'cross-file'"
         >
-          <span class="tab-name">Croquis (CF)</span>
+          <span class="tab-name">CF</span>
           <span class="tab-desc">cross-file</span>
         </button>
         <button

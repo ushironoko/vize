@@ -108,8 +108,11 @@ pub struct Croquis {
     /// Template-level metadata (root count, $attrs usage, etc.)
     pub template_info: TemplateInfo,
 
-    /// Components used in template
+    /// Components used in template (names only, for quick lookup)
     pub used_components: FxHashSet<CompactString>,
+
+    /// Detailed component usage information (props, events, slots)
+    pub component_usages: Vec<ComponentUsage>,
 
     /// Directives used in template
     pub used_directives: FxHashSet<CompactString>,
@@ -175,6 +178,75 @@ impl TemplateExpressionKind {
             Self::VModel => "VModel",
         }
     }
+}
+
+use vize_carton::SmallVec;
+
+/// Information about a component used in template.
+///
+/// Uses SmallVec to avoid heap allocations for typical component usage
+/// (most components have < 8 props, < 4 events, < 2 slots).
+#[derive(Debug, Clone)]
+pub struct ComponentUsage {
+    /// Component name (e.g., "MyButton", "user-card")
+    pub name: CompactString,
+    /// Start offset in template
+    pub start: u32,
+    /// End offset in template
+    pub end: u32,
+    /// Props passed to this component (stack-allocated for ≤8 props)
+    pub props: SmallVec<[PassedProp; 8]>,
+    /// Event listeners on this component (stack-allocated for ≤4 events)
+    pub events: SmallVec<[EventListener; 4]>,
+    /// Slots provided to this component (stack-allocated for ≤2 slots)
+    pub slots: SmallVec<[SlotUsage; 2]>,
+    /// Whether v-bind="$attrs" or similar spread is used
+    pub has_spread_attrs: bool,
+}
+
+/// A prop passed to a component in template.
+#[derive(Debug, Clone)]
+pub struct PassedProp {
+    /// Prop name (kebab-case or camelCase as written)
+    pub name: CompactString,
+    /// The expression if dynamic, or literal value if static
+    pub value: Option<CompactString>,
+    /// Start offset
+    pub start: u32,
+    /// End offset
+    pub end: u32,
+    /// Whether this is a dynamic binding (:prop or v-bind:prop)
+    pub is_dynamic: bool,
+}
+
+/// An event listener on a component.
+#[derive(Debug, Clone)]
+pub struct EventListener {
+    /// Event name (e.g., "click", "update:modelValue")
+    pub name: CompactString,
+    /// Handler expression
+    pub handler: Option<CompactString>,
+    /// Modifiers (stack-allocated for ≤4 modifiers)
+    pub modifiers: SmallVec<[CompactString; 4]>,
+    /// Start offset
+    pub start: u32,
+    /// End offset
+    pub end: u32,
+}
+
+/// A slot provided to a component.
+#[derive(Debug, Clone)]
+pub struct SlotUsage {
+    /// Slot name ("default" if unnamed)
+    pub name: CompactString,
+    /// Scope variable names if any (stack-allocated for ≤4 vars)
+    pub scope_vars: SmallVec<[CompactString; 4]>,
+    /// Start offset
+    pub start: u32,
+    /// End offset
+    pub end: u32,
+    /// Whether this slot has scope (v-slot:name="scope")
+    pub has_scope: bool,
 }
 
 impl Croquis {

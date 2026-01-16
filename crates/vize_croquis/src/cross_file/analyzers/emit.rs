@@ -214,12 +214,20 @@ fn extract_emit_info(analysis: &crate::Croquis) -> ComponentEmitInfo {
 /// Extract event listeners from a parent component's template.
 ///
 /// Returns a map from component name to (event name -> handler offset).
-fn extract_event_listeners(
-    _analysis: &crate::Croquis,
-) -> FxHashMap<String, FxHashMap<String, u32>> {
-    // This would require parsing the template to find @event handlers on components
-    // For now, return empty - a real implementation would track this during template analysis
-    FxHashMap::default()
+/// Uses component_usages for precise static analysis.
+fn extract_event_listeners(analysis: &crate::Croquis) -> FxHashMap<String, FxHashMap<String, u32>> {
+    let mut result: FxHashMap<String, FxHashMap<String, u32>> = FxHashMap::default();
+
+    for usage in &analysis.component_usages {
+        let component_name = usage.name.to_string();
+        let events = result.entry(component_name).or_default();
+
+        for event in &usage.events {
+            events.insert(event.name.to_string(), event.start);
+        }
+    }
+
+    result
 }
 
 /// Check if an event is a native DOM event.
