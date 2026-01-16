@@ -83,17 +83,42 @@ pub fn generate_virtual_ts(
         .define_props()
         .and_then(|m| m.type_args.as_ref());
 
+    // Check if Props is already defined in user code (interface Props or type Props)
+    let props_already_defined = summary
+        .type_exports
+        .iter()
+        .any(|te| te.name.as_str() == "Props");
+
+    // Check if Emits is already defined in user code
+    let emits_already_defined = summary
+        .type_exports
+        .iter()
+        .any(|te| te.name.as_str() == "Emits");
+
     // Exported Types (define Props type first so it can be referenced)
     ts.push_str("// ========== Exported Types ==========\n");
 
-    // Props type - use type_args from defineProps if available for strictness
-    if let Some(type_args) = define_props_type_args {
+    // Props type - skip if user already defined it
+    if props_already_defined {
+        // User defined Props, no need to re-export
+    } else if let Some(type_args) = define_props_type_args {
         // Remove angle brackets from type_args (e.g., "<{ foo: string }>" -> "{ foo: string }")
         let inner_type = type_args
             .strip_prefix('<')
             .and_then(|s| s.strip_suffix('>'))
             .unwrap_or(type_args.as_str());
-        ts.push_str(&format!("export type Props = {};\n", inner_type));
+        // Check if inner_type is a simple identifier that matches an existing type
+        let is_simple_reference = inner_type.chars().all(|c| c.is_alphanumeric() || c == '_');
+        if is_simple_reference
+            && summary
+                .type_exports
+                .iter()
+                .any(|te| te.name.as_str() == inner_type)
+        {
+            // Type arg references an existing type, no need to re-export
+        } else {
+            ts.push_str(&format!("export type Props = {};\n", inner_type));
+        }
     } else if has_props {
         ts.push_str("export type Props = {\n");
         for prop in props {
@@ -123,11 +148,12 @@ pub fn generate_virtual_ts(
         ts.push_str("declare const __props: Props;\n");
     }
 
-    // Emits type
+    // Emits type - skip if user already defined it
     let emits = summary.macros.emits();
-    if !emits.is_empty() {
-        ts.push_str("export type Emits = typeof __emit extends undefined ? {} : typeof __emit;\n");
+    if emits_already_defined {
+        // User defined Emits, no need to re-export
     } else {
+        // Just export empty Emits since we can't infer the type properly
         ts.push_str("export type Emits = {};\n");
     }
 

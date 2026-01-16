@@ -6,12 +6,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 
 /// LSP Client for tsgo
 pub struct TsgoLspClient {
@@ -64,6 +67,12 @@ impl TsgoLspClient {
 
         eprintln!("\x1b[90m[tsgo] Using: {}\x1b[0m", tsgo);
 
+        // Determine project root (for tsconfig.json resolution)
+        let project_root = working_dir
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .and_then(|p| p.canonicalize().ok());
+
         let mut cmd = Command::new(tsgo);
         cmd.arg("--lsp")
             .arg("--stdio")
@@ -71,7 +80,10 @@ impl TsgoLspClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        if let Some(wd) = working_dir {
+        // Set working directory to project root for proper tsconfig resolution
+        if let Some(root) = &project_root {
+            cmd.current_dir(root);
+        } else if let Some(wd) = working_dir {
             cmd.current_dir(wd);
         }
 
@@ -88,6 +100,17 @@ impl TsgoLspClient {
             .take()
             .ok_or("Failed to get stdout of tsgo lsp")?;
 
+        // Set stdout to non-blocking mode on Unix
+        #[cfg(unix)]
+        {
+            use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
+            let fd = stdout.as_raw_fd();
+            unsafe {
+                let flags = fcntl(fd, F_GETFL);
+                fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+            }
+        }
+
         let mut client = Self {
             process,
             stdin,
@@ -96,25 +119,42 @@ impl TsgoLspClient {
             diagnostics: HashMap::new(),
         };
 
-        // Initialize LSP
-        client.initialize()?;
+        // Initialize LSP with project root for tsconfig resolution
+        client.initialize(project_root.as_ref())?;
 
         Ok(client)
     }
 
     /// Initialize LSP connection
-    fn initialize(&mut self) -> Result<(), String> {
+    fn initialize(&mut self, project_root: Option<&std::path::PathBuf>) -> Result<(), String> {
+        // Convert project root to file:// URI
+        let root_uri = project_root.map(|p| format!("file://{}", p.display()));
+
+        let workspace_folders = root_uri.as_ref().map(|uri| {
+            serde_json::json!([{
+                "uri": uri,
+                "name": "workspace"
+            }])
+        });
+
         let params = serde_json::json!({
             "processId": std::process::id(),
             "capabilities": {
                 "textDocument": {
                     "publishDiagnostics": {
                         "relatedInformation": true
+                    },
+                    "diagnostic": {
+                        "dynamicRegistration": false
                     }
+                },
+                "workspace": {
+                    "workspaceFolders": true,
+                    "configuration": true
                 }
             },
-            "rootUri": null,
-            "workspaceFolders": null
+            "rootUri": root_uri,
+            "workspaceFolders": workspace_folders
         });
 
         let _response = self.send_request("initialize", params)?;
@@ -125,8 +165,17 @@ impl TsgoLspClient {
         Ok(())
     }
 
-    /// Open a virtual document
+    /// Open a virtual document (waits for diagnostics - slower but convenient for single files)
     pub fn did_open(&mut self, uri: &str, content: &str) -> Result<(), String> {
+        self.did_open_fast(uri, content)?;
+        // Read any diagnostics that might be published
+        self.read_notifications()?;
+        Ok(())
+    }
+
+    /// Open a virtual document without waiting for diagnostics (faster for batch operations)
+    /// Call wait_for_diagnostics() after opening all files to collect diagnostics
+    pub fn did_open_fast(&mut self, uri: &str, content: &str) -> Result<(), String> {
         let params = serde_json::json!({
             "textDocument": {
                 "uri": uri,
@@ -138,10 +187,61 @@ impl TsgoLspClient {
 
         self.send_notification("textDocument/didOpen", params)?;
 
-        // Read any diagnostics that might be published
-        self.read_notifications()?;
+        // Drain any pending messages to prevent pipe buffer from filling up
+        self.drain_pending_messages();
 
         Ok(())
+    }
+
+    /// Drain any pending messages without blocking
+    fn drain_pending_messages(&mut self) {
+        while let Some(Ok(msg)) = self.try_read_message_nonblocking() {
+            self.handle_notification(&msg);
+        }
+    }
+
+    /// Wait for diagnostics to be published for all opened files
+    /// Waits until idle for 200ms after receiving at least one message
+    pub fn wait_for_diagnostics(&mut self, _expected_count: usize) {
+        use std::time::Instant;
+
+        let max_wait = Duration::from_secs(30); // Maximum total wait
+        let idle_timeout = Duration::from_millis(200); // Idle timeout after receiving messages
+        let start = Instant::now();
+        let mut last_message: Option<Instant> = None;
+        let mut message_count = 0;
+        let last_report = Instant::now();
+
+        // Read messages until idle timeout or max wait
+        loop {
+            // Check for max wait timeout
+            if start.elapsed() > max_wait {
+                break;
+            }
+
+            // Check for idle timeout (only after receiving at least one message)
+            if let Some(last) = last_message {
+                if last.elapsed() > idle_timeout {
+                    break;
+                }
+            }
+
+            // Try reading a message
+            match self.try_read_message_nonblocking() {
+                Some(Ok(msg)) => {
+                    last_message = Some(Instant::now()); // Reset idle timer
+                    message_count += 1;
+                    self.handle_notification(&msg);
+                }
+                Some(Err(_)) => break,
+                None => {
+                    // No data available, wait a bit
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+
+        let _ = (message_count, last_report); // Suppress unused warnings
     }
 
     /// Close a virtual document
@@ -228,16 +328,23 @@ impl TsgoLspClient {
 
     /// Read a single LSP message
     fn read_message(&mut self) -> Result<Value, String> {
-        // Read headers
+        // Read headers (with retry on WouldBlock for non-blocking mode)
         let mut content_length: usize = 0;
         let mut headers_read = Vec::new();
 
         loop {
             let mut line = String::new();
-            let bytes_read = self
-                .stdout
-                .read_line(&mut line)
-                .map_err(|e| format!("Read error: {}", e))?;
+            let bytes_read = loop {
+                match self.stdout.read_line(&mut line) {
+                    Ok(n) => break n,
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                        // Non-blocking mode: wait a bit and retry
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(e) => return Err(format!("Read error: {}", e)),
+                }
+            };
 
             if bytes_read == 0 {
                 // EOF - process may have exited
@@ -268,11 +375,20 @@ impl TsgoLspClient {
             ));
         }
 
-        // Read content
+        // Read content (with retry on WouldBlock)
         let mut content = vec![0u8; content_length];
-        self.stdout
-            .read_exact(&mut content)
-            .map_err(|e| format!("Read error: {}", e))?;
+        let mut bytes_read = 0;
+        while bytes_read < content_length {
+            match self.stdout.read(&mut content[bytes_read..]) {
+                Ok(0) => return Err("EOF while reading content".to_string()),
+                Ok(n) => bytes_read += n,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(e) => return Err(format!("Read error: {}", e)),
+            }
+        }
 
         let msg: Value =
             serde_json::from_slice(&content).map_err(|e| format!("JSON parse error: {}", e))?;
@@ -349,10 +465,12 @@ impl TsgoLspClient {
     /// Try to read a message without blocking forever
     fn try_read_message_nonblocking(&mut self) -> Option<Result<Value, String>> {
         // Check if there's data available using fill_buf
+        // With non-blocking mode, fill_buf returns WouldBlock if no data
         match self.stdout.fill_buf() {
-            Ok([]) => None,
-            Ok(_) => Some(self.read_message()),
-            Err(_) => None,
+            Ok([]) => None,                                      // EOF
+            Ok(_) => Some(self.read_message()),                  // Data available
+            Err(e) if e.kind() == ErrorKind::WouldBlock => None, // No data yet
+            Err(_) => None,                                      // Other error
         }
     }
 

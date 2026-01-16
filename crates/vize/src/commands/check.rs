@@ -292,6 +292,7 @@ fn collect_vue_files(patterns: &[String]) -> Vec<PathBuf> {
 
 /// Run type checking directly with tsgo LSP (no file I/O)
 fn run_direct(args: &CheckArgs) {
+    use rayon::prelude::*;
     use vize_atelier_core::parser::parse;
     use vize_atelier_sfc::{parse_sfc, SfcParseOptions};
     use vize_canon::lsp_client::TsgoLspClient;
@@ -315,9 +316,9 @@ fn run_direct(args: &CheckArgs) {
 
     let gen_start = Instant::now();
 
-    // Generate Virtual TypeScript for each file
+    // Generate Virtual TypeScript for each file (in parallel)
     let generated: Vec<GeneratedFile> = files
-        .iter()
+        .par_iter()
         .filter_map(|path| {
             let source = fs::read_to_string(path).ok()?;
             // Use absolute path for proper file:// URI
@@ -331,36 +332,40 @@ fn run_direct(args: &CheckArgs) {
             };
             let descriptor = parse_sfc(&source, parse_opts).ok()?;
 
-            // Get script content
-            let script_content = descriptor
-                .script_setup
-                .as_ref()
-                .map(|s| s.content.as_ref())
-                .or_else(|| descriptor.script.as_ref().map(|s| s.content.as_ref()));
+            // Get script content (combine both script and script setup if both exist)
+            let script_content: Option<String> =
+                match (descriptor.script.as_ref(), descriptor.script_setup.as_ref()) {
+                    (Some(script), Some(script_setup)) => {
+                        // Both exist: combine them (plain script first, then script setup)
+                        Some(format!("{}\n{}", script.content, script_setup.content))
+                    }
+                    (None, Some(script_setup)) => Some(script_setup.content.to_string()),
+                    (Some(script), None) => Some(script.content.to_string()),
+                    (None, None) => None,
+                };
+            let script_content_ref = script_content.as_deref();
 
             // Create allocator
             let allocator = Bump::new();
 
-            // Analyze
+            // Analyze - need to analyze both script and script_setup if both exist
             let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
 
-            let template_offset: u32 = if let Some(ref script_setup) = descriptor.script_setup {
-                analyzer.analyze_script_setup(&script_setup.content);
-                descriptor
-                    .template
-                    .as_ref()
-                    .map(|t| t.loc.start as u32)
-                    .unwrap_or(0)
-            } else if let Some(ref script) = descriptor.script {
+            // Analyze plain script first (exports types, interfaces, etc.)
+            if let Some(ref script) = descriptor.script {
                 analyzer.analyze_script_plain(&script.content);
-                descriptor
-                    .template
-                    .as_ref()
-                    .map(|t| t.loc.start as u32)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            }
+
+            // Then analyze script setup (reactive bindings, macros, etc.)
+            if let Some(ref script_setup) = descriptor.script_setup {
+                analyzer.analyze_script_setup(&script_setup.content);
+            }
+
+            let template_offset: u32 = descriptor
+                .template
+                .as_ref()
+                .map(|t| t.loc.start as u32)
+                .unwrap_or(0);
 
             let template_ast = if let Some(ref template) = descriptor.template {
                 let (root, _) = parse(&allocator, &template.content);
@@ -375,7 +380,7 @@ fn run_direct(args: &CheckArgs) {
             // Generate Virtual TS using canon's implementation
             let virtual_ts = generate_virtual_ts(
                 &summary,
-                script_content,
+                script_content_ref,
                 template_ast.as_ref(),
                 template_offset,
             );
@@ -430,19 +435,61 @@ fn run_direct(args: &CheckArgs) {
 
     let check_start = Instant::now();
 
-    // Initialize LSP client
-    let mut lsp_client = match TsgoLspClient::new(args.tsgo_path.as_deref(), None) {
-        Ok(client) => client,
-        Err(e) => {
-            eprintln!("\x1b[31mError:\x1b[0m Failed to start tsgo LSP: {}", e);
-            eprintln!();
-            eprintln!("\x1b[33mHint:\x1b[0m Install tsgo and set path:");
-            eprintln!("  npm install -g @typescript/native-preview");
-            eprintln!("  export TSGO_PATH=$(npm root -g)/../bin/tsgo");
-            eprintln!("  # or use --tsgo-path option");
-            std::process::exit(1);
-        }
-    };
+    // Find project root from first generated file (for tsconfig resolution)
+    // Skip .nuxt, .out, node_modules directories when looking for the main tsconfig
+    let project_root = generated
+        .first()
+        .map(|g| std::path::Path::new(&g.original))
+        .and_then(|p| {
+            // Walk up to find directory containing tsconfig.json
+            // that is NOT in a generated/hidden directory
+            let mut dir = p.parent();
+            let mut best_tsconfig: Option<std::path::PathBuf> = None;
+
+            while let Some(d) = dir {
+                let dir_name = d.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_generated_dir = dir_name.starts_with('.')
+                    || dir_name == "node_modules"
+                    || dir_name == "dist"
+                    || dir_name == "build";
+
+                if d.join("tsconfig.json").exists() {
+                    if is_generated_dir {
+                        // Keep looking for a better one
+                        if best_tsconfig.is_none() {
+                            best_tsconfig = Some(d.to_path_buf());
+                        }
+                    } else {
+                        // Found a tsconfig in a non-generated directory - use it
+                        return Some(d.to_string_lossy().to_string());
+                    }
+                }
+                dir = d.parent();
+            }
+
+            // Use the best found tsconfig (even if in generated dir) or fallback
+            if let Some(d) = best_tsconfig {
+                return Some(d.to_string_lossy().to_string());
+            }
+
+            // Fallback: use directory of the first file
+            p.parent().map(|d| d.to_string_lossy().to_string())
+        });
+
+    // Initialize LSP client with project root
+    let mut lsp_client =
+        match TsgoLspClient::new(args.tsgo_path.as_deref(), project_root.as_deref()) {
+            Ok(client) => client,
+            Err(e) => {
+                eprintln!("\x1b[31mError:\x1b[0m Failed to start tsgo LSP: {}", e);
+                eprintln!();
+                eprintln!("\x1b[33mHint:\x1b[0m Install tsgo and set path:");
+                eprintln!("  npm install -g @typescript/native-preview");
+                eprintln!("  export TSGO_PATH=$(npm root -g)/../bin/tsgo");
+                eprintln!("  # or use --tsgo-path option");
+                std::process::exit(1);
+            }
+        };
 
     let mut total_errors = 0;
     let mut all_diagnostics: Vec<(String, Vec<String>)> = Vec::new();
@@ -456,21 +503,24 @@ fn run_direct(args: &CheckArgs) {
         })
         .collect();
 
-    // PHASE 1: Open ALL files first so cross-imports can be resolved
+    // PHASE 1: Open ALL files fast (no waiting per file)
     for (uri, content) in &uri_map {
-        if let Err(e) = lsp_client.did_open(uri, content) {
+        if let Err(e) = lsp_client.did_open_fast(uri, content) {
             eprintln!("Failed to open {}: {}", uri, e);
         }
     }
 
-    // PHASE 2: Get diagnostics for each file (now all imports should resolve)
+    // Wait briefly for the server to process files
+    lsp_client.wait_for_diagnostics(uri_map.len());
+
+    // PHASE 2: Request diagnostics for each file
     for g in &generated {
         let virtual_uri = format!("file://{}.ts", g.original);
 
-        // Get diagnostics - try pull model first, then fallback to push model
+        // Request diagnostics explicitly (tsgo requires pull-based diagnostics)
         let diagnostics = match lsp_client.request_diagnostics(&virtual_uri) {
-            Ok(diags) if !diags.is_empty() => diags,
-            _ => lsp_client.get_diagnostics(&virtual_uri),
+            Ok(diags) => diags,
+            Err(_) => lsp_client.get_diagnostics(&virtual_uri),
         };
 
         // Collect diagnostics (filter out noise from generated code and .vue module resolution)
