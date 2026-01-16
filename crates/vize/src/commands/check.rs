@@ -38,6 +38,14 @@ pub struct CheckArgs {
     /// Quiet mode - only show summary
     #[arg(short, long)]
     pub quiet: bool,
+
+    /// Profile mode - output Virtual TS and timing to .vize directory
+    #[arg(long)]
+    pub profile: bool,
+
+    /// Path to tsgo executable (can also use TSGO_PATH env var)
+    #[arg(long)]
+    pub tsgo_path: Option<String>,
 }
 
 /// JSON output structure
@@ -287,8 +295,8 @@ fn run_direct(args: &CheckArgs) {
     use vize_atelier_core::parser::parse;
     use vize_atelier_sfc::{parse_sfc, SfcParseOptions};
     use vize_canon::lsp_client::TsgoLspClient;
+    use vize_canon::virtual_ts::generate_virtual_ts;
     use vize_carton::Bump;
-    use vize_croquis::virtual_ts::generate_virtual_ts;
     use vize_croquis::{Analyzer, AnalyzerOptions};
 
     let start = Instant::now();
@@ -364,19 +372,17 @@ fn run_direct(args: &CheckArgs) {
 
             let summary = analyzer.finish();
 
-            // Generate Virtual TS
-            let output = generate_virtual_ts(
+            // Generate Virtual TS using canon's implementation
+            let virtual_ts = generate_virtual_ts(
+                &summary,
                 script_content,
                 template_ast.as_ref(),
-                &summary.bindings,
-                None,
-                Some(std::path::Path::new(&filename)),
                 template_offset,
             );
 
             Some(GeneratedFile {
                 original: filename,
-                virtual_ts: output.content,
+                virtual_ts,
             })
         })
         .collect();
@@ -395,6 +401,29 @@ fn run_direct(args: &CheckArgs) {
         }
     }
 
+    // Profile mode: write Virtual TS and timing to .vize directory
+    if args.profile {
+        let profile_dir = PathBuf::from(".vize/check-profile");
+        if let Err(e) = fs::create_dir_all(&profile_dir) {
+            eprintln!("Failed to create profile directory: {}", e);
+        } else {
+            for g in &generated {
+                let file_name = PathBuf::from(&g.original)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let ts_path = profile_dir.join(format!("{}.ts", file_name));
+                if let Err(e) = fs::write(&ts_path, &g.virtual_ts) {
+                    eprintln!("Failed to write {}: {}", ts_path.display(), e);
+                }
+            }
+            eprintln!(
+                "\x1b[33mProfile:\x1b[0m Virtual TS files written to {}",
+                profile_dir.display()
+            );
+        }
+    }
+
     if !args.quiet {
         eprintln!("Running tsgo LSP on {} files...", generated.len());
     }
@@ -402,13 +431,15 @@ fn run_direct(args: &CheckArgs) {
     let check_start = Instant::now();
 
     // Initialize LSP client
-    let mut lsp_client = match TsgoLspClient::new(None, None) {
+    let mut lsp_client = match TsgoLspClient::new(args.tsgo_path.as_deref(), None) {
         Ok(client) => client,
         Err(e) => {
             eprintln!("\x1b[31mError:\x1b[0m Failed to start tsgo LSP: {}", e);
             eprintln!();
-            eprintln!("\x1b[33mHint:\x1b[0m Install tsgo:");
-            eprintln!("  npm install -g @anthropic/native-preview  # tsgo");
+            eprintln!("\x1b[33mHint:\x1b[0m Install tsgo and set path:");
+            eprintln!("  npm install -g @typescript/native-preview");
+            eprintln!("  export TSGO_PATH=$(npm root -g)/../bin/tsgo");
+            eprintln!("  # or use --tsgo-path option");
             std::process::exit(1);
         }
     };
@@ -416,25 +447,64 @@ fn run_direct(args: &CheckArgs) {
     let mut total_errors = 0;
     let mut all_diagnostics: Vec<(String, Vec<String>)> = Vec::new();
 
-    // Check each file via LSP
+    // Build URI map for all files (so imports can be resolved)
+    let uri_map: Vec<(String, String)> = generated
+        .iter()
+        .map(|g| {
+            let virtual_uri = format!("file://{}.ts", g.original);
+            (virtual_uri, g.virtual_ts.clone())
+        })
+        .collect();
+
+    // PHASE 1: Open ALL files first so cross-imports can be resolved
+    for (uri, content) in &uri_map {
+        if let Err(e) = lsp_client.did_open(uri, content) {
+            eprintln!("Failed to open {}: {}", uri, e);
+        }
+    }
+
+    // PHASE 2: Get diagnostics for each file (now all imports should resolve)
     for g in &generated {
         let virtual_uri = format!("file://{}.ts", g.original);
 
-        // Send virtual file to LSP
-        if let Err(e) = lsp_client.did_open(&virtual_uri, &g.virtual_ts) {
-            eprintln!("Failed to open {}: {}", g.original, e);
-            continue;
-        }
+        // Get diagnostics - try pull model first, then fallback to push model
+        let diagnostics = match lsp_client.request_diagnostics(&virtual_uri) {
+            Ok(diags) if !diags.is_empty() => diags,
+            _ => lsp_client.get_diagnostics(&virtual_uri),
+        };
 
-        // Get diagnostics
-        let diagnostics = lsp_client.get_diagnostics(&virtual_uri);
-
-        // Close virtual file
-        let _ = lsp_client.did_close(&virtual_uri);
-
-        // Collect diagnostics
+        // Collect diagnostics (filter out noise from generated code and .vue module resolution)
         let mut file_diags: Vec<String> = Vec::new();
         for diag in &diagnostics {
+            let code_num = diag.code.as_ref().and_then(|c| match c {
+                serde_json::Value::Number(n) => n.as_u64(),
+                serde_json::Value::String(s) => s.parse::<u64>().ok(),
+                _ => None,
+            });
+
+            // Skip errors from generated code and .vue module resolution:
+            // - TS2307: Cannot find module (for .vue imports - virtual files not resolvable)
+            // - TS2666: Exports not permitted in module augmentations (generated declare module)
+            // - TS2300: Duplicate identifier (generated component declarations)
+            // - TS6133: Unused variable, TS6196: Unused type, TS2578: Unused ts-expect-error
+            if matches!(code_num, Some(2307) | Some(2666)) && diag.message.contains(".vue") {
+                continue;
+            }
+            if matches!(code_num, Some(2300))
+                && (diag.message.contains("component")
+                    || diag.message.contains("VueComponent")
+                    || diag.message.contains("_default"))
+            {
+                continue;
+            }
+            if matches!(code_num, Some(6133) | Some(6196) | Some(2578))
+                && (diag.message.contains("__")
+                    || diag.message.contains("handler")
+                    || diag.message.contains("@ts-expect-error"))
+            {
+                continue;
+            }
+
             let severity = match diag.severity {
                 Some(1) => {
                     total_errors += 1;
@@ -463,6 +533,11 @@ fn run_direct(args: &CheckArgs) {
         if !file_diags.is_empty() {
             all_diagnostics.push((g.original.clone(), file_diags));
         }
+    }
+
+    // PHASE 3: Close all files
+    for (uri, _) in &uri_map {
+        let _ = lsp_client.did_close(uri);
     }
 
     let check_time = check_start.elapsed();
@@ -526,8 +601,48 @@ fn run_direct(args: &CheckArgs) {
 
     if total_errors > 0 {
         println!("  \x1b[31m{} error(s)\x1b[0m", total_errors);
-        std::process::exit(1);
     } else {
         println!("  \x1b[32mNo type errors found!\x1b[0m");
+    }
+
+    // Profile mode: write timing report
+    if args.profile {
+        let profile_dir = PathBuf::from(".vize/check-profile");
+        let timing_report = serde_json::json!({
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            "files": generated.len(),
+            "errors": total_errors,
+            "timing": {
+                "total_ms": total_time.as_secs_f64() * 1000.0,
+                "gen_ms": gen_time.as_secs_f64() * 1000.0,
+                "lsp_ms": check_time.as_secs_f64() * 1000.0,
+            },
+            "diagnostics": all_diagnostics.iter().map(|(file, diags)| {
+                serde_json::json!({
+                    "file": file,
+                    "count": diags.len(),
+                    "messages": diags,
+                })
+            }).collect::<Vec<_>>(),
+        });
+        let report_path = profile_dir.join("report.json");
+        if let Err(e) = fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&timing_report).unwrap(),
+        ) {
+            eprintln!("Failed to write timing report: {}", e);
+        } else {
+            eprintln!(
+                "\x1b[33mProfile:\x1b[0m Timing report written to {}",
+                report_path.display()
+            );
+        }
+    }
+
+    if total_errors > 0 {
+        std::process::exit(1);
     }
 }

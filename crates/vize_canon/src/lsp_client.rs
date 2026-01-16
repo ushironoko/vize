@@ -49,8 +49,20 @@ pub struct LspPosition {
 
 impl TsgoLspClient {
     /// Start tsgo LSP server
+    ///
+    /// tsgo path resolution order:
+    /// 1. Explicit tsgo_path argument
+    /// 2. TSGO_PATH environment variable
+    /// 3. Common npm global install locations
+    /// 4. "tsgo" in PATH
     pub fn new(tsgo_path: Option<&str>, working_dir: Option<&str>) -> Result<Self, String> {
-        let tsgo = tsgo_path.unwrap_or("tsgo");
+        let tsgo = tsgo_path
+            .map(String::from)
+            .or_else(|| std::env::var("TSGO_PATH").ok())
+            .or_else(Self::find_tsgo_in_common_locations)
+            .unwrap_or_else(|| "tsgo".to_string());
+
+        eprintln!("\x1b[90m[tsgo] Using: {}\x1b[0m", tsgo);
 
         let mut cmd = Command::new(tsgo);
         cmd.arg("--lsp")
@@ -273,9 +285,9 @@ impl TsgoLspClient {
         // Create channel for timeout
         let (tx, rx) = mpsc::channel();
 
-        // Spawn a thread to signal after timeout
+        // Spawn a thread to signal after timeout (200ms for fast response)
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(200));
             let _ = tx.send(());
         });
 
@@ -305,6 +317,33 @@ impl TsgoLspClient {
         }
 
         Ok(())
+    }
+
+    /// Request diagnostics using textDocument/diagnostic (LSP 3.17+)
+    pub fn request_diagnostics(&mut self, uri: &str) -> Result<Vec<LspDiagnostic>, String> {
+        let params = serde_json::json!({
+            "textDocument": {
+                "uri": uri
+            }
+        });
+
+        match self.send_request("textDocument/diagnostic", params) {
+            Ok(result) => {
+                // Parse the diagnostic response
+                if let Some(items) = result.get("items").and_then(|i| i.as_array()) {
+                    let diags: Vec<LspDiagnostic> = items
+                        .iter()
+                        .filter_map(|d| serde_json::from_value(d.clone()).ok())
+                        .collect();
+                    return Ok(diags);
+                }
+                Ok(vec![])
+            }
+            Err(_) => {
+                // Fallback to cached diagnostics from publishDiagnostics
+                Ok(self.diagnostics.get(uri).cloned().unwrap_or_default())
+            }
+        }
     }
 
     /// Try to read a message without blocking forever
@@ -359,6 +398,59 @@ impl TsgoLspClient {
         self.send_notification("exit", Value::Null)?;
         let _ = self.process.wait();
         Ok(())
+    }
+
+    /// Find tsgo in common npm global install locations
+    fn find_tsgo_in_common_locations() -> Option<String> {
+        let home = std::env::var("HOME").ok()?;
+
+        // Common npm global binary locations
+        let candidates = [
+            // npm global (custom prefix)
+            format!("{}/.npm-global/bin/tsgo", home),
+            // npm global (default)
+            format!("{}/.npm/bin/tsgo", home),
+            // pnpm global
+            format!("{}/.local/share/pnpm/tsgo", home),
+            // volta
+            format!("{}/.volta/bin/tsgo", home),
+            // mise/asdf shims
+            format!("{}/.local/share/mise/shims/tsgo", home),
+            format!("{}/.asdf/shims/tsgo", home),
+            // fnm
+            format!("{}/.local/share/fnm/node-versions/current/bin/tsgo", home),
+            // nvm (check current version)
+            format!("{}/.nvm/versions/node/current/bin/tsgo", home),
+            // Homebrew (macOS)
+            "/opt/homebrew/bin/tsgo".to_string(),
+            "/usr/local/bin/tsgo".to_string(),
+        ];
+
+        for path in candidates {
+            if std::path::Path::new(&path).exists() {
+                return Some(path);
+            }
+        }
+
+        // Also try to get from npm root -g
+        if let Ok(output) = std::process::Command::new("npm")
+            .args(["root", "-g"])
+            .output()
+        {
+            if output.status.success() {
+                let npm_root = String::from_utf8_lossy(&output.stdout);
+                let npm_root = npm_root.trim();
+                // npm root -g returns lib path, bin is sibling
+                if let Some(lib_parent) = std::path::Path::new(npm_root).parent() {
+                    let tsgo_path = lib_parent.join("bin/tsgo");
+                    if tsgo_path.exists() {
+                        return Some(tsgo_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 

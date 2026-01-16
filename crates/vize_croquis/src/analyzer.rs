@@ -965,6 +965,7 @@ fn is_keyword(s: &str) -> bool {
 /// Only extracts "root" identifiers - identifiers that are references, not property accesses.
 /// For example, in "item.name + user.id", only "item" and "user" are extracted,
 /// not "name" or "id" (which are property accesses).
+/// Also properly handles string literals and template literals.
 #[inline]
 fn extract_identifiers_fast(expr: &str) -> Vec<&str> {
     let mut identifiers = Vec::with_capacity(4);
@@ -974,6 +975,82 @@ fn extract_identifiers_fast(expr: &str) -> Vec<&str> {
 
     while i < len {
         let c = bytes[i];
+
+        // Skip single-quoted strings
+        if c == b'\'' {
+            i += 1;
+            while i < len && bytes[i] != b'\'' {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    i += 2; // Skip escaped character
+                } else {
+                    i += 1;
+                }
+            }
+            if i < len {
+                i += 1; // Skip closing quote
+            }
+            continue;
+        }
+
+        // Skip double-quoted strings
+        if c == b'"' {
+            i += 1;
+            while i < len && bytes[i] != b'"' {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    i += 2; // Skip escaped character
+                } else {
+                    i += 1;
+                }
+            }
+            if i < len {
+                i += 1; // Skip closing quote
+            }
+            continue;
+        }
+
+        // Handle template literals - only extract from ${...} expressions
+        if c == b'`' {
+            i += 1;
+            while i < len {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    i += 2; // Skip escaped character
+                    continue;
+                }
+                if bytes[i] == b'`' {
+                    i += 1; // Skip closing backtick
+                    break;
+                }
+                // Handle ${...} interpolation
+                if bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
+                    i += 2; // Skip ${
+                    let interp_start = i;
+                    let mut brace_depth = 1;
+                    while i < len && brace_depth > 0 {
+                        match bytes[i] {
+                            b'{' => brace_depth += 1,
+                            b'}' => brace_depth -= 1,
+                            _ => {}
+                        }
+                        if brace_depth > 0 {
+                            i += 1;
+                        }
+                    }
+                    // Recursively extract identifiers from interpolation content
+                    if interp_start < i {
+                        let interp_content = &expr[interp_start..i];
+                        for ident in extract_identifiers_fast(interp_content) {
+                            identifiers.push(ident);
+                        }
+                    }
+                    if i < len {
+                        i += 1; // Skip closing }
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+            continue;
+        }
 
         // Start of identifier
         if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {

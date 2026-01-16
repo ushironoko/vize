@@ -7,47 +7,20 @@
 use vize_croquis::{AnalysisSummary, BindingType};
 
 /// Vue runtime type declarations for type checking.
-/// Uses imports from 'vue' so Monaco/TypeScript can resolve actual Vue types.
-pub const VUE_RUNTIME_TYPES: &str = r#"// Import Vue types (resolved by Monaco TypeScript)
-import type {
-  Ref,
-  ComputedRef,
-  UnwrapRef,
-  Reactive,
-  ShallowRef,
-  WritableComputedRef,
-} from 'vue';
+/// Minimal declarations to avoid conflicts with user imports.
+pub const VUE_RUNTIME_TYPES: &str = r#"// Vue SFC compiler macros (available globally in <script setup>)
+declare function defineProps<T>(): T;
+declare function defineEmits<T>(): T;
+declare function defineExpose<T>(exposed?: T): void;
+declare function defineModel<T>(name?: string, options?: any): any;
+declare function withDefaults<T, D>(props: T, defaults: D): T & D;
 
-import {
-  ref,
-  reactive,
-  computed,
-  watch,
-  watchEffect,
-  unref,
-  toRef,
-  toRefs,
-  shallowRef,
-  triggerRef,
-  customRef,
-  readonly,
-  onMounted,
-  onUnmounted,
-  onBeforeMount,
-  onBeforeUnmount,
-  onUpdated,
-  onBeforeUpdate,
-  onActivated,
-  onDeactivated,
-  onErrorCaptured,
-  nextTick,
-  getCurrentInstance,
-  inject,
-  provide,
-} from 'vue';
-
-// Re-export MaybeRef type alias
-type MaybeRef<T> = T | Ref<T>;"#;
+// Vue instance context
+declare const $attrs: Record<string, unknown>;
+declare const $slots: Record<string, (...args: any[]) => any>;
+declare const $refs: Record<string, any>;
+declare const $emit: (...args: any[]) => void;
+declare const $event: Event;"#;
 
 /// Generate virtual TypeScript from Vue SFC analysis.
 ///
@@ -77,24 +50,14 @@ pub fn generate_virtual_ts(
     ts.push_str(VUE_RUNTIME_TYPES);
     ts.push_str("\n\n");
 
-    // Vue Global Instance Context
-    ts.push_str("// ========== Vue Instance Context ==========\n");
-    ts.push_str("declare const $attrs: Record<string, unknown>;\n");
-    ts.push_str("declare const $slots: Record<string, (...args: any[]) => any>;\n");
-    ts.push_str("declare const $refs: Record<string, any>;\n");
-    ts.push_str("declare const $el: HTMLElement | undefined;\n");
-    ts.push_str("declare const $parent: any;\n");
-    ts.push_str("declare const $root: any;\n");
-    ts.push_str("declare const $emit: (...args: any[]) => void;\n");
-    ts.push_str("declare const $forceUpdate: () => void;\n");
-    ts.push_str("declare const $nextTick: (callback?: () => void) => Promise<void>;\n");
-    ts.push_str("declare const $event: Event;\n\n");
+    ts.push('\n');
 
     // Setup Function (supports generics)
     // TODO: Extract generic type parameter from <script setup generic="T">
     let has_generic = false; // Will be enabled when croquis supports generic tracking
 
     // Original Script
+    // Note: .vue imports will cause TS2307 errors which are filtered in check command
     if let Some(script) = script_content {
         ts.push_str("// ========== Script Setup ==========\n");
         let script_gen_start = ts.len();
@@ -110,17 +73,54 @@ pub fn generate_virtual_ts(
         ));
     }
 
-    // Exported Types
+    // Props declarations for template access
+    let props = summary.macros.props();
+    let has_props = !props.is_empty();
+
+    // Get defineProps type args for proper typing
+    let define_props_type_args = summary
+        .macros
+        .define_props()
+        .and_then(|m| m.type_args.as_ref());
+
+    // Exported Types (define Props type first so it can be referenced)
     ts.push_str("// ========== Exported Types ==========\n");
 
-    // Props type
-    let props = summary.macros.props();
-    if !props.is_empty() {
-        ts.push_str(
-            "export type Props = typeof __props extends undefined ? {} : typeof __props;\n",
-        );
+    // Props type - use type_args from defineProps if available for strictness
+    if let Some(type_args) = define_props_type_args {
+        // Remove angle brackets from type_args (e.g., "<{ foo: string }>" -> "{ foo: string }")
+        let inner_type = type_args
+            .strip_prefix('<')
+            .and_then(|s| s.strip_suffix('>'))
+            .unwrap_or(type_args.as_str());
+        ts.push_str(&format!("export type Props = {};\n", inner_type));
+    } else if has_props {
+        ts.push_str("export type Props = {\n");
+        for prop in props {
+            let prop_type = prop.prop_type.as_deref().unwrap_or("unknown");
+            let optional = if prop.required { "" } else { "?" };
+            ts.push_str(&format!("  {}{}: {};\n", prop.name, optional, prop_type));
+        }
+        ts.push_str("};\n");
     } else {
         ts.push_str("export type Props = {};\n");
+    }
+
+    // Props declarations for template access - use actual types from Props
+    if has_props || define_props_type_args.is_some() {
+        ts.push_str("\n// ========== Props Declarations ==========\n");
+        ts.push_str("// Props are auto-unwrapped in template\n");
+        for prop in props {
+            // Use indexed access Props['propName'] for proper typing
+            let prop_type = prop
+                .prop_type
+                .as_deref()
+                .map(String::from)
+                .unwrap_or_else(|| format!("Props['{}']", prop.name));
+            ts.push_str(&format!("declare const {}: {};\n", prop.name, prop_type));
+        }
+        // Define __props with full Props type
+        ts.push_str("declare const __props: Props;\n");
     }
 
     // Emits type
@@ -187,6 +187,7 @@ pub fn generate_virtual_ts(
     // Template Type Verification
     if template_ast.is_some() {
         ts.push_str("// ========== Template Type Verification ==========\n");
+        ts.push_str("// @ts-ignore - Verification function for type checking template bindings\n");
         ts.push_str("function __verifyTemplateTypes() {\n");
 
         // Verify all bindings are accessible with proper types
@@ -249,6 +250,16 @@ pub fn generate_virtual_ts(
         ts.push_str("\n} // End of __VizeSetup\n");
     }
 
+    // Default export for Vue SFC component (required for imports to work)
+    ts.push_str("\n// ========== Default Export ==========\n");
+    ts.push_str("// Vue SFC default export for component imports\n");
+    ts.push_str("declare const __vize_component__: {\n");
+    ts.push_str("  props: Props;\n");
+    ts.push_str("  emits: Emits;\n");
+    ts.push_str("  slots: Slots;\n");
+    ts.push_str("};\n");
+    ts.push_str("export default __vize_component__;\n");
+
     ts
 }
 
@@ -257,10 +268,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_vue_runtime_types_contains_imports() {
-        assert!(VUE_RUNTIME_TYPES.contains("import type"));
-        assert!(VUE_RUNTIME_TYPES.contains("from 'vue'"));
-        assert!(VUE_RUNTIME_TYPES.contains("Ref"));
-        assert!(VUE_RUNTIME_TYPES.contains("computed"));
+    fn test_vue_runtime_types_contains_declarations() {
+        assert!(VUE_RUNTIME_TYPES.contains("declare function defineProps"));
+        assert!(VUE_RUNTIME_TYPES.contains("declare function defineEmits"));
+        assert!(VUE_RUNTIME_TYPES.contains("$attrs"));
+        assert!(VUE_RUNTIME_TYPES.contains("$slots"));
     }
 }

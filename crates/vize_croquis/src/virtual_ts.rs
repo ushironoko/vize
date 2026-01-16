@@ -191,6 +191,9 @@ impl VirtualTsGenerator {
         // Generate emits type (for component signature)
         self.generate_emits_type(bindings);
 
+        // Generate binding declarations for template access
+        self.generate_binding_declarations(bindings);
+
         self.create_output()
     }
 
@@ -288,16 +291,16 @@ impl VirtualTsGenerator {
         self.create_output()
     }
 
-    /// Generate props type definition.
+    /// Generate props type definition and declare props variables for template access.
     fn generate_props_type(&mut self, bindings: &BindingMetadata) {
-        self.write_line("// Props type");
-        self.write("type __Props = { ");
-
         let props: Vec<_> = bindings
             .bindings
             .iter()
             .filter(|(_, t)| matches!(t, BindingType::Props | BindingType::PropsAliased))
             .collect();
+
+        self.write_line("// Props type");
+        self.write("type __Props = { ");
 
         for (i, (name, _)) in props.iter().enumerate() {
             if i > 0 {
@@ -308,6 +311,15 @@ impl VirtualTsGenerator {
 
         self.write_line(" };");
         self.write_line("");
+
+        // Declare props variables for template access (they're automatically available in template)
+        if !props.is_empty() {
+            self.write_line("// Props variables for template access");
+            for (name, _) in props.iter() {
+                self.write_line(&format!("declare const {}: any;", name));
+            }
+            self.write_line("");
+        }
     }
 
     /// Generate emits type definition.
@@ -315,6 +327,41 @@ impl VirtualTsGenerator {
         self.write_line("// Emits type");
         self.write_line("type __Emits = {};");
         self.write_line("");
+    }
+
+    /// Generate binding declarations for template access.
+    /// This makes script setup variables available in template expressions.
+    fn generate_binding_declarations(&mut self, bindings: &BindingMetadata) {
+        let setup_bindings: Vec<_> = bindings
+            .bindings
+            .iter()
+            .filter(|(_, t)| {
+                matches!(
+                    t,
+                    BindingType::SetupRef
+                        | BindingType::SetupConst
+                        | BindingType::SetupLet
+                        | BindingType::SetupReactiveConst
+                        | BindingType::SetupMaybeRef
+                        | BindingType::Data
+                        | BindingType::Options
+                )
+            })
+            .collect();
+
+        if !setup_bindings.is_empty() {
+            self.write_line("// Setup bindings for template access");
+            for (name, binding_type) in setup_bindings.iter() {
+                // For refs, we need to access .value in templates (auto-unwrapped by Vue)
+                // For type checking, we just declare them as any
+                let _is_ref = matches!(
+                    binding_type,
+                    BindingType::SetupRef | BindingType::SetupMaybeRef
+                );
+                self.write_line(&format!("declare const {}: any;", name));
+            }
+            self.write_line("");
+        }
     }
     /// Visit template children.
     fn visit_children(&mut self, children: &[TemplateChildNode]) {
