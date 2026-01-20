@@ -123,6 +123,8 @@ mod tests {
             loc: BlockLocation {
                 start: 0,
                 end: content.len(),
+                tag_start: 0,
+                tag_end: content.len(),
                 start_line: 1,
                 start_column: 1,
                 end_line: 1,

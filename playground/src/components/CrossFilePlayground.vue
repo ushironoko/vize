@@ -199,6 +199,24 @@ const displayName = computed(() => state.user.name.toUpperCase())
   </div>
 </template>`,
 
+      'stores/user.ts': `import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+
+export const useUserStore = defineStore('user', () => {
+  const username = ref('john_doe')
+  const email = ref('john@example.com')
+
+  const displayName = computed(() => username.value.toUpperCase())
+
+  function updateUser(name: string, mail: string) {
+    username.value = name
+    email.value = mail
+  }
+
+  return { username, email, displayName, updateUser }
+})
+`,
+
       'StoreExample.vue': `<script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useUserStore } from './stores/user'
@@ -1255,6 +1273,7 @@ async function analyzeAll() {
 
   // Build options for cross-file analysis
   const wasmOptions: WasmCrossFileOptions = {
+    all: true, // Enable all analyzers for comprehensive analysis
     provideInject: options.value.provideInject,
     componentEmits: options.value.componentEmits,
     fallthroughAttrs: options.value.fallthroughAttrs,
@@ -1271,12 +1290,11 @@ async function analyzeAll() {
       const crossFileResult: CrossFileResult = props.compiler.analyzeCrossFile(crossFileInputs, wasmOptions);
 
       // Convert WASM diagnostics to CrossFileIssue format
-      console.log('[DEBUG] WASM diagnostics:', crossFileResult.diagnostics);
       for (const diag of crossFileResult.diagnostics) {
         const source = files.value[diag.file] || '';
         const loc = offsetToLineColumn(source, diag.offset);
         const endLoc = offsetToLineColumn(source, diag.endOffset);
-        console.log(`[DEBUG] ${diag.file}: offset=${diag.offset}-${diag.endOffset}, line=${loc.line}, col=${loc.column}, msg=${diag.message.slice(0,50)}`);
+        console.log(`[DEBUG] ${diag.file}: offset=${diag.offset}-${diag.endOffset}, line=${loc.line}, col=${loc.column}, code=${diag.code}, msg=${diag.message.slice(0,50)}`);
 
         issues.push({
           id: `issue-${++issueIdCounter}`,

@@ -86,6 +86,8 @@ pub fn parse_sfc<'a>(
             let loc = BlockLocation {
                 start: content_start,
                 end: content_end,
+                tag_start: pos,
+                tag_end: end_pos,
                 start_line: line,
                 start_column: column,
                 end_line,

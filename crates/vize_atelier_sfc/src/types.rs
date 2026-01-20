@@ -275,11 +275,19 @@ impl<'a> SfcCustomBlock<'a> {
 /// Location information for a block
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BlockLocation {
-    /// Start offset in source
+    /// Start offset of content in source (after opening tag)
     pub start: usize,
 
-    /// End offset in source
+    /// End offset of content in source (before closing tag)
     pub end: usize,
+
+    /// Start offset of opening tag (e.g., `<template>`)
+    #[serde(default)]
+    pub tag_start: usize,
+
+    /// End offset of closing tag (e.g., `</template>`)
+    #[serde(default)]
+    pub tag_end: usize,
 
     /// Start line (1-based)
     pub start_line: usize,

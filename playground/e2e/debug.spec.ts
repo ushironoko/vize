@@ -1,53 +1,49 @@
 import { test, expect } from '@playwright/test';
 
-test('Debug Default preset - ParentComponent', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForLoadState('networkidle');
+const PRESETS = [
+  'Overview',
+  'Reactivity Loss',
+  'Setup Context',
+  'Reference Escape',
+  'Provide/Inject Tree',
+  'Fallthrough Attrs',
+];
 
-  // Click CF tab
-  await page.click('text=CF');
-  await page.waitForTimeout(2000);
+for (const preset of PRESETS) {
+  test(`Debug ${preset} preset`, async ({ page }) => {
+    // Capture console logs for debugging
+    page.on('console', msg => {
+      const text = msg.text();
+      if (text.includes('[DEBUG]') && text.includes('offset=')) {
+        console.log('BROWSER:', text);
+      }
+      // Also capture WASM DEBUG logs
+      if (text.includes('[WASM DEBUG]')) {
+        console.log('WASM:', text);
+      }
+    });
 
-  // Click on ParentComponent.vue to view it
-  await page.click('text=ParentComponent.vue');
-  await page.waitForTimeout(1000);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
 
-  // Take screenshot
-  await page.screenshot({ path: 'test-results/default-parent.png', fullPage: true });
+    // Click CF tab
+    await page.click('text=CF');
+    await page.waitForTimeout(1000);
 
-  // Get diagnostics
-  const diagPanel = page.locator('.diagnostics-pane');
-  const diagText = await diagPanel.first().textContent();
-  console.log('=== DIAGNOSTICS ===');
-  console.log(diagText);
+    // Click preset
+    await page.click(`text=${preset}`);
+    await page.waitForTimeout(2000);
 
-  expect(true).toBeTruthy();
-});
+    // Take screenshot
+    const safeName = preset.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+    await page.screenshot({ path: `test-results/${safeName}.png`, fullPage: true });
 
-test('Debug Reactivity Loss preset - ChildComponent', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForLoadState('networkidle');
+    // Get diagnostics
+    const diagPanel = page.locator('.diagnostics-pane');
+    const diagText = await diagPanel.first().textContent();
+    console.log(`\n=== ${preset} DIAGNOSTICS ===`);
+    console.log(diagText);
 
-  // Click CF tab
-  await page.click('text=CF');
-  await page.waitForTimeout(1000);
-
-  // Click Reactivity Loss preset
-  await page.click('text=Reactivity Loss');
-  await page.waitForTimeout(2000);
-
-  // Click on ChildComponent.vue to view it
-  await page.click('text=ChildComponent.vue');
-  await page.waitForTimeout(1000);
-
-  // Take screenshot
-  await page.screenshot({ path: 'test-results/reactivity-loss-child.png', fullPage: true });
-
-  // Get diagnostics
-  const diagPanel = page.locator('.diagnostics-pane');
-  const diagText = await diagPanel.first().textContent();
-  console.log('=== DIAGNOSTICS ===');
-  console.log(diagText);
-
-  expect(true).toBeTruthy();
-});
+    expect(true).toBeTruthy();
+  });
+}

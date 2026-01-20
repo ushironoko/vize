@@ -60,6 +60,10 @@ pub struct TemplateInfo {
     pub binds_attrs_explicitly: bool,
     /// Whether inheritAttrs: false is set in defineOptions.
     pub inherit_attrs_disabled: bool,
+    /// Start offset of template content (relative to template block).
+    pub content_start: u32,
+    /// End offset of template content (relative to template block).
+    pub content_end: u32,
 }
 
 impl TemplateInfo {

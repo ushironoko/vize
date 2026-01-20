@@ -102,6 +102,7 @@ pub fn analyze_reactivity(
 struct InternalIssue {
     kind: ReactivityIssueKind,
     offset: u32,
+    end_offset: Option<u32>,
     source: Option<CompactString>,
 }
 
@@ -126,6 +127,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         destructured_props: props.clone(),
                     },
                     offset: inject.start,
+                    end_offset: None,
                     source: Some(inject.local_name.clone()),
                 });
             }
@@ -136,6 +138,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         destructured_props: vec![CompactString::new("(array items)")],
                     },
                     offset: inject.start,
+                    end_offset: None,
                     source: Some(inject.local_name.clone()),
                 });
             }
@@ -152,6 +155,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         destructured_props: props.clone(),
                     },
                     offset: *offset,
+                    end_offset: None,
                     source: Some(inject_var.clone()),
                 });
             }
@@ -214,6 +218,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         destructured_props: destructured_props.clone(),
                     },
                     offset: loss.start,
+                    end_offset: Some(loss.end),
                     source: Some(source_name.clone()),
                 });
             }
@@ -226,6 +231,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         ref_name: source_name.clone(),
                     },
                     offset: loss.start,
+                    end_offset: Some(loss.end),
                     source: Some(CompactString::new(format!(
                         "{}.value (destructured: {})",
                         source_name,
@@ -243,6 +249,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         target_name: target_name.clone(),
                     },
                     offset: loss.start,
+                    end_offset: Some(loss.end),
                     source: Some(source_name.clone()),
                 });
             }
@@ -252,16 +259,35 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         source_name: source_name.clone(),
                     },
                     offset: loss.start,
+                    end_offset: Some(loss.end),
                     source: Some(source_name.clone()),
                 });
             }
             ReactivityLossKind::ReactiveReassign { source_name } => {
+                // Get the original reactive type for better diagnostics
+                let original_type = analysis
+                    .reactivity
+                    .lookup(source_name.as_str())
+                    .map(|s| match s.kind {
+                        ReactiveKind::Ref => "ref",
+                        ReactiveKind::ShallowRef => "shallowRef",
+                        ReactiveKind::Reactive => "reactive",
+                        ReactiveKind::ShallowReactive => "shallowReactive",
+                        ReactiveKind::Computed => "computed",
+                        ReactiveKind::Readonly => "readonly",
+                        ReactiveKind::ShallowReadonly => "shallowReadonly",
+                        ReactiveKind::ToRef => "toRef",
+                        ReactiveKind::ToRefs => "toRefs",
+                    })
+                    .unwrap_or("reactive");
+
                 issues.push(InternalIssue {
                     kind: ReactivityIssueKind::ReactivityLost {
                         value_name: source_name.clone(),
-                        context: CompactString::new("reassignment"),
+                        context: CompactString::new(original_type),
                     },
                     offset: loss.start,
+                    end_offset: Some(loss.end),
                     source: Some(source_name.clone()),
                 });
             }
@@ -303,6 +329,7 @@ fn analyze_component_reactivity(analysis: &crate::Croquis) -> Vec<InternalIssue>
                         prop_name: source.name.clone(),
                     },
                     offset: source.declaration_offset,
+                    end_offset: None,
                     source: Some(source.name.clone()),
                 });
             }
@@ -341,64 +368,110 @@ fn create_diagnostic(file_id: FileId, issue: &InternalIssue) -> CrossFileDiagnos
         ReactivityIssueKind::DestructuredReactive {
             source_name,
             destructured_props,
-        } => CrossFileDiagnostic::new(
-            CrossFileDiagnosticKind::HydrationMismatchRisk {
-                reason: CompactString::new(format!(
-                    "Destructuring '{}' loses reactivity for: {:?}",
-                    source_name, destructured_props
-                )),
-            },
-            DiagnosticSeverity::Warning,
-            file_id,
-            issue.offset,
-            format!(
-                "Destructuring reactive object '{}' breaks reactivity connection",
-                source_name
-            ),
-        )
-        .with_suggestion(format!(
-            "Use toRefs({}) or access properties directly as {}.prop",
-            source_name, source_name
-        )),
+        } => {
+            let mut diag = CrossFileDiagnostic::new(
+                CrossFileDiagnosticKind::DestructuringBreaksReactivity {
+                    source_name: source_name.clone(),
+                    destructured_keys: destructured_props.clone(),
+                    suggestion: CompactString::new("toRefs"),
+                },
+                DiagnosticSeverity::Warning,
+                file_id,
+                issue.offset,
+                format!(
+                    "Destructuring reactive object '{}' breaks reactivity connection",
+                    source_name
+                ),
+            )
+            .with_suggestion(format!(
+                "Use toRefs({}) or access properties directly as {}.prop",
+                source_name, source_name
+            ));
+            if let Some(end) = issue.end_offset {
+                diag = diag.with_end_offset(end);
+            }
+            diag
+        }
 
-        ReactivityIssueKind::DestructuredRef { ref_name } => CrossFileDiagnostic::new(
-            CrossFileDiagnosticKind::HydrationMismatchRisk {
-                reason: CompactString::new(format!(
-                    "Destructuring ref '{}' loses reactivity",
+        ReactivityIssueKind::DestructuredRef { ref_name } => {
+            let mut diag = CrossFileDiagnostic::new(
+                CrossFileDiagnosticKind::DestructuringBreaksReactivity {
+                    source_name: ref_name.clone(),
+                    destructured_keys: vec![CompactString::new("value")],
+                    suggestion: CompactString::new("computed"),
+                },
+                DiagnosticSeverity::Warning,
+                file_id,
+                issue.offset,
+                format!(
+                    "Destructuring ref '{}' creates a non-reactive copy",
                     ref_name
-                )),
-            },
-            DiagnosticSeverity::Warning,
-            file_id,
-            issue.offset,
-            format!(
-                "Destructuring ref '{}' creates a non-reactive copy",
-                ref_name
-            ),
-        )
-        .with_suggestion(format!(
-            "Access {}.value directly or use computed(() => {}.value.prop)",
-            ref_name, ref_name
-        )),
+                ),
+            )
+            .with_suggestion(format!(
+                "Access {}.value directly or use computed(() => {}.value.prop)",
+                ref_name, ref_name
+            ));
+            if let Some(end) = issue.end_offset {
+                diag = diag.with_end_offset(end);
+            }
+            diag
+        }
 
         ReactivityIssueKind::ReactivityLost {
             value_name,
             context,
-        } => CrossFileDiagnostic::new(
-            CrossFileDiagnosticKind::HydrationMismatchRisk {
-                reason: CompactString::new(format!(
-                    "'{}' loses reactivity in {}",
-                    value_name, context
-                )),
-            },
-            DiagnosticSeverity::Warning,
-            file_id,
-            issue.offset,
-            format!(
-                "Reactive value '{}' loses reactivity when passed to {}",
-                value_name, context
-            ),
-        ),
+        } => {
+            // Check if this is a reassignment (context is a reactive type name)
+            let is_reassignment = matches!(
+                context.as_str(),
+                "ref"
+                    | "shallowRef"
+                    | "reactive"
+                    | "shallowReactive"
+                    | "computed"
+                    | "readonly"
+                    | "shallowReadonly"
+                    | "toRef"
+                    | "toRefs"
+            );
+
+            if is_reassignment {
+                let mut diag = CrossFileDiagnostic::new(
+                    CrossFileDiagnosticKind::ReassignmentBreaksReactivity {
+                        variable_name: value_name.clone(),
+                        original_type: context.clone(),
+                    },
+                    DiagnosticSeverity::Warning,
+                    file_id,
+                    issue.offset,
+                    format!("Reassigning '{}' breaks reactivity tracking", value_name),
+                )
+                .with_suggestion(
+                    "Mutate the object's properties instead, or use ref() for replaceable values",
+                );
+                if let Some(end) = issue.end_offset {
+                    diag = diag.with_end_offset(end);
+                }
+                diag
+            } else {
+                CrossFileDiagnostic::new(
+                    CrossFileDiagnosticKind::HydrationMismatchRisk {
+                        reason: CompactString::new(format!(
+                            "'{}' loses reactivity in {}",
+                            value_name, context
+                        )),
+                    },
+                    DiagnosticSeverity::Warning,
+                    file_id,
+                    issue.offset,
+                    format!(
+                        "Reactive value '{}' loses reactivity when passed to {}",
+                        value_name, context
+                    ),
+                )
+            }
+        }
 
         ReactivityIssueKind::MissingValueAccess { ref_name } => CrossFileDiagnostic::new(
             CrossFileDiagnosticKind::HydrationMismatchRisk {
@@ -414,46 +487,56 @@ fn create_diagnostic(file_id: FileId, issue: &InternalIssue) -> CrossFileDiagnos
         )
         .with_suggestion(format!("Use {}.value instead of {}", ref_name, ref_name)),
 
-        ReactivityIssueKind::ShouldUseToRefs { source_name } => CrossFileDiagnostic::new(
-            CrossFileDiagnosticKind::HydrationMismatchRisk {
-                reason: CompactString::new(format!("Use toRefs for '{}'", source_name)),
-            },
-            DiagnosticSeverity::Warning,
-            file_id,
-            issue.offset,
-            format!(
-                "Destructuring '{}' - consider using toRefs() to maintain reactivity",
-                source_name
-            ),
-        )
-        .with_suggestion(format!(
-            "const {{ prop1, prop2 }} = toRefs({})",
-            source_name
-        )),
+        ReactivityIssueKind::ShouldUseToRefs { source_name } => {
+            let mut diag = CrossFileDiagnostic::new(
+                CrossFileDiagnosticKind::SpreadBreaksReactivity {
+                    source_name: source_name.clone(),
+                    source_type: CompactString::new("reactive"),
+                },
+                DiagnosticSeverity::Warning,
+                file_id,
+                issue.offset,
+                format!("Spreading '{}' creates a non-reactive copy", source_name),
+            )
+            .with_suggestion(format!(
+                "Use toRefs({}) to maintain reactivity, or toRaw({}) for intentional copy",
+                source_name, source_name
+            ));
+            if let Some(end) = issue.end_offset {
+                diag = diag.with_end_offset(end);
+            }
+            diag
+        }
 
         ReactivityIssueKind::ReactiveToPlain {
             source_name,
             target_name,
-        } => CrossFileDiagnostic::new(
-            CrossFileDiagnosticKind::HydrationMismatchRisk {
-                reason: CompactString::new(format!(
-                    "Assigning '{}' to plain '{}' loses reactivity",
+        } => {
+            let mut diag = CrossFileDiagnostic::new(
+                CrossFileDiagnosticKind::ValueExtractionBreaksReactivity {
+                    source_name: source_name.clone(),
+                    extracted_value: target_name.clone(),
+                },
+                DiagnosticSeverity::Warning,
+                file_id,
+                issue.offset,
+                format!(
+                    "Assigning reactive '{}' to '{}' creates a non-reactive copy",
                     source_name, target_name
-                )),
-            },
-            DiagnosticSeverity::Warning,
-            file_id,
-            issue.offset,
-            format!(
-                "Assigning reactive '{}' to '{}' creates a non-reactive copy",
-                source_name, target_name
-            ),
-        )
-        .with_suggestion("Use computed() or keep the reactive reference"),
+                ),
+            )
+            .with_suggestion("Use computed() or keep the reactive reference");
+            if let Some(end) = issue.end_offset {
+                diag = diag.with_end_offset(end);
+            }
+            diag
+        }
 
         ReactivityIssueKind::ShouldUseStoreToRefs { store_name } => CrossFileDiagnostic::new(
-            CrossFileDiagnosticKind::HydrationMismatchRisk {
-                reason: CompactString::new(format!("Use storeToRefs for '{}'", store_name)),
+            CrossFileDiagnosticKind::DestructuringBreaksReactivity {
+                source_name: store_name.clone(),
+                destructured_keys: vec![],
+                suggestion: CompactString::new("storeToRefs"),
             },
             DiagnosticSeverity::Warning,
             file_id,

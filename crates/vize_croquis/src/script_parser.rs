@@ -10,8 +10,8 @@
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, BindingPatternKind, CallExpression, Declaration, Expression, ObjectPropertyKind,
-    PropertyKey, Statement, TSType, VariableDeclarationKind,
+    Argument, AssignmentTarget, BindingPatternKind, CallExpression, Declaration, Expression,
+    ObjectPropertyKind, PropertyKey, Statement, TSType, VariableDeclarationKind,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
@@ -435,6 +435,21 @@ fn process_statement(result: &mut ScriptParseResult, stmt: &Statement<'_>, sourc
             });
         }
 
+        // Block statements at top level (scoped blocks)
+        Statement::BlockStatement(block) => {
+            result.scopes.enter_block_scope(
+                BlockScopeData {
+                    kind: BlockKind::Block,
+                },
+                block.span.start,
+                block.span.end,
+            );
+            for stmt in block.body.iter() {
+                walk_statement(result, stmt, source);
+            }
+            result.scopes.exit_scope();
+        }
+
         _ => {}
     }
 }
@@ -542,24 +557,7 @@ fn process_variable_declarator(
                     walk_expression(result, init, source);
 
                     // Check for ref.value extraction: const x = someRef.value
-                    if let Expression::StaticMemberExpression(member) = init {
-                        if member.property.name.as_str() == "value" {
-                            if let Expression::Identifier(obj_id) = &member.object {
-                                let ref_name = CompactString::new(obj_id.name.as_str());
-                                if result.reactivity.needs_value_access(ref_name.as_str()) {
-                                    use crate::reactivity::{ReactivityLoss, ReactivityLossKind};
-                                    result.reactivity.add_loss(ReactivityLoss {
-                                        kind: ReactivityLossKind::RefValueExtract {
-                                            source_name: ref_name,
-                                            target_name: CompactString::new(name),
-                                        },
-                                        start: member.span.start,
-                                        end: member.span.end,
-                                    });
-                                }
-                            }
-                        }
-                    }
+                    check_ref_value_extraction(result, &declarator.id, init);
                 }
             }
 
@@ -1173,6 +1171,41 @@ fn detect_provide_inject_call(
     }
 }
 
+/// Check for ref.value extraction to a plain variable (loses reactivity)
+/// e.g., `const x = someRef.value` or `const primitiveValue = countRef.value`
+#[inline]
+fn check_ref_value_extraction(
+    result: &mut ScriptParseResult,
+    id: &oxc_ast::ast::BindingPattern<'_>,
+    init: &Expression<'_>,
+) {
+    // Only check simple identifier bindings
+    let target_name = match &id.kind {
+        BindingPatternKind::BindingIdentifier(id) => id.name.as_str(),
+        _ => return,
+    };
+
+    // Check for ref.value pattern: someRef.value
+    if let Expression::StaticMemberExpression(member) = init {
+        if member.property.name.as_str() == "value" {
+            if let Expression::Identifier(obj_id) = &member.object {
+                let ref_name = CompactString::new(obj_id.name.as_str());
+                if result.reactivity.needs_value_access(ref_name.as_str()) {
+                    use crate::reactivity::{ReactivityLoss, ReactivityLossKind};
+                    result.reactivity.add_loss(ReactivityLoss {
+                        kind: ReactivityLossKind::RefValueExtract {
+                            source_name: ref_name,
+                            target_name: CompactString::new(target_name),
+                        },
+                        start: member.span.start,
+                        end: member.span.end,
+                    });
+                }
+            }
+        }
+    }
+}
+
 /// Extract a provide/inject key from an argument
 fn extract_provide_key(arg: &Argument<'_>, source: &str) -> Option<ProvideKey> {
     match arg {
@@ -1512,6 +1545,16 @@ fn walk_expression(result: &mut ScriptParseResult, expr: &Expression<'_>, source
 
         // Assignment
         Expression::AssignmentExpression(assign) => {
+            // Check for reactive variable reassignment: state = newValue
+            if let AssignmentTarget::AssignmentTargetIdentifier(id) = &assign.left {
+                let var_name = CompactString::new(id.name.as_str());
+                if result.reactivity.is_reactive(var_name.as_str()) {
+                    // Use id.span for the variable name, assign.span for the full expression
+                    result
+                        .reactivity
+                        .record_reassign(var_name, id.span.start, assign.span.end);
+                }
+            }
             walk_expression(result, &assign.right, source);
         }
 
@@ -1684,11 +1727,15 @@ fn walk_statement(result: &mut ScriptParseResult, stmt: &Statement<'_>, source: 
             walk_expression(result, &expr_stmt.expression, source);
         }
         Statement::VariableDeclaration(var_decl) => {
-            // Add variable bindings to current scope
+            // Add variable bindings to current scope and check for reactivity losses
             for decl in var_decl.declarations.iter() {
                 add_binding_pattern_to_scope(result, &decl.id, decl.span.start);
                 if let Some(init) = &decl.init {
                     walk_expression(result, init, source);
+
+                    // Check for ref.value extraction: const x = someRef.value
+                    // This also applies in block scopes (e.g., { const x = countRef.value })
+                    check_ref_value_extraction(result, &decl.id, init);
                 }
             }
         }
@@ -2422,6 +2469,34 @@ mod tests {
             } => {
                 assert_eq!(source_name.as_str(), "count");
                 assert_eq!(target_name.as_str(), "value");
+            }
+            _ => panic!("Expected RefValueExtract, got {:?}", losses[0].kind),
+        }
+    }
+
+    #[test]
+    fn test_ref_value_extract_in_block_scope() {
+        use crate::reactivity::ReactivityLossKind;
+
+        let result = parse_script_setup(
+            r#"
+            const countRef = ref(0)
+            {
+                const primitiveValue = countRef.value
+            }
+        "#,
+        );
+
+        assert!(result.reactivity.has_losses());
+        let losses = result.reactivity.losses();
+        assert_eq!(losses.len(), 1);
+        match &losses[0].kind {
+            ReactivityLossKind::RefValueExtract {
+                source_name,
+                target_name,
+            } => {
+                assert_eq!(source_name.as_str(), "countRef");
+                assert_eq!(target_name.as_str(), "primitiveValue");
             }
             _ => panic!("Expected RefValueExtract, got {:?}", losses[0].kind),
         }

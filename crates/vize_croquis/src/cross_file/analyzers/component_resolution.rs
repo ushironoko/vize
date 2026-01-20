@@ -230,6 +230,7 @@ fn resolve_import(
 
     // Handle relative imports
     if specifier.starts_with('.') {
+        // First, try to resolve using the directory path
         if let Some(dir) = from_dir {
             // Try with common extensions
             for ext in &[
@@ -248,6 +249,32 @@ fn resolve_import(
                 }
             }
         }
+
+        // Fallback: try to match by filename only (for flat file structures like playground presets)
+        // Extract the filename from the specifier (e.g., "./ChildComponent.vue" -> "ChildComponent.vue")
+        let filename = specifier
+            .strip_prefix("./")
+            .or_else(|| specifier.strip_prefix("../"))
+            .unwrap_or(specifier);
+
+        // Try with common extensions if no extension is provided
+        let extensions = if filename.contains('.') {
+            vec![""]
+        } else {
+            vec![".vue", ".ts", ".tsx", ".js", ".jsx", ""]
+        };
+
+        for ext in extensions {
+            let target = format!("{}{}", filename, ext);
+            // Check if any file in the registry ends with this filename
+            for entry in registry.iter() {
+                let entry_path = entry.path.to_string_lossy();
+                if entry_path.ends_with(&target) || entry_path == target {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 

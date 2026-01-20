@@ -17,6 +17,18 @@ fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Convert UTF-8 byte offset to character (code point) offset.
+/// OXC uses UTF-8 byte offsets, but JavaScript strings use UTF-16 code units.
+/// For most cases (ASCII + BMP characters), this converts to character count.
+fn utf8_byte_to_char_offset(content: &str, byte_offset: u32) -> u32 {
+    let byte_offset = byte_offset as usize;
+    if byte_offset >= content.len() {
+        return content.chars().count() as u32;
+    }
+    // Count characters up to the byte offset
+    content[..byte_offset].chars().count() as u32
+}
+
 use crate::{CompileResult, CompilerOptions};
 use vize_atelier_core::options::CodegenMode;
 use vize_atelier_core::parser::parse;
@@ -1482,7 +1494,6 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
 
     // Parse options
     let cross_file_opts = parse_cross_file_options(&options);
-    let provide_inject_enabled = cross_file_opts.provide_inject;
 
     // Create analyzer
     let mut analyzer = CrossFileAnalyzer::new(cross_file_opts);
@@ -1506,8 +1517,13 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
     }
 
     // Process each file - for .vue files, analyze both script and template
-    // Track script start offsets for adjusting diagnostic positions later
+    // Track script and template offsets for adjusting diagnostic positions later
     let mut script_offsets: std::collections::HashMap<u32, usize> =
+        std::collections::HashMap::new();
+    // Template spans: (tag_start, content_start) for template positioning
+    // - tag_start: position of '<' in <template>
+    // - content_start: position right after '>' in <template> (where content begins)
+    let mut template_spans: std::collections::HashMap<u32, (usize, usize)> =
         std::collections::HashMap::new();
 
     for (path, source) in &file_data {
@@ -1587,11 +1603,20 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
                     );
                 }
 
+                // Record template opening tag span before adding file
+                // Use tag_start and content start (which is right after '>') to cover just <template...>
+                let template_span = descriptor
+                    .template
+                    .as_ref()
+                    .map(|t| (t.loc.tag_start, t.loc.start))
+                    .unwrap_or((0, 0));
+
                 // Add file with pre-computed analysis
                 let file_id = analyzer.add_file_with_analysis(std_path, script_content, analysis);
 
-                // Record the script start offset for this file
+                // Record the script and template offsets for this file
                 script_offsets.insert(file_id.as_u32(), script_start);
+                template_spans.insert(file_id.as_u32(), template_span);
             }
         } else {
             // For .ts/.js files, use directly
@@ -1603,49 +1628,32 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
     // This ensures edges are created even when files are processed out of order
     analyzer.rebuild_component_edges();
 
-    // Debug: log graph state
-    web_sys::console::log_1(
-        &format!(
-            "[WASM DEBUG] Graph nodes: {}, Options: provideInject={}",
-            analyzer.graph().nodes().count(),
-            provide_inject_enabled
-        )
-        .into(),
-    );
-    for node in analyzer.graph().nodes() {
-        web_sys::console::log_1(
-            &format!(
-                "[WASM DEBUG]   {} component_name={:?} imports={:?}",
-                node.path, node.component_name, node.imports
-            )
-            .into(),
-        );
-    }
-
     // Run cross-file analysis
     let result = analyzer.analyze();
 
-    // Debug: log result
-    web_sys::console::log_1(
-        &format!(
-            "[WASM DEBUG] Analysis result: {} diagnostics, {} matches",
-            result.diagnostics.len(),
-            result.provide_inject_matches.len()
-        )
-        .into(),
-    );
-
-    // Build file path map for JSON output
+    // Build file path map and content map for JSON output and offset conversion
     let mut file_paths: Vec<String> = Vec::new();
+    let mut file_contents: Vec<String> = Vec::new();
+    for (path, source) in &file_data {
+        file_paths.push(path.clone());
+        file_contents.push(source.clone());
+    }
+    // Also create a map from file_id to index in file_data
+    let mut file_id_to_index: std::collections::HashMap<u32, usize> =
+        std::collections::HashMap::new();
     for entry in analyzer.registry().iter() {
-        while file_paths.len() <= entry.id.as_u32() as usize {
-            file_paths.push(String::new());
+        // Find the matching file in file_data by path
+        let entry_path = entry.path.to_string_lossy();
+        for (idx, (path, _)) in file_data.iter().enumerate() {
+            if path == entry_path.as_ref() || path.ends_with(entry_path.as_ref()) {
+                file_id_to_index.insert(entry.id.as_u32(), idx);
+                break;
+            }
         }
-        file_paths[entry.id.as_u32() as usize] = entry.path.to_string_lossy().to_string();
     }
 
     // Convert diagnostics to JSON
-    // Adjust offsets for .vue files to account for script block position
+    // Adjust offsets for .vue files to account for script/template block position
     let diagnostics: Vec<serde_json::Value> = result
         .diagnostics
         .iter()
@@ -1655,12 +1663,56 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
                 .cloned()
                 .unwrap_or_default();
 
-            // Adjust primary offset for SFC script position
-            let primary_offset_adjustment = script_offsets
-                .get(&d.primary_file.as_u32())
-                .copied()
-                .unwrap_or(0) as u32;
-            let adjusted_primary_offset = d.primary_offset + primary_offset_adjustment;
+            // Determine if this diagnostic is template-related or script-related
+            // Template-related diagnostics need template offset, script-related need script offset
+            let is_template_diagnostic = is_template_related_diagnostic(&d.kind);
+            // Some template diagnostics cover the entire <template> tag (e.g., multi-root)
+            let is_template_tag_diagnostic = is_template_tag_span_diagnostic(&d.kind);
+
+            // Adjust primary offset for SFC position (template or script)
+            let (adjusted_primary_offset, adjusted_primary_end_offset) =
+                if is_template_tag_diagnostic {
+                    // For diagnostics that span the entire template tag, use tag_start and tag_end directly
+                    let (tag_start, tag_end) = template_spans
+                        .get(&d.primary_file.as_u32())
+                        .copied()
+                        .unwrap_or((0, 0));
+                    (tag_start as u32, tag_end as u32)
+                } else if is_template_diagnostic {
+                    // For template-content diagnostics, add content_start offset
+                    // (content_start is the position right after <template>)
+                    let (_, content_start) = template_spans
+                        .get(&d.primary_file.as_u32())
+                        .copied()
+                        .unwrap_or((0, 0));
+                    (
+                        d.primary_offset + content_start as u32,
+                        d.primary_end_offset + content_start as u32,
+                    )
+                } else {
+                    // For script diagnostics, add script offset and convert UTF-8 byte offset to char offset
+                    let script_offset = script_offsets
+                        .get(&d.primary_file.as_u32())
+                        .copied()
+                        .unwrap_or(0) as u32;
+
+                    // Get the file content for UTF-8 to char offset conversion
+                    let file_content = file_id_to_index
+                        .get(&d.primary_file.as_u32())
+                        .and_then(|idx| file_contents.get(*idx))
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+
+                    // Calculate UTF-8 byte offsets first
+                    let utf8_start = d.primary_offset + script_offset;
+                    let utf8_end = d.primary_end_offset + script_offset;
+
+                    // Convert to character offsets (handles emojis and multi-byte chars)
+                    let char_start = utf8_byte_to_char_offset(file_content, utf8_start);
+                    let char_end = utf8_byte_to_char_offset(file_content, utf8_end);
+
+                    (char_start, char_end)
+                };
 
             let related_locations: Vec<serde_json::Value> = d
                 .related_files
@@ -1676,10 +1728,19 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
                             .cloned()
                             .unwrap_or_default();
 
-                        // Adjust related location offset for SFC script position
+                        // Related locations use script offsets (they reference components, not template positions)
                         let offset_adjustment =
                             script_offsets.get(&file_id.as_u32()).copied().unwrap_or(0) as u32;
-                        let adjusted_offset = offset + offset_adjustment;
+                        let utf8_offset = offset + offset_adjustment;
+
+                        // Convert to character offset
+                        let related_content = file_id_to_index
+                            .get(&file_id.as_u32())
+                            .and_then(|idx| file_contents.get(*idx))
+                            .map(|s| s.as_str())
+                            .unwrap_or("");
+                        let adjusted_offset =
+                            utf8_byte_to_char_offset(related_content, utf8_offset);
 
                         serde_json::json!({
                             "file": file_path,
@@ -1691,10 +1752,8 @@ pub fn analyze_cross_file_wasm(files: JsValue, options: JsValue) -> Result<JsVal
                 .collect();
 
             let kind_str = diagnostic_kind_to_string(&d.kind);
-            let code = diagnostic_kind_to_code(&d.kind);
-
-            // Adjust end offset for SFC script position
-            let adjusted_primary_end_offset = d.primary_end_offset + primary_offset_adjustment;
+            // Use the code() method from diagnostics.rs for unified code naming
+            let code = d.code();
 
             serde_json::json!({
                 "type": kind_str,
@@ -1873,86 +1932,36 @@ fn diagnostic_kind_to_string(
     }
 }
 
-/// Convert diagnostic kind to error code
-fn diagnostic_kind_to_code(
+/// Determine if a diagnostic is template-related (uses template offsets)
+/// vs script-related (uses script offsets)
+fn is_template_related_diagnostic(
     kind: &vize_croquis::cross_file::CrossFileDiagnosticKind,
-) -> &'static str {
+) -> bool {
     use vize_croquis::cross_file::CrossFileDiagnosticKind::*;
-    match kind {
-        // Fallthrough attributes
-        UnusedFallthroughAttrs { .. } => "cross-file/unused-fallthrough-attrs",
-        InheritAttrsDisabledUnused => "cross-file/inherit-attrs-unused",
-        MultiRootMissingAttrs => "cross-file/multi-root-missing-attrs",
-        // Component emits
-        UndeclaredEmit { .. } => "cross-file/undeclared-emit",
-        UnusedEmit { .. } => "cross-file/unused-emit",
-        UnmatchedEventListener { .. } => "cross-file/unmatched-listener",
-        // Event bubbling
-        UnhandledEvent { .. } => "cross-file/unhandled-event",
-        EventModifierIssue { .. } => "cross-file/event-modifier-issue",
-        // Provide/Inject
-        UnmatchedInject { .. } => "cross-file/unmatched-inject",
-        UnusedProvide { .. } => "cross-file/unused-provide",
-        ProvideInjectTypeMismatch { .. } => "cross-file/provide-inject-type-mismatch",
-        ProvideInjectWithoutSymbol { .. } => "cross-file/provide-inject-no-symbol",
-        // Unique IDs
-        DuplicateElementId { .. } => "cross-file/duplicate-id",
-        NonUniqueIdInLoop { .. } => "cross-file/non-unique-id-loop",
-        // SSR boundary
-        BrowserApiInSsr { .. } => "cross-file/browser-api-in-ssr",
-        AsyncWithoutSuspense { .. } => "cross-file/async-without-suspense",
-        HydrationMismatchRisk { .. } => "cross-file/hydration-mismatch",
-        // Error boundary
-        UncaughtErrorBoundary => "cross-file/uncaught-error",
-        MissingSuspenseBoundary => "cross-file/missing-suspense",
-        SuspenseWithoutFallback => "cross-file/suspense-no-fallback",
-        // Circular dependency
-        CircularDependency { .. } => "cross-file/circular-dependency",
-        DeepImportChain { .. } => "cross-file/deep-import-chain",
-        // Component resolution
-        UnregisteredComponent { .. } => "cross-file/unregistered-component",
-        UnresolvedImport { .. } => "cross-file/unresolved-import",
-        // Props validation
-        UndeclaredProp { .. } => "cross-file/undeclared-prop",
-        MissingRequiredProp { .. } => "cross-file/missing-required-prop",
-        PropTypeMismatch { .. } => "cross-file/prop-type-mismatch",
-        // Slot validation
-        UndefinedSlot { .. } => "cross-file/undefined-slot",
-        // Setup context violations
-        ReactivityOutsideSetup { .. } => "cross-file/reactivity-outside-setup",
-        LifecycleOutsideSetup { .. } => "cross-file/lifecycle-outside-setup",
-        WatcherOutsideSetup { .. } => "cross-file/watcher-outside-setup",
-        DependencyInjectionOutsideSetup { .. } => "cross-file/di-outside-setup",
-        ComposableOutsideSetup { .. } => "cross-file/composable-outside-setup",
-        // Reactivity loss
-        SpreadBreaksReactivity { .. } => "cross-file/spread-breaks-reactivity",
-        ReassignmentBreaksReactivity { .. } => "cross-file/reassign-breaks-reactivity",
-        ValueExtractionBreaksReactivity { .. } => "cross-file/value-extraction-breaks-reactivity",
-        DestructuringBreaksReactivity { .. } => "cross-file/destructure-breaks-reactivity",
-        // Reference escape
-        ReactiveReferenceEscapes { .. } => "cross-file/reference-escapes",
-        ReactiveObjectMutatedAfterEscape { .. } => "cross-file/mutated-after-escape",
-        // Circular reactive dependency
-        CircularReactiveDependency { .. } => "cross-file/circular-reactive-dependency",
-        // Watch patterns
-        WatchMutationCanBeComputed { .. } => "cross-file/watch-can-be-computed",
-        // DOM access
-        DomAccessWithoutNextTick { .. } => "cross-file/dom-without-next-tick",
-        // Ultra-strict diagnostics
-        ComputedHasSideEffects { .. } => "cross-file/computed-side-effects",
-        ReactiveStateAtModuleScope { .. } => "cross-file/module-scope-reactive",
-        TemplateRefAccessedBeforeMount { .. } => "cross-file/template-ref-before-mount",
-        AsyncBoundaryCrossing { .. } => "cross-file/async-boundary-crossing",
-        ClosureCapturesReactive { .. } => "cross-file/closure-captures-reactive",
-        ObjectIdentityComparison { .. } => "cross-file/object-identity-comparison",
-        ReactiveStateExported { .. } => "cross-file/reactive-state-exported",
-        ShallowReactiveDeepAccess { .. } => "cross-file/shallow-reactive-deep-access",
-        ToRawMutation { .. } => "cross-file/to-raw-mutation",
-        EventListenerWithoutCleanup { .. } => "cross-file/event-listener-no-cleanup",
-        ArrayMutationNotTriggering { .. } => "cross-file/array-mutation-not-triggering",
-        PiniaGetterWithoutStoreToRefs { .. } => "cross-file/pinia-getter-no-store-to-refs",
-        WatchEffectWithAsync { .. } => "cross-file/watch-effect-async",
-        // Setup context violation (unified)
-        SetupContextViolation { .. } => "cross-file/setup-context-violation",
-    }
+    matches!(
+        kind,
+        // Template-based diagnostics (positions in template block)
+        UnmatchedEventListener { .. }
+            | UndeclaredProp { .. }
+            | MissingRequiredProp { .. }
+            | PropTypeMismatch { .. }
+            | UndefinedSlot { .. }
+            | UnregisteredComponent { .. }
+            | UnusedFallthroughAttrs { .. }
+            | MultiRootMissingAttrs
+            | InheritAttrsDisabledUnused
+    )
+}
+
+/// Determine if a diagnostic should span the entire <template> tag
+/// (uses tag_start and tag_end directly, not relative offsets)
+fn is_template_tag_span_diagnostic(
+    kind: &vize_croquis::cross_file::CrossFileDiagnosticKind,
+) -> bool {
+    use vize_croquis::cross_file::CrossFileDiagnosticKind::*;
+    matches!(
+        kind,
+        // These diagnostics apply to the entire template, not a specific location
+        MultiRootMissingAttrs | InheritAttrsDisabledUnused | UnusedFallthroughAttrs { .. }
+    )
 }

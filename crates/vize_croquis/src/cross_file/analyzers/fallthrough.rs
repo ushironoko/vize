@@ -29,6 +29,10 @@ pub struct FallthroughInfo {
     pub passed_attrs: FxHashSet<CompactString>,
     /// Props declared by this component.
     pub declared_props: FxHashSet<CompactString>,
+    /// Template content start offset (relative to template block).
+    pub template_start: u32,
+    /// Template content end offset (relative to template block).
+    pub template_end: u32,
 }
 
 impl FallthroughInfo {
@@ -97,6 +101,8 @@ pub fn analyze_fallthrough(
             root_element_count: template_info.root_element_count,
             passed_attrs: FxHashSet::default(), // Will be filled later
             declared_props,
+            template_start: template_info.content_start,
+            template_end: template_info.content_end,
         };
 
         infos.push(info);
@@ -146,12 +152,14 @@ pub fn analyze_fallthrough(
                 .any(|attr| !info.declared_props.contains(attr));
 
             if has_fallthrough {
+                // Use offset 0 to point to <template> tag start (wasm.rs adds tag_start offset)
                 diagnostics.push(
-                    CrossFileDiagnostic::new(
+                    CrossFileDiagnostic::with_span(
                         CrossFileDiagnosticKind::MultiRootMissingAttrs,
                         DiagnosticSeverity::Warning,
                         info.file_id,
                         0,
+                        info.template_end - info.template_start,
                         "Component has multiple root elements but $attrs is not explicitly bound",
                     )
                     .with_suggestion(
@@ -163,12 +171,14 @@ pub fn analyze_fallthrough(
 
         // Check for inheritAttrs: false without $attrs usage
         if info.inherit_attrs_disabled && !info.uses_attrs && !info.binds_attrs {
+            // Use offset 0 to point to <template> tag start (wasm.rs adds tag_start offset)
             diagnostics.push(
-                CrossFileDiagnostic::new(
+                CrossFileDiagnostic::with_span(
                     CrossFileDiagnosticKind::InheritAttrsDisabledUnused,
                     DiagnosticSeverity::Warning,
                     info.file_id,
                     0,
+                    info.template_end - info.template_start,
                     "inheritAttrs is disabled but $attrs is not used anywhere",
                 )
                 .with_suggestion("Use v-bind=\"$attrs\" or $attrs.class/$attrs.style in template"),
@@ -188,14 +198,16 @@ pub fn analyze_fallthrough(
             .collect();
 
         if !unused_attrs.is_empty() && !info.binds_attrs && info.root_element_count > 1 {
+            // Use offset 0 to point to <template> tag start (wasm.rs adds tag_start offset)
             diagnostics.push(
-                CrossFileDiagnostic::new(
+                CrossFileDiagnostic::with_span(
                     CrossFileDiagnosticKind::UnusedFallthroughAttrs {
                         passed_attrs: unused_attrs.clone(),
                     },
                     DiagnosticSeverity::Info,
                     info.file_id,
                     0,
+                    info.template_end - info.template_start,
                     format!(
                         "Attributes {:?} are passed but not used (component has multiple roots)",
                         unused_attrs
@@ -211,13 +223,18 @@ pub fn analyze_fallthrough(
 
 /// Check if inheritAttrs: false is set in the component options.
 fn check_inherit_attrs_disabled(analysis: &crate::Croquis) -> bool {
-    // Look for defineOptions or script block with inheritAttrs: false
-    // This is a simplified check - a full implementation would parse the AST
-    analysis
-        .macros
-        .all_calls()
-        .iter()
-        .any(|call| call.name == "defineOptions")
+    // Look for defineOptions with inheritAttrs: false in runtime_args
+    analysis.macros.all_calls().iter().any(|call| {
+        if call.name != "defineOptions" {
+            return false;
+        }
+        // Check if runtime_args contains "inheritAttrs: false" or "inheritAttrs:false"
+        if let Some(ref args) = call.runtime_args {
+            args.contains("inheritAttrs") && args.contains("false")
+        } else {
+            false
+        }
+    })
 }
 
 /// Extract attributes passed to a child component.
@@ -270,6 +287,8 @@ mod tests {
             root_element_count: 1,
             passed_attrs: FxHashSet::default(),
             declared_props: FxHashSet::default(),
+            template_start: 0,
+            template_end: 0,
         };
         assert!(!info.has_potential_issues());
 

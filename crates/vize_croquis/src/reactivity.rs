@@ -272,6 +272,17 @@ impl ReactivityTracker {
         }
     }
 
+    /// Record reassignment of a reactive variable
+    pub fn record_reassign(&mut self, source_name: CompactString, start: u32, end: u32) {
+        if self.is_reactive(source_name.as_str()) {
+            self.losses.push(ReactivityLoss {
+                kind: ReactivityLossKind::ReactiveReassign { source_name },
+                start,
+                end,
+            });
+        }
+    }
+
     /// Get all detected reactivity losses
     #[inline]
     pub fn losses(&self) -> &[ReactivityLoss] {

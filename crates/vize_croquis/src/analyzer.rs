@@ -220,6 +220,10 @@ impl Analyzer {
         }
         self.summary.template_info.root_element_count = root_element_count;
 
+        // Store template content range for diagnostics
+        self.summary.template_info.content_start = root.loc.start.offset;
+        self.summary.template_info.content_end = root.loc.end.offset;
+
         // Single-pass template traversal
         for child in root.children.iter() {
             self.visit_template_child(child, &mut Vec::new());
@@ -421,6 +425,15 @@ impl Analyzer {
                             );
                         }
 
+                        // Track $attrs usage for fallthrough analysis
+                        if content.contains("$attrs") {
+                            self.summary.template_info.uses_attrs = true;
+                            // v-bind="$attrs" without arg means explicit full binding
+                            if dir.arg.is_none() && content.trim() == "$attrs" {
+                                self.summary.template_info.binds_attrs_explicitly = true;
+                            }
+                        }
+
                         // Extract :key for v-for
                         if let Some(ref arg) = dir.arg {
                             let arg_name = match arg {
@@ -429,6 +442,62 @@ impl Analyzer {
                             };
                             if arg_name == "key" {
                                 key_expression = Some(CompactString::new(content));
+                            }
+                        }
+
+                        // Handle bind callbacks (:class="(item) => ...")
+                        if self.options.analyze_template_scopes {
+                            if let Some(params) = extract_inline_callback_params(content) {
+                                let context = dir
+                                    .arg
+                                    .as_ref()
+                                    .map(|arg| match arg {
+                                        ExpressionNode::Simple(s) => {
+                                            CompactString::new(format!(":{}callback", s.content))
+                                        }
+                                        ExpressionNode::Compound(c) => {
+                                            CompactString::new(format!(":{}callback", c.loc.source))
+                                        }
+                                    })
+                                    .unwrap_or_else(|| CompactString::const_new(":bind callback"));
+
+                                // Create callback scope
+                                self.summary.scopes.enter_template_callback_scope(
+                                    CallbackScopeData {
+                                        param_names: params.into_iter().collect(),
+                                        context,
+                                    },
+                                    dir.loc.start.offset,
+                                    dir.loc.end.offset,
+                                );
+
+                                let params_added: Vec<_> = self
+                                    .summary
+                                    .scopes
+                                    .current_scope()
+                                    .bindings()
+                                    .map(|(name, _)| CompactString::new(name))
+                                    .collect();
+
+                                for param in &params_added {
+                                    scope_vars.push(param.clone());
+                                }
+
+                                if self.options.detect_undefined && self.script_analyzed {
+                                    self.check_expression_refs(
+                                        exp,
+                                        scope_vars,
+                                        dir.loc.start.offset,
+                                    );
+                                }
+
+                                for _ in &params_added {
+                                    scope_vars.pop();
+                                }
+
+                                self.summary.scopes.exit_scope();
+                            } else if self.options.detect_undefined && self.script_analyzed {
+                                self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
                             }
                         }
                     }
@@ -680,73 +749,6 @@ impl Analyzer {
                                     );
                                 }
                             }
-                        }
-                    }
-                }
-                // Handle bind callbacks (:class="(item) => ...")
-                else if dir.name == "bind" && self.options.analyze_template_scopes {
-                    if let Some(ref exp) = dir.exp {
-                        let content = match exp {
-                            ExpressionNode::Simple(s) => s.content.as_str(),
-                            ExpressionNode::Compound(c) => c.loc.source.as_str(),
-                        };
-
-                        // Track $attrs usage for fallthrough analysis
-                        if content.contains("$attrs") {
-                            self.summary.template_info.uses_attrs = true;
-                            // v-bind="$attrs" without arg means explicit full binding
-                            if dir.arg.is_none() && content.trim() == "$attrs" {
-                                self.summary.template_info.binds_attrs_explicitly = true;
-                            }
-                        }
-
-                        if let Some(params) = extract_inline_callback_params(content) {
-                            let context = dir
-                                .arg
-                                .as_ref()
-                                .map(|arg| match arg {
-                                    ExpressionNode::Simple(s) => {
-                                        CompactString::new(format!(":{}callback", s.content))
-                                    }
-                                    ExpressionNode::Compound(c) => {
-                                        CompactString::new(format!(":{}callback", c.loc.source))
-                                    }
-                                })
-                                .unwrap_or_else(|| CompactString::const_new(":bind callback"));
-
-                            // Create callback scope
-                            self.summary.scopes.enter_template_callback_scope(
-                                CallbackScopeData {
-                                    param_names: params.into_iter().collect(),
-                                    context,
-                                },
-                                dir.loc.start.offset,
-                                dir.loc.end.offset,
-                            );
-
-                            let params_added: Vec<_> = self
-                                .summary
-                                .scopes
-                                .current_scope()
-                                .bindings()
-                                .map(|(name, _)| CompactString::new(name))
-                                .collect();
-
-                            for param in &params_added {
-                                scope_vars.push(param.clone());
-                            }
-
-                            if self.options.detect_undefined && self.script_analyzed {
-                                self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
-                            }
-
-                            for _ in &params_added {
-                                scope_vars.pop();
-                            }
-
-                            self.summary.scopes.exit_scope();
-                        } else if self.options.detect_undefined && self.script_analyzed {
-                            self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
                         }
                     }
                 }
