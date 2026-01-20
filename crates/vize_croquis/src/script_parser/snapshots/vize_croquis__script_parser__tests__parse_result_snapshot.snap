@@ -1,0 +1,29 @@
+---
+source: crates/vize_croquis/src/script_parser/mod.rs
+expression: output
+---
+=== Bindings ===
+MyAlias: SetupConst
+MyComponent: SetupConst
+computed: SetupConst
+count: Props
+counter: SetupRef
+doubled: SetupRef
+emit: SetupConst
+increment: SetupConst
+msg: Props
+props: SetupConst
+ref: SetupConst
+watch: SetupConst
+
+=== Macros ===
+Props count: 2
+  - msg (required: true)
+  - count (required: false)
+Emits count: 2
+  - update
+  - delete
+
+=== Reactivity ===
+counter: reactive=true
+doubled: reactive=true

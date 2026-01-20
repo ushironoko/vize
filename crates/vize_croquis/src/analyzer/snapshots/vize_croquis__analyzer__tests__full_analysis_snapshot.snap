@@ -1,0 +1,35 @@
+---
+source: crates/vize_croquis/src/analyzer/mod.rs
+expression: output
+---
+=== Bindings ===
+  model: SetupConst
+  emit: SetupConst
+  count: Props
+  theme: SetupConst
+  props: SetupConst
+  provide: SetupConst
+  inject: SetupConst
+  msg: Props
+  computed: SetupConst
+  ref: SetupConst
+  MyComponent: SetupConst
+  doubled: SetupRef
+  increment: SetupConst
+  counter: SetupRef
+
+=== Macros ===
+  props: 2
+  emits: 2
+  models: 1
+
+=== Reactivity ===
+  counter: kind=Ref, needs_value=true
+  doubled: kind=Computed, needs_value=true
+
+=== Provide/Inject ===
+  provides: 1
+  injects: 1
+
+=== Type Exports ===
+  UserProps: Type

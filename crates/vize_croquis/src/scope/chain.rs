@@ -1,447 +1,18 @@
-//! Scope analysis for Vue templates and scripts.
+//! Scope chain management for Vue templates and scripts.
 //!
-//! Provides a hierarchical scope chain that tracks variable visibility
-//! across different contexts (module, function, block, v-for, v-slot).
-//!
-//! ## Performance Optimizations
-//!
-//! - Uses `CompactString` instead of `String` for identifier names (SSO for short strings)
-//! - Uses `SmallVec` for parameter lists (stack-allocated for small counts)
-//! - Bitflags for binding properties to reduce memory and improve cache locality
-//! - `#[inline]` hints for hot path functions
+//! This module provides the core scope management functionality:
+//! - `Scope` - A single scope in the scope chain
+//! - `ScopeChain` - Manages the hierarchical scope chain
 
-use vize_carton::{bitflags, smallvec, CompactString, FxHashMap, SmallVec};
+use vize_carton::{smallvec, CompactString, FxHashMap, SmallVec};
 use vize_relief::BindingType;
 
-/// Maximum parameters typically seen in v-for/v-slot/callbacks
-/// Stack-allocated up to this count, heap-allocated beyond
-const PARAM_INLINE_CAP: usize = 4;
-
-/// Type alias for parameter name lists (stack-allocated for small counts)
-pub type ParamNames = SmallVec<[CompactString; PARAM_INLINE_CAP]>;
-
-/// Unique identifier for a scope
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-pub struct ScopeId(u32);
-
-impl ScopeId {
-    /// The root scope (SFC level)
-    pub const ROOT: Self = Self(0);
-
-    /// Create a new scope ID
-    #[inline(always)]
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-
-    /// Get the raw ID value
-    #[inline(always)]
-    pub const fn as_u32(self) -> u32 {
-        self.0
-    }
-}
-
-/// Kind of scope
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ScopeKind {
-    /// SFC (Single File Component) level scope
-    /// This is the root scope that contains script setup/non-script-setup scopes
-    Module = 0,
-    /// Function scope
-    Function = 1,
-    /// Block scope (if, for, etc.)
-    Block = 2,
-    /// v-for scope (template)
-    VFor = 3,
-    /// v-slot scope (template)
-    VSlot = 4,
-    /// Event handler scope (@click, etc.)
-    EventHandler = 5,
-    /// Callback/arrow function scope in expressions
-    Callback = 6,
-    /// Script setup scope (`<script setup>`)
-    ScriptSetup = 7,
-    /// Non-script setup scope (Options API, regular `<script>`)
-    NonScriptSetup = 8,
-    /// Universal scope (SSR - runs on both server and client)
-    Universal = 9,
-    /// Client-only scope (onMounted, onBeforeUnmount, etc.)
-    ClientOnly = 10,
-    /// Universal JavaScript global scope (console, Math, Object, Array, etc.)
-    /// Works in all runtimes
-    JsGlobalUniversal = 11,
-    /// Browser-only JavaScript global scope (window, document, navigator, localStorage, etc.)
-    /// WARNING: Not available in SSR server context
-    JsGlobalBrowser = 12,
-    /// Node.js-only JavaScript global scope (process, Buffer, __dirname, require, etc.)
-    /// WARNING: Not available in browser context
-    JsGlobalNode = 13,
-    /// Deno-only JavaScript global scope (Deno namespace)
-    JsGlobalDeno = 14,
-    /// Bun-only JavaScript global scope (Bun namespace)
-    JsGlobalBun = 15,
-    /// Vue global scope ($refs, $emit, $slots, $attrs, etc.)
-    VueGlobal = 16,
-    /// External module scope (imported modules)
-    ExternalModule = 17,
-    /// Closure scope (function declaration, function expression, arrow function)
-    /// Has access to arguments, this, and local variables
-    Closure = 18,
-}
-
-impl ScopeKind {
-    /// Get the display prefix for this scope kind
-    /// - `~` = universal (works on both client and server)
-    /// - `!` = client only (requires client API: window, document, etc.)
-    /// - `#` = server private (reserved for future Server Components)
-    #[inline]
-    pub const fn prefix(&self) -> &'static str {
-        match self {
-            // Client-only (requires client API)
-            Self::ClientOnly | Self::JsGlobalBrowser => "!",
-            // Server private (reserved for future Server Components)
-            Self::JsGlobalNode | Self::JsGlobalDeno | Self::JsGlobalBun => "#",
-            // Universal (works on both)
-            _ => "~",
-        }
-    }
-
-    /// Get the display name for this scope kind
-    #[inline]
-    pub const fn display_name(&self) -> &'static str {
-        match self {
-            Self::Module => "mod",
-            Self::Function => "fn",
-            Self::Block => "block",
-            Self::VFor => "v-for",
-            Self::VSlot => "v-slot",
-            Self::EventHandler => "event",
-            Self::Callback => "cb",
-            Self::ScriptSetup => "setup",
-            Self::NonScriptSetup => "plain",
-            Self::Universal => "universal",
-            Self::ClientOnly => "client",
-            Self::JsGlobalUniversal => "univ",
-            Self::JsGlobalBrowser => "client",
-            Self::JsGlobalNode => "server",
-            Self::JsGlobalDeno => "server",
-            Self::JsGlobalBun => "server",
-            Self::VueGlobal => "vue",
-            Self::ExternalModule => "extern",
-            Self::Closure => "closure",
-        }
-    }
-
-    /// Format for VIR display (zero allocation)
-    #[inline]
-    pub const fn to_display(&self) -> &'static str {
-        match self {
-            Self::Module => "mod",
-            Self::Function => "fn",
-            Self::Block => "block",
-            Self::VFor => "v-for",
-            Self::VSlot => "v-slot",
-            Self::EventHandler => "event",
-            Self::Callback => "cb",
-            Self::ScriptSetup => "setup",
-            Self::NonScriptSetup => "plain",
-            Self::Universal => "universal",
-            Self::ClientOnly => "client",
-            Self::JsGlobalUniversal => "univ",
-            Self::JsGlobalBrowser => "client",
-            Self::JsGlobalNode => "server",
-            Self::JsGlobalDeno => "server",
-            Self::JsGlobalBun => "server",
-            Self::VueGlobal => "vue",
-            Self::ExternalModule => "extern",
-            Self::Closure => "closure",
-        }
-    }
-
-    /// Get reference prefix for parent scope references
-    /// - `~` = universal (works on both client and server)
-    /// - `!` = client only (requires client API)
-    /// - `#` = server private (reserved for future Server Components)
-    #[inline]
-    pub const fn ref_prefix(&self) -> &'static str {
-        match self {
-            Self::ClientOnly | Self::JsGlobalBrowser => "!",
-            Self::JsGlobalNode | Self::JsGlobalDeno | Self::JsGlobalBun => "#",
-            _ => "~",
-        }
-    }
-}
-
-/// Data specific to v-for scope
-#[derive(Debug, Clone)]
-pub struct VForScopeData {
-    /// The value alias (e.g., "item" in v-for="item in items")
-    pub value_alias: CompactString,
-    /// The key alias (e.g., "key" in v-for="(item, key) in items")
-    pub key_alias: Option<CompactString>,
-    /// The index alias (e.g., "index" in v-for="(item, index) in items")
-    pub index_alias: Option<CompactString>,
-    /// The source expression (e.g., "items")
-    pub source: CompactString,
-    /// The :key expression if present (e.g., "item.id")
-    pub key_expression: Option<CompactString>,
-}
-
-/// Data specific to v-slot scope
-#[derive(Debug, Clone)]
-pub struct VSlotScopeData {
-    /// Slot name
-    pub name: CompactString,
-    /// Props pattern (e.g., "{ item, index }" in v-slot="{ item, index }")
-    pub props_pattern: Option<CompactString>,
-    /// Extracted prop names (stack-allocated for typical cases)
-    pub prop_names: ParamNames,
-}
-
-/// Data specific to event handler scope
-#[derive(Debug, Clone)]
-pub struct EventHandlerScopeData {
-    /// Event name (e.g., "click")
-    pub event_name: CompactString,
-    /// Whether this handler has implicit $event
-    pub has_implicit_event: bool,
-    /// Explicit parameter names (stack-allocated for typical cases)
-    pub param_names: ParamNames,
-    /// The handler expression (e.g., "handleClick" or "handleClick($event)")
-    pub handler_expression: Option<CompactString>,
-}
-
-/// Data specific to callback scope
-#[derive(Debug, Clone)]
-pub struct CallbackScopeData {
-    /// Parameter names (stack-allocated for typical cases)
-    pub param_names: ParamNames,
-    /// Context description (for debugging)
-    pub context: CompactString,
-}
-
-/// Data specific to script setup scope
-#[derive(Debug, Clone)]
-pub struct ScriptSetupScopeData {
-    /// Whether this is TypeScript
-    pub is_ts: bool,
-    /// Whether async setup
-    pub is_async: bool,
-    /// Generic type parameter from `<script setup generic="T">`
-    pub generic: Option<CompactString>,
-}
-
-/// Data specific to non-script-setup scope (Options API, regular script)
-#[derive(Debug, Clone)]
-pub struct NonScriptSetupScopeData {
-    /// Whether this is TypeScript
-    pub is_ts: bool,
-    /// Whether using defineComponent
-    pub has_define_component: bool,
-}
-
-/// Data specific to client-only scope (onMounted, onBeforeUnmount, etc.)
-#[derive(Debug, Clone)]
-pub struct ClientOnlyScopeData {
-    /// The lifecycle hook name (e.g., "onMounted", "onBeforeUnmount")
-    pub hook_name: CompactString,
-}
-
-/// Data specific to universal scope (SSR - runs on both server and client)
-#[derive(Debug, Clone)]
-pub struct UniversalScopeData {
-    /// Context description
-    pub context: CompactString,
-}
-
-/// Runtime environment for JavaScript globals
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum JsRuntime {
-    /// Universal - works in all runtimes (console, Math, Object, Array, JSON, etc.)
-    Universal = 0,
-    /// Browser - window, document, navigator, localStorage, etc.
-    Browser = 1,
-    /// Node.js - process, Buffer, __dirname, __filename, require, etc.
-    Node = 2,
-    /// Deno - Deno namespace
-    Deno = 3,
-    /// Bun - Bun namespace
-    Bun = 4,
-}
-
-/// Data specific to JavaScript global scope
-#[derive(Debug, Clone)]
-pub struct JsGlobalScopeData {
-    /// Runtime environment
-    pub runtime: JsRuntime,
-    /// Known JS globals for this runtime
-    pub globals: ParamNames,
-}
-
-/// Data specific to Vue global scope
-#[derive(Debug, Clone)]
-pub struct VueGlobalScopeData {
-    /// Known Vue globals ($refs, $emit, $slots, $attrs, $el, etc.)
-    pub globals: ParamNames,
-}
-
-/// Data specific to external module scope
-#[derive(Debug, Clone)]
-pub struct ExternalModuleScopeData {
-    /// Module source path
-    pub source: CompactString,
-    /// Whether this is a type-only import
-    pub is_type_only: bool,
-}
-
-/// Data specific to closure scope (function declaration, function expression, arrow function)
-#[derive(Debug, Clone)]
-pub struct ClosureScopeData {
-    /// Function name (if named function)
-    pub name: Option<CompactString>,
-    /// Parameter names
-    pub param_names: ParamNames,
-    /// Whether this is an arrow function (no `arguments`, no `this` binding)
-    pub is_arrow: bool,
-    /// Whether this is async
-    pub is_async: bool,
-    /// Whether this is a generator
-    pub is_generator: bool,
-}
-
-/// Block kind for block scopes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum BlockKind {
-    Block,
-    If,
-    Else,
-    For,
-    ForIn,
-    ForOf,
-    While,
-    DoWhile,
-    Switch,
-    Try,
-    Catch,
-    Finally,
-    With,
-}
-
-impl BlockKind {
-    /// Get the display name for this block kind
-    #[inline]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Block => "block",
-            Self::If => "if",
-            Self::Else => "else",
-            Self::For => "for",
-            Self::ForIn => "for-in",
-            Self::ForOf => "for-of",
-            Self::While => "while",
-            Self::DoWhile => "do-while",
-            Self::Switch => "switch",
-            Self::Try => "try",
-            Self::Catch => "catch",
-            Self::Finally => "finally",
-            Self::With => "with",
-        }
-    }
-}
-
-/// Data specific to block scope (if, for, switch, etc.)
-#[derive(Debug, Clone, Copy)]
-pub struct BlockScopeData {
-    /// Block kind
-    pub kind: BlockKind,
-}
-
-/// Scope-specific data
-#[derive(Debug, Clone)]
-pub enum ScopeData {
-    /// No additional data
-    None,
-    /// v-for specific data
-    VFor(VForScopeData),
-    /// v-slot specific data
-    VSlot(VSlotScopeData),
-    /// Event handler specific data
-    EventHandler(EventHandlerScopeData),
-    /// Callback specific data
-    Callback(CallbackScopeData),
-    /// Script setup specific data
-    ScriptSetup(ScriptSetupScopeData),
-    /// Non-script-setup specific data
-    NonScriptSetup(NonScriptSetupScopeData),
-    /// Client-only specific data
-    ClientOnly(ClientOnlyScopeData),
-    /// Universal scope specific data
-    Universal(UniversalScopeData),
-    /// JavaScript global specific data (with runtime info)
-    JsGlobal(JsGlobalScopeData),
-    /// Vue global specific data
-    VueGlobal(VueGlobalScopeData),
-    /// External module specific data
-    ExternalModule(ExternalModuleScopeData),
-    /// Closure specific data
-    Closure(ClosureScopeData),
-    /// Block specific data
-    Block(BlockScopeData),
-}
-
-impl JsRuntime {
-    /// Get the corresponding ScopeKind for this runtime
-    #[inline]
-    pub const fn to_scope_kind(self) -> ScopeKind {
-        match self {
-            JsRuntime::Universal => ScopeKind::JsGlobalUniversal,
-            JsRuntime::Browser => ScopeKind::JsGlobalBrowser,
-            JsRuntime::Node => ScopeKind::JsGlobalNode,
-            JsRuntime::Deno => ScopeKind::JsGlobalDeno,
-            JsRuntime::Bun => ScopeKind::JsGlobalBun,
-        }
-    }
-
-    /// Get the corresponding BindingType for this runtime
-    #[inline]
-    pub const fn to_binding_type(self) -> BindingType {
-        match self {
-            JsRuntime::Universal => BindingType::JsGlobalUniversal,
-            JsRuntime::Browser => BindingType::JsGlobalBrowser,
-            JsRuntime::Node => BindingType::JsGlobalNode,
-            JsRuntime::Deno => BindingType::JsGlobalDeno,
-            JsRuntime::Bun => BindingType::JsGlobalBun,
-        }
-    }
-}
-
-impl Default for ScopeData {
-    #[inline]
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-/// Source span
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Span {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl Span {
-    #[inline(always)]
-    pub const fn new(start: u32, end: u32) -> Self {
-        Self { start, end }
-    }
-}
-
-/// Parent scope references (typically 1-2 parents)
-pub type ParentScopes = SmallVec<[ScopeId; 2]>;
+use super::types::{
+    BlockScopeData, CallbackScopeData, ClientOnlyScopeData, ClosureScopeData,
+    EventHandlerScopeData, ExternalModuleScopeData, JsGlobalScopeData, NonScriptSetupScopeData,
+    ParentScopes, ScopeBinding, ScopeData, ScopeId, ScopeKind, ScriptSetupScopeData, Span,
+    UniversalScopeData, VForScopeData, VSlotScopeData, VueGlobalScopeData,
+};
 
 /// A single scope in the scope chain
 #[derive(Debug)]
@@ -603,68 +174,6 @@ impl Scope {
     }
 }
 
-bitflags! {
-    /// Binding flags for tracking usage and mutation
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-    pub struct BindingFlags: u8 {
-        /// Binding has been referenced
-        const USED = 1 << 0;
-        /// Binding has been mutated
-        const MUTATED = 1 << 1;
-        /// Binding is a rest parameter
-        const REST = 1 << 2;
-        /// Binding has a default value
-        const HAS_DEFAULT = 1 << 3;
-    }
-}
-
-/// A binding within a scope
-#[derive(Debug, Clone, Copy)]
-pub struct ScopeBinding {
-    /// The type of binding
-    pub binding_type: BindingType,
-    /// Source location of the declaration (offset in source)
-    pub declaration_offset: u32,
-    /// Binding flags
-    flags: BindingFlags,
-}
-
-impl ScopeBinding {
-    /// Create a new scope binding
-    #[inline]
-    pub const fn new(binding_type: BindingType, declaration_offset: u32) -> Self {
-        Self {
-            binding_type,
-            declaration_offset,
-            flags: BindingFlags::empty(),
-        }
-    }
-
-    /// Check if binding is used
-    #[inline]
-    pub const fn is_used(&self) -> bool {
-        self.flags.contains(BindingFlags::USED)
-    }
-
-    /// Check if binding is mutated
-    #[inline]
-    pub const fn is_mutated(&self) -> bool {
-        self.flags.contains(BindingFlags::MUTATED)
-    }
-
-    /// Mark as used
-    #[inline]
-    pub fn mark_used(&mut self) {
-        self.flags.insert(BindingFlags::USED);
-    }
-
-    /// Mark as mutated
-    #[inline]
-    pub fn mark_mutated(&mut self) {
-        self.flags.insert(BindingFlags::MUTATED);
-    }
-}
-
 /// Manages the scope chain during analysis
 #[derive(Debug)]
 pub struct ScopeChain {
@@ -680,80 +189,83 @@ impl Default for ScopeChain {
     }
 }
 
+/// ECMAScript standard built-in globals (ECMA-262)
+const JS_UNIVERSAL_GLOBALS: &[&str] = &[
+    "AggregateError",
+    "arguments", // Function scope closure
+    "Array",
+    "ArrayBuffer",
+    "AsyncFunction",
+    "AsyncGenerator",
+    "AsyncGeneratorFunction",
+    "AsyncIterator",
+    "Atomics",
+    "BigInt",
+    "BigInt64Array",
+    "BigUint64Array",
+    "Boolean",
+    "console", // Non-standard but universally available
+    "DataView",
+    "Date",
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "Error",
+    "eval",
+    "EvalError",
+    "Float32Array",
+    "Float64Array",
+    "Function",
+    "Generator",
+    "GeneratorFunction",
+    "globalThis",
+    "Infinity",
+    "Int16Array",
+    "Int32Array",
+    "Int8Array",
+    "Intl",
+    "isFinite",
+    "isNaN",
+    "Iterator",
+    "JSON",
+    "Map",
+    "Math",
+    "NaN",
+    "Number",
+    "Object",
+    "parseFloat",
+    "parseInt",
+    "Promise",
+    "Proxy",
+    "RangeError",
+    "ReferenceError",
+    "Reflect",
+    "RegExp",
+    "Set",
+    "SharedArrayBuffer",
+    "String",
+    "Symbol",
+    "SyntaxError",
+    "this", // Function scope closure
+    "TypeError",
+    "Uint16Array",
+    "Uint32Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "undefined",
+    "URIError",
+    "WeakMap",
+    "WeakSet",
+];
+
 impl ScopeChain {
     /// Create a new scope chain with JS universal globals as root
     /// ECMAScript standard built-ins only (ECMA-262)
     #[inline]
     pub fn new() -> Self {
         let mut root = Scope::new(ScopeId::ROOT, None, ScopeKind::JsGlobalUniversal);
-        for name in [
-            "AggregateError",
-            "arguments", // Function scope closure
-            "Array",
-            "ArrayBuffer",
-            "AsyncFunction",
-            "AsyncGenerator",
-            "AsyncGeneratorFunction",
-            "AsyncIterator",
-            "Atomics",
-            "BigInt",
-            "BigInt64Array",
-            "BigUint64Array",
-            "Boolean",
-            "console", // Non-standard but universally available
-            "DataView",
-            "Date",
-            "decodeURI",
-            "decodeURIComponent",
-            "encodeURI",
-            "encodeURIComponent",
-            "Error",
-            "eval",
-            "EvalError",
-            "Float32Array",
-            "Float64Array",
-            "Function",
-            "Generator",
-            "GeneratorFunction",
-            "globalThis",
-            "Infinity",
-            "Int16Array",
-            "Int32Array",
-            "Int8Array",
-            "Intl",
-            "isFinite",
-            "isNaN",
-            "Iterator",
-            "JSON",
-            "Map",
-            "Math",
-            "NaN",
-            "Number",
-            "Object",
-            "parseFloat",
-            "parseInt",
-            "Promise",
-            "Proxy",
-            "RangeError",
-            "ReferenceError",
-            "Reflect",
-            "RegExp",
-            "Set",
-            "SharedArrayBuffer",
-            "String",
-            "Symbol",
-            "SyntaxError",
-            "this", // Function scope closure
-            "TypeError",
-            "Uint16Array",
-            "Uint32Array",
-            "Uint8Array",
-            "Uint8ClampedArray",
-            "undefined",
-            "URIError",
-            "WeakMap",
-            "WeakSet",
-        ] {
+        for name in JS_UNIVERSAL_GLOBALS {
             root.add_binding(
                 CompactString::new(name),
                 ScopeBinding::new(BindingType::JsGlobalUniversal, 0),
@@ -769,74 +281,7 @@ impl ScopeChain {
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let mut root = Scope::new(ScopeId::ROOT, None, ScopeKind::JsGlobalUniversal);
-        for name in [
-            "AggregateError",
-            "arguments",
-            "Array",
-            "ArrayBuffer",
-            "AsyncFunction",
-            "AsyncGenerator",
-            "AsyncGeneratorFunction",
-            "AsyncIterator",
-            "Atomics",
-            "BigInt",
-            "BigInt64Array",
-            "BigUint64Array",
-            "Boolean",
-            "console",
-            "DataView",
-            "Date",
-            "decodeURI",
-            "decodeURIComponent",
-            "encodeURI",
-            "encodeURIComponent",
-            "Error",
-            "eval",
-            "EvalError",
-            "Float32Array",
-            "Float64Array",
-            "Function",
-            "Generator",
-            "GeneratorFunction",
-            "globalThis",
-            "Infinity",
-            "Int16Array",
-            "Int32Array",
-            "Int8Array",
-            "Intl",
-            "isFinite",
-            "isNaN",
-            "Iterator",
-            "JSON",
-            "Map",
-            "Math",
-            "NaN",
-            "Number",
-            "Object",
-            "parseFloat",
-            "parseInt",
-            "Promise",
-            "Proxy",
-            "RangeError",
-            "ReferenceError",
-            "Reflect",
-            "RegExp",
-            "Set",
-            "SharedArrayBuffer",
-            "String",
-            "Symbol",
-            "SyntaxError",
-            "this",
-            "TypeError",
-            "Uint16Array",
-            "Uint32Array",
-            "Uint8Array",
-            "Uint8ClampedArray",
-            "undefined",
-            "URIError",
-            "WeakMap",
-            "WeakSet",
-        ] {
+        for name in JS_UNIVERSAL_GLOBALS {
             root.add_binding(
                 CompactString::new(name),
                 ScopeBinding::new(BindingType::JsGlobalUniversal, 0),
@@ -1411,6 +856,8 @@ impl ScopeChain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scope::types::JsRuntime;
+    use insta::assert_snapshot;
 
     #[test]
     fn test_scope_chain_basic() {
@@ -1650,21 +1097,6 @@ mod tests {
         assert!(chain.is_defined("item"));
         assert!(chain.is_defined("index"));
         assert!(chain.is_defined("e"));
-    }
-
-    #[test]
-    fn test_binding_flags() {
-        let mut binding = ScopeBinding::new(BindingType::SetupRef, 0);
-        assert!(!binding.is_used());
-        assert!(!binding.is_mutated());
-
-        binding.mark_used();
-        assert!(binding.is_used());
-        assert!(!binding.is_mutated());
-
-        binding.mark_mutated();
-        assert!(binding.is_used());
-        assert!(binding.is_mutated());
     }
 
     #[test]
@@ -2025,5 +1457,53 @@ mod tests {
 
         // Current scope is client-only
         assert_eq!(chain.current_scope().kind, ScopeKind::ClientOnly);
+    }
+
+    #[test]
+    fn test_scope_chain_snapshot() {
+        let mut chain = ScopeChain::new();
+
+        // Build a complex scope chain
+        chain.enter_script_setup_scope(
+            ScriptSetupScopeData {
+                is_ts: true,
+                is_async: false,
+                generic: None,
+            },
+            0,
+            500,
+        );
+        chain.add_binding(
+            CompactString::new("count"),
+            ScopeBinding::new(BindingType::SetupRef, 10),
+        );
+
+        chain.enter_v_for_scope(
+            VForScopeData {
+                value_alias: CompactString::new("item"),
+                key_alias: Some(CompactString::new("key")),
+                index_alias: None,
+                source: CompactString::new("items"),
+                key_expression: None,
+            },
+            100,
+            200,
+        );
+
+        // Snapshot the scope chain structure
+        let mut output = String::new();
+        for scope in chain.iter() {
+            output.push_str(&format!(
+                "Scope {} ({:?}): {} bindings\n",
+                scope.id.as_u32(),
+                scope.kind,
+                scope.binding_count()
+            ));
+            for (name, binding) in scope.bindings() {
+                output.push_str(&format!("  - {}: {:?}\n", name, binding.binding_type));
+            }
+        }
+
+        assert_snapshot!("scope_chain_structure", output);
     }
 }

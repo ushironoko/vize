@@ -26,3 +26,4 @@ oxc_allocator.workspace = true
 [dev-dependencies]
 tempfile = "3.10"
 vize_armature.workspace = true
+insta.workspace = true
