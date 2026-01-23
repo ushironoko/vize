@@ -202,6 +202,13 @@
   "a11y/aria-props.help": "**理由:** 無効なARIA属性は、支援技術がユーザーに意図した意味を伝えることを妨げます。\n\n**有効なARIA属性**はWAI-ARIA仕様で定義されています:\nhttps://www.w3.org/TR/wai-aria/#state_prop_def\n\n**よく使うARIA属性:**\n```vue\n<!-- ラベル付け -->\n<input aria-label=\"検索\" />\n<div aria-labelledby=\"title-id\">\n\n<!-- 状態 -->\n<button aria-expanded=\"false\">\n<input aria-invalid=\"true\">\n\n<!-- 関係性 -->\n<input aria-describedby=\"hint-id\">\n<div aria-controls=\"panel-id\">\n```\n\n**注意:** カスタム`aria-*`属性は許可されていません。WAI-ARIA仕様の属性のみを使用してください。",
   "a11y/aria-props.help_suggestion": "**無効な属性:** `{invalid}`\n\n**もしかして:** `{valid}`?\n\nこれはよくあるタイプミスです。ARIA属性はWAI-ARIA仕様の特定の命名規則に従います。",
 
+  "a11y/aria-role.description": "ARIA roleを持つ要素は、有効で非抽象的なARIA roleを使用する必要がある",
+  "a11y/aria-role.message": "'{role}' は有効なARIA roleではありません",
+  "a11y/aria-role.message_abstract": "'{role}' は抽象的なARIA roleであり、直接使用できません",
+  "a11y/aria-role.help": "**理由:** 無効なARIA roleは、支援技術がユーザーに意図した意味を伝えることを妨げます。\n\n**有効なARIA role**はWAI-ARIA仕様で定義されています:\nhttps://www.w3.org/TR/wai-aria/#role_definitions\n\n**よく使うrole:**\n```vue\n<!-- ウィジェットrole -->\n<div role=\"button\">クリック</div>\n<div role=\"dialog\">モーダル内容</div>\n<div role=\"checkbox\">トグル</div>\n\n<!-- ランドマークrole -->\n<nav role=\"navigation\">...</nav>\n<main role=\"main\">...</main>\n<aside role=\"complementary\">...</aside>\n\n<!-- ドキュメント構造role -->\n<div role=\"heading\" aria-level=\"2\">タイトル</div>\n<div role=\"list\">...</div>\n```",
+  "a11y/aria-role.help_abstract": "**抽象的なrole**はARIA仕様の基本概念であり、直接使用できません。\n\n**抽象的なrole一覧:**\n`command`, `composite`, `input`, `landmark`, `range`, `roletype`, `section`, `sectionhead`, `select`, `structure`, `widget`, `window`\n\n**代わりに具体的なroleを使用:**\n```vue\n<!-- role=\"range\" の代わりに -->\n<div role=\"slider\">...</div>\n<div role=\"progressbar\">...</div>\n\n<!-- role=\"input\" の代わりに -->\n<div role=\"textbox\">...</div>\n<div role=\"checkbox\">...</div>\n```",
+  "a11y/aria-role.help_suggestion": "**無効なrole:** `{invalid}`\n\n**もしかして:** `{valid}`?\n\n有効なroleの完全なリストはWAI-ARIA仕様を参照してください。",
+
   "compiler.parse_error": "パースエラー: {message}",
   "compiler.unexpected_token": "予期しないトークン'{token}'",
   "compiler.unclosed_tag": "閉じられていないタグ<{tag}>",

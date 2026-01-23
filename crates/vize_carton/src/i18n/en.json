@@ -202,6 +202,13 @@
   "a11y/aria-props.help": "**Why:** Invalid ARIA attributes prevent assistive technologies from conveying the intended meaning to users.\n\n**Valid ARIA attributes** are defined in the WAI-ARIA specification:\nhttps://www.w3.org/TR/wai-aria/#state_prop_def\n\n**Common ARIA attributes:**\n```vue\n<!-- Labeling -->\n<input aria-label=\"Search\" />\n<div aria-labelledby=\"title-id\">\n\n<!-- State -->\n<button aria-expanded=\"false\">\n<input aria-invalid=\"true\">\n\n<!-- Relationships -->\n<input aria-describedby=\"hint-id\">\n<div aria-controls=\"panel-id\">\n```\n\n**Note:** Custom `aria-*` attributes are not allowed. Only use attributes from the WAI-ARIA specification.",
   "a11y/aria-props.help_suggestion": "**Invalid attribute:** `{invalid}`\n\n**Did you mean:** `{valid}`?\n\nThis is a common typo. ARIA attributes follow specific naming conventions from the WAI-ARIA specification.",
 
+  "a11y/aria-role.description": "Elements with ARIA roles must use a valid, non-abstract ARIA role",
+  "a11y/aria-role.message": "'{role}' is not a valid ARIA role",
+  "a11y/aria-role.message_abstract": "'{role}' is an abstract ARIA role and cannot be used directly",
+  "a11y/aria-role.help": "**Why:** Invalid ARIA roles prevent assistive technologies from conveying the intended meaning to users.\n\n**Valid ARIA roles** are defined in the WAI-ARIA specification:\nhttps://www.w3.org/TR/wai-aria/#role_definitions\n\n**Common roles:**\n```vue\n<!-- Widget roles -->\n<div role=\"button\">Click me</div>\n<div role=\"dialog\">Modal content</div>\n<div role=\"checkbox\">Toggle</div>\n\n<!-- Landmark roles -->\n<nav role=\"navigation\">...</nav>\n<main role=\"main\">...</main>\n<aside role=\"complementary\">...</aside>\n\n<!-- Document structure roles -->\n<div role=\"heading\" aria-level=\"2\">Title</div>\n<div role=\"list\">...</div>\n```",
+  "a11y/aria-role.help_abstract": "**Abstract roles** are base concepts in the ARIA spec and cannot be used directly.\n\n**Abstract roles include:**\n`command`, `composite`, `input`, `landmark`, `range`, `roletype`, `section`, `sectionhead`, `select`, `structure`, `widget`, `window`\n\n**Use concrete roles instead:**\n```vue\n<!-- Instead of role=\"range\" -->\n<div role=\"slider\">...</div>\n<div role=\"progressbar\">...</div>\n\n<!-- Instead of role=\"input\" -->\n<div role=\"textbox\">...</div>\n<div role=\"checkbox\">...</div>\n```",
+  "a11y/aria-role.help_suggestion": "**Invalid role:** `{invalid}`\n\n**Did you mean:** `{valid}`?\n\nRefer to the WAI-ARIA specification for a complete list of valid roles.",
+
   "compiler.parse_error": "Parse error: {message}",
   "compiler.unexpected_token": "Unexpected token '{token}'",
   "compiler.unclosed_tag": "Unclosed tag <{tag}>",

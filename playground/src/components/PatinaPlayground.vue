@@ -73,6 +73,12 @@ const handleClick = () => {}
     <!-- a11y/aria-props: Invalid ARIA attribute (typo) -->
     <input aria-labeledby="label-id" />
 
+    <!-- a11y/aria-role: Invalid ARIA role -->
+    <div role="datepicker"></div>
+
+    <!-- a11y/aria-role: Abstract ARIA role -->
+    <div role="range"></div>
+
     <!-- vue/no-v-html: XSS risk -->
     <div v-html="htmlContent"></div>
 

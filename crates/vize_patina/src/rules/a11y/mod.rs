@@ -7,6 +7,7 @@
 
 mod anchor_has_content;
 mod aria_props;
+mod aria_role;
 mod click_events_have_key_events;
 mod form_control_has_label;
 mod heading_has_content;
@@ -17,6 +18,7 @@ mod tabindex_no_positive;
 
 pub use anchor_has_content::AnchorHasContent;
 pub use aria_props::AriaProps;
+pub use aria_role::AriaRole;
 pub use click_events_have_key_events::ClickEventsHaveKeyEvents;
 pub use form_control_has_label::FormControlHasLabel;
 pub use heading_has_content::HeadingHasContent;
