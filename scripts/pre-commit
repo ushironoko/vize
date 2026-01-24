@@ -4,38 +4,44 @@ set -e
 
 echo "🔍 Running pre-commit checks in parallel..."
 
-# Create temp files for results and output
+# Create temp files for results
 FMT_RESULT=$(mktemp)
-FMT_OUTPUT=$(mktemp)
 CLIPPY_RESULT=$(mktemp)
-CLIPPY_OUTPUT=$(mktemp)
 TEST_RESULT=$(mktemp)
-TEST_OUTPUT=$(mktemp)
 
-# Run all checks in parallel, capturing output
+# Run all checks in parallel with prefixed output
 (
-    if cargo fmt --all -- --check > "$FMT_OUTPUT" 2>&1; then
+    echo "📝 [fmt] Starting format check..."
+    if cargo fmt --all -- --check 2>&1 | sed 's/^/[fmt] /'; then
         echo "0" > "$FMT_RESULT"
+        echo "📝 [fmt] Done"
     else
         echo "1" > "$FMT_RESULT"
+        echo "📝 [fmt] Failed"
     fi
 ) &
 FMT_PID=$!
 
 (
-    if cargo clippy --workspace -- -D warnings > "$CLIPPY_OUTPUT" 2>&1; then
+    echo "📎 [clippy] Starting clippy check..."
+    if cargo clippy --workspace -- -D warnings 2>&1 | sed 's/^/[clippy] /'; then
         echo "0" > "$CLIPPY_RESULT"
+        echo "📎 [clippy] Done"
     else
         echo "1" > "$CLIPPY_RESULT"
+        echo "📎 [clippy] Failed"
     fi
 ) &
 CLIPPY_PID=$!
 
 (
-    if cargo test --workspace > "$TEST_OUTPUT" 2>&1; then
+    echo "🧪 [test] Starting tests..."
+    if cargo test --workspace 2>&1 | sed 's/^/[test] /'; then
         echo "0" > "$TEST_RESULT"
+        echo "🧪 [test] Done"
     else
         echo "1" > "$TEST_RESULT"
+        echo "🧪 [test] Failed"
     fi
 ) &
 TEST_PID=$!
@@ -49,41 +55,36 @@ FMT_EXIT=$(cat "$FMT_RESULT")
 CLIPPY_EXIT=$(cat "$CLIPPY_RESULT")
 TEST_EXIT=$(cat "$TEST_RESULT")
 
-# Report results
+# Cleanup temp files
+rm -f "$FMT_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT"
+
+# Report summary
+echo ""
+echo "========================================"
+echo "Summary:"
 FAILED=0
 
 if [ "$FMT_EXIT" = "0" ]; then
-    echo "✅ Format OK"
+    echo "  ✅ Format OK"
 else
-    echo "❌ Format check failed:"
-    echo "----------------------------------------"
-    cat "$FMT_OUTPUT"
-    echo "----------------------------------------"
+    echo "  ❌ Format check failed"
     FAILED=1
 fi
 
 if [ "$CLIPPY_EXIT" = "0" ]; then
-    echo "✅ Clippy OK"
+    echo "  ✅ Clippy OK"
 else
-    echo "❌ Clippy check failed:"
-    echo "----------------------------------------"
-    cat "$CLIPPY_OUTPUT"
-    echo "----------------------------------------"
+    echo "  ❌ Clippy check failed"
     FAILED=1
 fi
 
 if [ "$TEST_EXIT" = "0" ]; then
-    echo "✅ Tests OK"
+    echo "  ✅ Tests OK"
 else
-    echo "❌ Tests failed:"
-    echo "----------------------------------------"
-    cat "$TEST_OUTPUT"
-    echo "----------------------------------------"
+    echo "  ❌ Tests failed"
     FAILED=1
 fi
-
-# Cleanup temp files
-rm -f "$FMT_RESULT" "$FMT_OUTPUT" "$CLIPPY_RESULT" "$CLIPPY_OUTPUT" "$TEST_RESULT" "$TEST_OUTPUT"
+echo "========================================"
 
 if [ "$FAILED" = "1" ]; then
     echo "💥 Pre-commit checks failed!"
