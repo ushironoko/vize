@@ -78,16 +78,47 @@ pub use virtual_code::{VirtualCodeGenerator, VirtualDocuments};
 
 use tower_lsp::{LspService, Server};
 
+/// Initialize file-based logging to node_modules/.vize/lsp.log
+fn init_file_logging() {
+    use std::fs::{create_dir_all, OpenOptions};
+    use std::sync::Once;
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+    static INIT: Once = Once::new();
+
+    INIT.call_once(|| {
+        // Try to find node_modules/.vize directory
+        let log_dir = std::env::current_dir()
+            .ok()
+            .map(|p| p.join("node_modules/.vize"))
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp/vize"));
+
+        let _ = create_dir_all(&log_dir);
+
+        let log_path = log_dir.join("lsp.log");
+
+        // Try to open log file, fall back to stderr
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+            tracing_subscriber::fmt()
+                .with_writer(file.and(std::io::stderr))
+                .with_ansi(false)
+                .init();
+        } else {
+            tracing_subscriber::fmt()
+                .with_writer(std::io::stderr)
+                .with_ansi(false)
+                .init();
+        }
+    });
+}
+
 /// Start the LSP server using stdio transport.
 ///
 /// This is the main entry point for the language server.
 /// It creates a tower-lsp service and starts serving on stdin/stdout.
 pub async fn serve() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Initialize tracing for logging
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
-        .init();
+    // Initialize tracing for logging to file
+    init_file_logging();
 
     tracing::info!("Starting vize_maestro LSP server");
 

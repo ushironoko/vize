@@ -84,6 +84,9 @@ pub struct ServerState {
     /// tsgo bridge for TypeScript language features (lazy initialized)
     #[cfg(feature = "native")]
     tsgo_bridge: OnceCell<Arc<TsgoBridge>>,
+    /// Flag to track if tsgo initialization has been attempted and failed
+    #[cfg(feature = "native")]
+    tsgo_init_failed: std::sync::atomic::AtomicBool,
     /// Workspace root path
     #[cfg(feature = "native")]
     workspace_root: RwLock<Option<PathBuf>>,
@@ -110,6 +113,8 @@ impl ServerState {
             virtual_docs_cache: DashMap::new(),
             #[cfg(feature = "native")]
             tsgo_bridge: OnceCell::new(),
+            #[cfg(feature = "native")]
+            tsgo_init_failed: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "native")]
             workspace_root: RwLock::new(None),
             #[cfg(feature = "native")]
@@ -205,24 +210,58 @@ impl ServerState {
     /// Returns None if tsgo is not available or failed to initialize.
     #[cfg(feature = "native")]
     pub async fn get_tsgo_bridge(&self) -> Option<Arc<TsgoBridge>> {
+        use std::sync::atomic::Ordering;
+
+        // If already initialized successfully, return it
+        if let Some(bridge) = self.tsgo_bridge.get() {
+            return Some(bridge.clone());
+        }
+
+        // If initialization already failed, don't retry
+        if self.tsgo_init_failed.load(Ordering::SeqCst) {
+            return None;
+        }
+
         // Get workspace root for tsgo configuration
         let workspace_root = self.get_workspace_root();
 
-        self.tsgo_bridge
+        let result = self
+            .tsgo_bridge
             .get_or_try_init(|| async {
                 let config = TsgoBridgeConfig {
                     working_dir: workspace_root,
+                    timeout_ms: 30000, // 30 second timeout for requests (tsgo needs time to analyze)
                     ..Default::default()
                 };
                 let bridge = TsgoBridge::with_config(config);
-                match bridge.spawn().await {
-                    Ok(()) => Ok(Arc::new(bridge)),
-                    Err(_) => Err(()),
+
+                // Add timeout for spawning tsgo (5 seconds)
+                match tokio::time::timeout(std::time::Duration::from_secs(5), bridge.spawn()).await
+                {
+                    Ok(Ok(())) => {
+                        tracing::info!("tsgo bridge initialized successfully");
+                        Ok(Arc::new(bridge))
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!("tsgo bridge spawn failed: {}", e);
+                        Err(())
+                    }
+                    Err(_) => {
+                        tracing::warn!("tsgo bridge spawn timed out");
+                        Err(())
+                    }
                 }
             })
-            .await
-            .ok()
-            .cloned()
+            .await;
+
+        match result {
+            Ok(bridge) => Some(bridge.clone()),
+            Err(()) => {
+                // Mark as failed so we don't retry
+                self.tsgo_init_failed.store(true, Ordering::SeqCst);
+                None
+            }
+        }
     }
 
     /// Check if tsgo bridge is available (without initializing).

@@ -612,15 +612,91 @@ impl TsgoLspClient {
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::current_dir().ok())?;
 
-        let candidates = [
-            base_dir.join("node_modules/.bin/tsgo"),
-            base_dir.join("node_modules/@typescript/native-preview/bin/tsgo"),
-        ];
-
-        for candidate in &candidates {
-            if candidate.exists() {
-                return Some(candidate.to_string_lossy().to_string());
+        // Platform-specific path for @typescript/native-preview
+        let platform_suffix = if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                "darwin-arm64"
+            } else {
+                "darwin-x64"
             }
+        } else if cfg!(target_os = "linux") {
+            if cfg!(target_arch = "aarch64") {
+                "linux-arm64"
+            } else {
+                "linux-x64"
+            }
+        } else if cfg!(target_os = "windows") {
+            "win32-x64"
+        } else {
+            ""
+        };
+
+        // Helper to search for tsgo in a directory
+        let search_in_dir = |dir: &std::path::Path| -> Option<String> {
+            // Try pnpm structure first
+            let pnpm_pattern = dir.join("node_modules/.pnpm");
+            if pnpm_pattern.exists() {
+                if let Ok(entries) = std::fs::read_dir(&pnpm_pattern) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        if name_str.starts_with("@typescript+native-preview-")
+                            && name_str.contains(platform_suffix)
+                        {
+                            let native_path = entry.path().join(format!(
+                                "node_modules/@typescript/native-preview-{}/lib/tsgo",
+                                platform_suffix
+                            ));
+                            if native_path.exists() {
+                                return Some(native_path.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Try npm/yarn structure
+            let native_candidates = [
+                dir.join(format!(
+                    "node_modules/@typescript/native-preview-{}/lib/tsgo",
+                    platform_suffix
+                )),
+                dir.join("node_modules/@typescript/native-preview/lib/tsgo"),
+            ];
+
+            for candidate in &native_candidates {
+                if candidate.exists() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+
+            // Fallback to .bin/tsgo (requires Node.js in PATH)
+            let candidates = [
+                dir.join("node_modules/.bin/tsgo"),
+                dir.join("node_modules/@typescript/native-preview/bin/tsgo"),
+            ];
+
+            for candidate in &candidates {
+                if candidate.exists() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+
+            None
+        };
+
+        // Search in base_dir first
+        if let Some(path) = search_in_dir(&base_dir) {
+            return Some(path);
+        }
+
+        // Walk up parent directories to find workspace root's node_modules
+        let mut current = base_dir.as_path();
+        while let Some(parent) = current.parent() {
+            if let Some(path) = search_in_dir(parent) {
+                return Some(path);
+            }
+            current = parent;
         }
 
         None

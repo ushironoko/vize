@@ -136,6 +136,21 @@ fn to_camel_case(s: &str) -> String {
     result
 }
 
+/// Sanitize a string to be a valid TypeScript identifier.
+/// Replaces invalid characters (like ':') with underscores.
+/// Examples: "update:title" -> "update_title", "my-event" -> "my_event"
+fn to_safe_identifier(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// Generate virtual TypeScript from Vue SFC analysis.
 ///
 /// The generated TypeScript uses proper scope hierarchy:
@@ -441,9 +456,8 @@ fn generate_expression(
         // Wrap in if block for type narrowing
         ts.push_str(&format!("{}if ({}) {{\n", indent, guard));
         ts.push_str(&format!(
-            "{}  const __expr_{} = {}; // {}\n",
+            "{}  void ({}); // {}\n",
             indent,
-            expr.start,
             expr.content,
             expr.kind.as_str()
         ));
@@ -454,9 +468,8 @@ fn generate_expression(
         ts.push_str(&format!("{}}}\n", indent));
     } else {
         ts.push_str(&format!(
-            "{}const __expr_{} = {}; // {}\n",
+            "{}void ({}); // {}\n",
             indent,
-            expr.start,
             expr.content,
             expr.kind.as_str()
         ));
@@ -584,6 +597,9 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                     // Generate event handler closure
                     ts.push_str(&format!("\n  // @{} handler\n", data.event_name));
 
+                    // Sanitize event name for use in TypeScript identifiers
+                    let safe_event_name = to_safe_identifier(data.event_name.as_str());
+
                     // Determine event type based on target
                     if let Some(ref component_name) = data.target_component {
                         // Component custom event: extract type from component's props
@@ -591,14 +607,21 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                         let pascal_event = to_pascal_case(data.event_name.as_str());
                         let on_handler = format!("on{}", pascal_event);
 
+                        // Quote property name if it contains special characters (like colon in "update:title")
+                        let prop_key = if on_handler.contains(':') {
+                            format!("\"{}\"", on_handler)
+                        } else {
+                            on_handler
+                        };
+
                         // Generate type extraction for component event
                         ts.push_str(&format!(
                             "  type __{}_{}_event = typeof {} extends {{ new (): {{ $props: infer P }} }}\n",
-                            component_name, data.event_name, component_name
+                            component_name, safe_event_name, component_name
                         ));
                         ts.push_str(&format!(
                             "    ? P extends {{ {}?: (arg: infer A, ...rest: any[]) => any }} ? A : unknown\n",
-                            on_handler
+                            prop_key
                         ));
                         ts.push_str(&format!(
                             "    : typeof {} extends (props: infer P) => any\n",
@@ -606,11 +629,11 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                         ));
                         ts.push_str(&format!(
                             "      ? P extends {{ {}?: (arg: infer A, ...rest: any[]) => any }} ? A : unknown\n",
-                            on_handler
+                            prop_key
                         ));
                         ts.push_str("      : unknown;\n");
 
-                        let event_type = format!("__{}_{}_event", component_name, data.event_name);
+                        let event_type = format!("__{}_{}_event", component_name, safe_event_name);
                         ts.push_str(&format!("  (($event: {}) => {{\n", event_type));
 
                         // Generate expressions in this scope
@@ -620,6 +643,9 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                                 let is_simple_identifier = content
                                     .chars()
                                     .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+
+                                let src_start = template_offset + expr.start;
+                                let src_end = template_offset + expr.end;
 
                                 if data.has_implicit_event
                                     && is_simple_identifier
@@ -635,6 +661,10 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                                         content
                                     ));
                                 }
+                                ts.push_str(&format!(
+                                    "    // @vize-map: handler -> {}:{}\n",
+                                    src_start, src_end
+                                ));
                             }
                         }
 
@@ -652,6 +682,9 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                                     .chars()
                                     .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
 
+                                let src_start = template_offset + expr.start;
+                                let src_end = template_offset + expr.end;
+
                                 if data.has_implicit_event
                                     && is_simple_identifier
                                     && !content.is_empty()
@@ -666,6 +699,10 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                                         content
                                     ));
                                 }
+                                ts.push_str(&format!(
+                                    "    // @vize-map: handler -> {}:{}\n",
+                                    src_start, src_end
+                                ));
                             }
                         }
 

@@ -307,14 +307,35 @@ struct JsonRpcNotification {
     params: Option<Value>,
 }
 
-/// JSON-RPC response.
+/// JSON-RPC ID can be number or string.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum JsonRpcId {
+    Number(u64),
+    String(String),
+}
+
+impl JsonRpcId {
+    fn as_u64(&self) -> Option<u64> {
+        match self {
+            JsonRpcId::Number(n) => Some(*n),
+            JsonRpcId::String(s) => s.parse().ok(),
+        }
+    }
+}
+
+/// JSON-RPC message (response or notification).
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct JsonRpcResponse {
+struct JsonRpcMessage {
     jsonrpc: String,
-    id: Option<u64>,
+    id: Option<JsonRpcId>,
     result: Option<Value>,
     error: Option<JsonRpcError>,
+    /// Method name for notifications
+    method: Option<String>,
+    /// Params for notifications
+    params: Option<Value>,
 }
 
 /// JSON-RPC error.
@@ -356,14 +377,17 @@ type PendingMap = Arc<DashMap<u64, oneshot::Sender<Result<Value, TsgoBridgeError
 /// Type alias for diagnostics cache map.
 type DiagnosticsCache = Arc<DashMap<String, Vec<LspDiagnostic>>>;
 
+/// Type alias for shared stdin writer.
+type SharedStdin = Arc<Mutex<Option<BufWriter<TokioChildStdin>>>>;
+
 /// Bridge to tsgo for type checking via LSP.
 pub struct TsgoBridge {
     /// Configuration
     config: TsgoBridgeConfig,
     /// tsgo process handle
     process: Mutex<Option<TokioChild>>,
-    /// Stdin writer
-    stdin: Mutex<Option<BufWriter<TokioChildStdin>>>,
+    /// Stdin writer (shared with reader task for responding to server requests)
+    stdin: SharedStdin,
     /// Request ID counter
     request_id: AtomicU64,
     /// Pending requests (wrapped in Arc for sharing with reader task)
@@ -395,7 +419,7 @@ impl TsgoBridge {
         Self {
             config,
             process: Mutex::new(None),
-            stdin: Mutex::new(None),
+            stdin: Arc::new(Mutex::new(None)),
             request_id: AtomicU64::new(1),
             pending: Arc::new(DashMap::new()),
             initialized: AtomicBool::new(false),
@@ -410,7 +434,9 @@ impl TsgoBridge {
         let _timer = self.profiler.timer("tsgo_spawn");
 
         // Find tsgo executable
+        tracing::info!("tsgo_bridge: finding tsgo path...");
         let tsgo_path = self.find_tsgo_path()?;
+        tracing::info!("tsgo_bridge: found tsgo at {:?}", tsgo_path);
 
         // Spawn tsgo with LSP mode
         let mut cmd = TokioCommand::new(&tsgo_path);
@@ -418,15 +444,18 @@ impl TsgoBridge {
             .arg("--stdio")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped()); // Capture stderr for debugging
 
         if let Some(ref working_dir) = self.config.working_dir {
+            tracing::info!("tsgo_bridge: working_dir = {:?}", working_dir);
             cmd.current_dir(working_dir);
         }
 
+        tracing::info!("tsgo_bridge: spawning process...");
         let mut child = cmd.spawn().map_err(|e| {
             TsgoBridgeError::SpawnFailed(format!("Failed to spawn tsgo at {:?}: {}", tsgo_path, e))
         })?;
+        tracing::info!("tsgo_bridge: process spawned");
 
         let stdin = child
             .stdin
@@ -438,14 +467,35 @@ impl TsgoBridge {
             .take()
             .ok_or_else(|| TsgoBridgeError::SpawnFailed("Failed to get stdout".to_string()))?;
 
+        let stderr = child.stderr.take();
+
         *self.process.lock().await = Some(child);
         *self.stdin.lock().await = Some(BufWriter::new(stdin));
 
+        // Start stderr reader task (for debugging)
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => break,
+                        Ok(_) => tracing::warn!("tsgo stderr: {}", line.trim()),
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
         // Start response reader task
+        tracing::info!("tsgo_bridge: starting reader task...");
         self.start_reader_task(stdout);
 
         // Initialize LSP
+        tracing::info!("tsgo_bridge: calling initialize()...");
         self.initialize().await?;
+        tracing::info!("tsgo_bridge: initialized");
 
         self.initialized.store(true, Ordering::SeqCst);
 
@@ -460,8 +510,9 @@ impl TsgoBridge {
     ///
     /// Search order:
     /// 1. Explicit config.tsgo_path
-    /// 2. Local node_modules (relative to working_dir or cwd)
-    /// 3. Global PATH
+    /// 2. Native binary in node_modules (platform-specific) - walks up parent dirs
+    /// 3. Local node_modules/.bin/tsgo (requires node)
+    /// 4. Global PATH
     fn find_tsgo_path(&self) -> Result<PathBuf, TsgoBridgeError> {
         // 1. Use explicit path if provided
         if let Some(ref path) = self.config.tsgo_path {
@@ -470,26 +521,97 @@ impl TsgoBridge {
             }
         }
 
-        // 2. Try local node_modules first (prefer local installation)
         let base_dir = self
             .config
             .working_dir
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-        let local_candidates = [
-            base_dir.join("node_modules/.bin/tsgo"),
-            base_dir.join("node_modules/@typescript/native-preview/bin/tsgo"),
-        ];
-
-        for candidate in &local_candidates {
-            if candidate.exists() {
-                return Ok(candidate.clone());
+        // Platform-specific paths for @typescript/native-preview
+        let platform_suffix = if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                "darwin-arm64"
+            } else {
+                "darwin-x64"
             }
+        } else if cfg!(target_os = "linux") {
+            if cfg!(target_arch = "aarch64") {
+                "linux-arm64"
+            } else {
+                "linux-x64"
+            }
+        } else if cfg!(target_os = "windows") {
+            "win32-x64"
+        } else {
+            ""
+        };
+
+        // Helper to search for tsgo in a directory
+        let search_in_dir = |dir: &std::path::Path| -> Option<PathBuf> {
+            // Try pnpm structure first
+            let pnpm_pattern = dir.join("node_modules/.pnpm");
+            if pnpm_pattern.exists() {
+                if let Ok(entries) = std::fs::read_dir(&pnpm_pattern) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        if name_str.starts_with("@typescript+native-preview-")
+                            && name_str.contains(platform_suffix)
+                        {
+                            let native_path = entry.path().join(format!(
+                                "node_modules/@typescript/native-preview-{}/lib/tsgo",
+                                platform_suffix
+                            ));
+                            if native_path.exists() {
+                                return Some(native_path);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Try npm/yarn structure
+            let native_candidates = [
+                dir.join(format!(
+                    "node_modules/@typescript/native-preview-{}/lib/tsgo",
+                    platform_suffix
+                )),
+                dir.join("node_modules/@typescript/native-preview/lib/tsgo"),
+            ];
+
+            for candidate in &native_candidates {
+                if candidate.exists() {
+                    return Some(candidate.clone());
+                }
+            }
+
+            // Try .bin/tsgo (requires node in PATH)
+            let bin_tsgo = dir.join("node_modules/.bin/tsgo");
+            if bin_tsgo.exists() {
+                return Some(bin_tsgo);
+            }
+
+            None
+        };
+
+        // 2. Search in base_dir first, then walk up parent directories
+        if let Some(path) = search_in_dir(&base_dir) {
+            tracing::info!("tsgo_bridge: found tsgo at {:?}", path);
+            return Ok(path);
+        }
+
+        let mut current = base_dir.as_path();
+        while let Some(parent) = current.parent() {
+            if let Some(path) = search_in_dir(parent) {
+                tracing::info!("tsgo_bridge: found tsgo at {:?}", path);
+                return Ok(path);
+            }
+            current = parent;
         }
 
         // 3. Try global PATH
         if let Ok(path) = which::which("tsgo") {
+            tracing::info!("tsgo_bridge: found tsgo in PATH at {:?}", path);
             return Ok(path);
         }
 
@@ -502,21 +624,32 @@ impl TsgoBridge {
     fn start_reader_task(&self, stdout: TokioChildStdout) {
         let pending = Arc::clone(&self.pending);
         let diagnostics_cache = Arc::clone(&self.diagnostics_cache);
+        let stdin = Arc::clone(&self.stdin);
 
         tokio::spawn(async move {
+            tracing::info!("tsgo_bridge: reader task started");
             let mut reader = BufReader::new(stdout);
             let mut headers = String::new();
             let mut content_length: usize = 0;
 
             loop {
                 headers.clear();
+                tracing::debug!("tsgo_bridge: reader waiting for next message...");
 
                 // Read headers
                 loop {
                     let mut line = String::new();
                     match reader.read_line(&mut line).await {
-                        Ok(0) => return, // EOF
-                        Ok(_) => {
+                        Ok(0) => {
+                            tracing::warn!("tsgo_bridge: reader EOF");
+                            return;
+                        }
+                        Ok(n) => {
+                            tracing::debug!(
+                                "tsgo_bridge: read header line ({} bytes): {:?}",
+                                n,
+                                line
+                            );
                             if line == "\r\n" || line == "\n" {
                                 break;
                             }
@@ -526,51 +659,120 @@ impl TsgoBridge {
                                 }
                             }
                         }
-                        Err(_) => return,
+                        Err(e) => {
+                            tracing::error!("tsgo_bridge: reader error: {}", e);
+                            return;
+                        }
                     }
                 }
 
                 if content_length == 0 {
+                    tracing::warn!("tsgo_bridge: content_length is 0, skipping");
                     continue;
                 }
+
+                tracing::info!("tsgo_bridge: reading {} bytes", content_length);
 
                 // Read content
                 let mut content = vec![0u8; content_length];
                 if reader.read_exact(&mut content).await.is_err() {
+                    tracing::error!("tsgo_bridge: failed to read content");
                     continue;
                 }
 
-                // Parse response
-                let response: JsonRpcResponse = match serde_json::from_slice(&content) {
+                // Log raw content for debugging
+                let raw_str = String::from_utf8_lossy(&content);
+                tracing::info!(
+                    "tsgo_bridge: raw message (first 300 chars): {}",
+                    &raw_str[..raw_str.len().min(300)]
+                );
+
+                // Parse message (response or notification)
+                let message: JsonRpcMessage = match serde_json::from_slice(&content) {
                     Ok(r) => r,
-                    Err(_) => continue,
+                    Err(e) => {
+                        tracing::error!("tsgo_bridge: failed to parse message: {}", e);
+                        tracing::error!("tsgo_bridge: raw content: {}", raw_str);
+                        continue;
+                    }
                 };
 
-                // Handle response or notification
-                if let Some(id) = response.id {
-                    // Response to a request
-                    if let Some((_, sender)) = pending.remove(&id) {
-                        let result = if let Some(error) = response.error {
-                            Err(TsgoBridgeError::ResponseError {
-                                code: error.code,
-                                message: error.message,
-                            })
-                        } else {
-                            Ok(response.result.unwrap_or(Value::Null))
-                        };
-                        let _ = sender.send(result);
+                tracing::info!(
+                    "tsgo_bridge: received message id={:?} method={:?}",
+                    message.id,
+                    message.method
+                );
+
+                // Handle response (has id, no method) - this is a response to our request
+                if let Some(ref id) = message.id {
+                    // Check if this is a server request (has both id and method)
+                    if message.method.is_some() {
+                        // This is a request FROM the server TO the client
+                        // We need to respond with an empty result (like CLI does)
+                        tracing::info!(
+                            "tsgo_bridge: server request received, method={:?}, sending empty response",
+                            message.method
+                        );
+
+                        // Send empty response
+                        let response = json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": Value::Null
+                        });
+                        if let Ok(response_content) = serde_json::to_string(&response) {
+                            let response_msg = format!(
+                                "Content-Length: {}\r\n\r\n{}",
+                                response_content.len(),
+                                response_content
+                            );
+                            let mut stdin_guard = stdin.lock().await;
+                            if let Some(ref mut writer) = *stdin_guard {
+                                let _ = writer.write_all(response_msg.as_bytes()).await;
+                                let _ = writer.flush().await;
+                                tracing::info!(
+                                    "tsgo_bridge: sent empty response for server request"
+                                );
+                            }
+                        }
+                    } else if let Some(numeric_id) = id.as_u64() {
+                        // This is a response to our request
+                        if let Some((_, sender)) = pending.remove(&numeric_id) {
+                            let result = if let Some(error) = message.error {
+                                tracing::warn!(
+                                    "tsgo_bridge: error response: {} - {}",
+                                    error.code,
+                                    error.message
+                                );
+                                Err(TsgoBridgeError::ResponseError {
+                                    code: error.code,
+                                    message: error.message,
+                                })
+                            } else {
+                                Ok(message.result.unwrap_or(Value::Null))
+                            };
+                            let _ = sender.send(result);
+                        }
                     }
-                } else if let Some(result) = response.result {
-                    // Check if it's a publishDiagnostics notification
-                    if let Some(params) = result.get("params") {
-                        if let (Some(uri), Some(diagnostics)) = (
-                            params.get("uri").and_then(|v| v.as_str()),
-                            params.get("diagnostics"),
-                        ) {
-                            if let Ok(diags) =
-                                serde_json::from_value::<Vec<LspDiagnostic>>(diagnostics.clone())
-                            {
-                                diagnostics_cache.insert(uri.to_string(), diags);
+                }
+                // Handle notification (no id, has method)
+                else if let Some(ref method) = message.method {
+                    if method == "textDocument/publishDiagnostics" {
+                        if let Some(ref params) = message.params {
+                            if let (Some(uri), Some(diagnostics)) = (
+                                params.get("uri").and_then(|v| v.as_str()),
+                                params.get("diagnostics"),
+                            ) {
+                                if let Ok(diags) = serde_json::from_value::<Vec<LspDiagnostic>>(
+                                    diagnostics.clone(),
+                                ) {
+                                    tracing::info!(
+                                        "tsgo_bridge: received {} diagnostics for {}",
+                                        diags.len(),
+                                        uri
+                                    );
+                                    diagnostics_cache.insert(uri.to_string(), diags);
+                                }
                             }
                         }
                     }
@@ -582,6 +784,15 @@ impl TsgoBridge {
     /// Send LSP initialize request.
     async fn initialize(&self) -> Result<(), TsgoBridgeError> {
         let _timer = self.profiler.timer("lsp_initialize");
+
+        let root_uri = self
+            .config
+            .working_dir
+            .as_ref()
+            .map(|p| format!("file://{}", p.display()))
+            .unwrap_or_else(|| "file:///".to_string());
+
+        tracing::info!("tsgo_bridge: LSP rootUri = {}", root_uri);
 
         let params = json!({
             "processId": std::process::id(),
@@ -595,17 +806,19 @@ impl TsgoBridge {
                     }
                 }
             },
-            "rootUri": self.config.working_dir.as_ref()
-                .map(|p| format!("file://{}", p.display()))
-                .unwrap_or_else(|| "file:///".to_string()),
+            "rootUri": root_uri,
             "initializationOptions": {}
         });
 
+        tracing::info!("tsgo_bridge: sending initialize request...");
         self.send_request("initialize", Some(params)).await?;
+        tracing::info!("tsgo_bridge: initialize response received");
 
         // Send initialized notification
+        tracing::info!("tsgo_bridge: sending initialized notification...");
         self.send_notification("initialized", Some(json!({})))
             .await?;
+        tracing::info!("tsgo_bridge: initialized notification sent");
 
         if let Some(timer) = _timer {
             timer.record(&self.profiler);
@@ -715,7 +928,17 @@ impl TsgoBridge {
 
         let _timer = self.profiler.timer("open_virtual_document");
 
-        let uri = format!("{}://{}", VIRTUAL_URI_SCHEME, name);
+        // Use file:// URI scheme for compatibility with tsgo
+        // tsgo only publishes diagnostics for file:// URIs
+        let uri = if name.starts_with("file://") || name.starts_with('/') {
+            if name.starts_with("file://") {
+                name.to_string()
+            } else {
+                format!("file://{}", name)
+            }
+        } else {
+            format!("{}://{}", VIRTUAL_URI_SCHEME, name)
+        };
 
         let params = json!({
             "textDocument": {
@@ -792,29 +1015,94 @@ impl TsgoBridge {
     }
 
     /// Get diagnostics for a document.
+    /// First tries textDocument/diagnostic request, then falls back to cached publishDiagnostics.
     pub async fn get_diagnostics(&self, uri: &str) -> Result<Vec<LspDiagnostic>, TsgoBridgeError> {
         if !self.initialized.load(Ordering::SeqCst) {
             return Err(TsgoBridgeError::NotInitialized);
         }
 
-        // Check cache first
+        // Check cache first (diagnostics arrive via publishDiagnostics notification)
         if let Some(cached) = self.diagnostics_cache.get(uri) {
             self.cache_stats.hit();
+            tracing::info!(
+                "tsgo_bridge: cache hit for {}, {} diagnostics",
+                uri,
+                cached.len()
+            );
             return Ok(cached.clone());
         }
 
         self.cache_stats.miss();
 
-        // Wait for diagnostics to be published
-        // Note: This is a heuristic; tsgo publishes diagnostics asynchronously
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Try textDocument/diagnostic request first (LSP 3.17+ pull diagnostics)
+        // This is how CLI gets diagnostics
+        tracing::info!(
+            "tsgo_bridge: requesting diagnostics via textDocument/diagnostic for {}",
+            uri
+        );
 
-        // Return cached diagnostics or empty
-        Ok(self
-            .diagnostics_cache
-            .get(uri)
-            .map(|d| d.clone())
-            .unwrap_or_default())
+        let params = json!({
+            "textDocument": {
+                "uri": uri
+            }
+        });
+
+        match self
+            .send_request("textDocument/diagnostic", Some(params))
+            .await
+        {
+            Ok(result) => {
+                // Parse diagnostic response
+                if let Some(items) = result.get("items").and_then(|i| i.as_array()) {
+                    let diags: Vec<LspDiagnostic> = items
+                        .iter()
+                        .filter_map(|d| serde_json::from_value(d.clone()).ok())
+                        .collect();
+                    tracing::info!(
+                        "tsgo_bridge: received {} diagnostics via request for {}",
+                        diags.len(),
+                        uri
+                    );
+                    // Cache for later
+                    self.diagnostics_cache
+                        .insert(uri.to_string(), diags.clone());
+                    return Ok(diags);
+                }
+                tracing::info!(
+                    "tsgo_bridge: diagnostic request returned no items for {}",
+                    uri
+                );
+            }
+            Err(e) => {
+                tracing::warn!("tsgo_bridge: textDocument/diagnostic request failed: {}", e);
+            }
+        }
+
+        // Fallback: wait briefly for publishDiagnostics notification
+        tracing::info!("tsgo_bridge: waiting for publishDiagnostics for {}", uri);
+        let max_wait = std::time::Duration::from_millis(500);
+        let poll_interval = std::time::Duration::from_millis(50);
+        let start = std::time::Instant::now();
+
+        while start.elapsed() < max_wait {
+            if let Some(cached) = self.diagnostics_cache.get(uri) {
+                tracing::info!(
+                    "tsgo_bridge: diagnostics arrived via notification for {}, {} items",
+                    uri,
+                    cached.len()
+                );
+                return Ok(cached.clone());
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+
+        tracing::info!(
+            "tsgo_bridge: no diagnostics for {} (file may have no errors)",
+            uri
+        );
+
+        // Return empty if no diagnostics (file might have no errors)
+        Ok(vec![])
     }
 
     /// Type check a virtual TypeScript document.

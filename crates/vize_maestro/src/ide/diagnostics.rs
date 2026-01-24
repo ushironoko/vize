@@ -42,6 +42,32 @@ impl From<Severity> for DiagnosticSeverity {
     }
 }
 
+/// Source position mapping from @vize-map comments.
+#[cfg(feature = "native")]
+#[derive(Debug, Clone)]
+struct SourceMapping {
+    /// Byte offset start in SFC
+    start: u32,
+    /// Byte offset end in SFC
+    end: u32,
+}
+
+/// Virtual TypeScript generation result with position mapping info.
+#[cfg(feature = "native")]
+struct VirtualTsResult {
+    /// Generated TypeScript code
+    code: String,
+    /// Line number where user code starts in virtual TS (0-indexed)
+    user_code_start_line: u32,
+    /// Line number where script starts in original SFC (1-indexed)
+    sfc_script_start_line: u32,
+    /// Line number where template scope starts in virtual TS (0-indexed)
+    template_scope_start_line: u32,
+    /// Line-to-source mappings from @vize-map comments
+    /// Index is virtual TS line number (0-indexed), value is source position in SFC
+    line_mappings: Vec<Option<SourceMapping>>,
+}
+
 /// Diagnostic service for collecting and aggregating diagnostics.
 pub struct DiagnosticService;
 
@@ -49,6 +75,7 @@ impl DiagnosticService {
     /// Collect all diagnostics for a document.
     pub fn collect(state: &ServerState, uri: &Url) -> Vec<Diagnostic> {
         let Some(doc) = state.documents.get(uri) else {
+            tracing::warn!("collect: document not found for {}", uri);
             return vec![];
         };
 
@@ -65,16 +92,27 @@ impl DiagnosticService {
 
         // Standard SFC processing
         // Collect SFC parser diagnostics
-        diagnostics.extend(Self::collect_sfc_diagnostics(uri, &content));
+        let sfc_diags = Self::collect_sfc_diagnostics(uri, &content);
+        tracing::info!("collect: SFC parser diagnostics: {}", sfc_diags.len());
+        diagnostics.extend(sfc_diags);
 
         // Collect template parser diagnostics
-        diagnostics.extend(Self::collect_template_diagnostics(uri, &content));
+        let template_diags = Self::collect_template_diagnostics(uri, &content);
+        tracing::info!(
+            "collect: template parser diagnostics: {}",
+            template_diags.len()
+        );
+        diagnostics.extend(template_diags);
 
         // Collect linter diagnostics (vize_patina)
-        diagnostics.extend(Self::collect_lint_diagnostics(uri, &content));
+        let lint_diags = Self::collect_lint_diagnostics(uri, &content);
+        tracing::info!("collect: patina lint diagnostics: {}", lint_diags.len());
+        diagnostics.extend(lint_diags);
 
         // Collect type checker diagnostics (vize_canon)
-        diagnostics.extend(super::TypeService::collect_diagnostics(state, uri));
+        let type_diags = super::TypeService::collect_diagnostics(state, uri);
+        tracing::info!("collect: type checker diagnostics: {}", type_diags.len());
+        diagnostics.extend(type_diags);
 
         diagnostics
     }
@@ -82,15 +120,23 @@ impl DiagnosticService {
     /// Collect diagnostics asynchronously (includes tsgo diagnostics when available).
     #[cfg(feature = "native")]
     pub async fn collect_async(state: &ServerState, uri: &Url) -> Vec<Diagnostic> {
+        tracing::info!("collect_async: {}", uri);
+
         // Start with sync diagnostics (patina, etc.)
         let mut diagnostics = Self::collect(state, uri);
+        tracing::info!("sync diagnostics count: {}", diagnostics.len());
 
         // Try to get tsgo diagnostics (with timeout, skip on failure)
+        // Use 10s timeout - polling for diagnostics internally uses 5s
         let tsgo_future = Self::collect_tsgo_diagnostics(state, uri);
-        if let Ok(tsgo_diags) =
-            tokio::time::timeout(std::time::Duration::from_secs(5), tsgo_future).await
-        {
-            diagnostics.extend(tsgo_diags);
+        match tokio::time::timeout(std::time::Duration::from_secs(10), tsgo_future).await {
+            Ok(tsgo_diags) => {
+                tracing::info!("tsgo diagnostics count: {}", tsgo_diags.len());
+                diagnostics.extend(tsgo_diags);
+            }
+            Err(_) => {
+                tracing::warn!("tsgo diagnostics timed out for {}", uri);
+            }
         }
 
         diagnostics
@@ -99,62 +145,222 @@ impl DiagnosticService {
     /// Collect diagnostics from tsgo LSP.
     #[cfg(feature = "native")]
     async fn collect_tsgo_diagnostics(state: &ServerState, uri: &Url) -> Vec<Diagnostic> {
+        tracing::info!("collect_tsgo_diagnostics: {}", uri);
+
         // Only process .vue files
         if !uri.path().ends_with(".vue") {
+            tracing::debug!("skipping non-vue file: {}", uri);
             return vec![];
         }
 
         // Get document content
         let Some(doc) = state.documents.get(uri) else {
+            tracing::warn!("document not found: {}", uri);
             return vec![];
         };
         let content = doc.text();
 
         // Get tsgo bridge
+        tracing::info!("getting tsgo bridge...");
         let Some(bridge) = state.get_tsgo_bridge().await else {
+            tracing::warn!("tsgo bridge not available");
             return vec![];
         };
+        tracing::info!("tsgo bridge acquired");
 
         // Generate virtual TypeScript
-        let Some(virtual_ts) = Self::generate_virtual_ts(uri, &content) else {
+        let Some(virtual_result) = Self::generate_virtual_ts(uri, &content) else {
+            tracing::warn!("failed to generate virtual ts for {}", uri);
             return vec![];
         };
+        let virtual_ts = &virtual_result.code;
+        let user_code_start_line = virtual_result.user_code_start_line;
+        let sfc_script_start_line = virtual_result.sfc_script_start_line;
+        let template_scope_start_line = virtual_result.template_scope_start_line;
+        let line_mappings = &virtual_result.line_mappings;
+        tracing::info!(
+            "generated virtual ts ({} bytes), user_code_start={}, sfc_script_start={}, template_scope_start={}, mappings_count={}",
+            virtual_ts.len(),
+            user_code_start_line,
+            sfc_script_start_line,
+            template_scope_start_line,
+            line_mappings.iter().filter(|m| m.is_some()).count()
+        );
 
-        // Create virtual URI
-        let virtual_uri = format!("file://{}.ts", uri.path());
+        // Create virtual document name (used by tsgo bridge to create the full URI)
+        let virtual_name = format!("{}.ts", uri.path());
 
         // Open document in tsgo
-        if bridge
-            .open_virtual_document(&virtual_uri, &virtual_ts)
+        tracing::info!("opening virtual document: {}", virtual_name);
+        let virtual_uri = match bridge
+            .open_virtual_document(&virtual_name, virtual_ts)
             .await
-            .is_err()
         {
-            return vec![];
-        }
+            Ok(uri) => {
+                tracing::info!("virtual document opened successfully: {}", uri);
+                uri
+            }
+            Err(e) => {
+                tracing::warn!("failed to open virtual document: {}", e);
+                return vec![];
+            }
+        };
 
-        // Get diagnostics
+        // Get diagnostics (will poll for publishDiagnostics notification)
+        tracing::info!(
+            "waiting for diagnostics from tsgo bridge for {}",
+            virtual_uri
+        );
         let Ok(tsgo_diags) = bridge.get_diagnostics(&virtual_uri).await else {
+            tracing::warn!("failed to get diagnostics from tsgo");
             return vec![];
         };
 
-        // Convert to LSP diagnostics
+        tracing::info!(
+            "tsgo returned {} raw diagnostics for {}",
+            tsgo_diags.len(),
+            virtual_uri
+        );
+
+        // Log each diagnostic for debugging
+        for (i, diag) in tsgo_diags.iter().enumerate() {
+            tracing::info!(
+                "  raw diag[{}]: line {}-{}, message: {}",
+                i,
+                diag.range.start.line,
+                diag.range.end.line,
+                &diag.message[..diag.message.len().min(100)]
+            );
+        }
+
+        // Helper to convert byte offset to (line, column) - both 0-indexed
+        let offset_to_position = |offset: u32| -> (u32, u32) {
+            let mut line = 0u32;
+            let mut col = 0u32;
+            let mut current = 0u32;
+
+            for ch in content.chars() {
+                if current >= offset {
+                    break;
+                }
+                if ch == '\n' {
+                    line += 1;
+                    col = 0;
+                } else {
+                    col += 1;
+                }
+                current += ch.len_utf8() as u32;
+            }
+
+            (line, col)
+        };
+
+        // Convert to LSP diagnostics with proper position mapping
         tsgo_diags
             .into_iter()
             .filter_map(|diag| {
-                // Skip diagnostics in preamble (before script content)
-                if diag.range.start.line < 20 {
+                // Skip diagnostics in preamble (before user script content)
+                if diag.range.start.line < user_code_start_line {
+                    tracing::debug!(
+                        "skipping preamble diagnostic at line {} (user code starts at {}): {}",
+                        diag.range.start.line,
+                        user_code_start_line,
+                        &diag.message[..diag.message.len().min(50)]
+                    );
                     return None;
                 }
+
+                // Skip warnings about internal generated variables
+                // TS6133: 'X' is declared but its value is never read
+                // TS6196: 'X' is declared but never used
+                let is_unused_warning = diag.message.contains("is declared but")
+                    && (diag.message.contains("never read") || diag.message.contains("never used"));
+                let is_internal_var = diag.message.contains("'__")
+                    || diag.message.contains("'$event'")
+                    || diag.message.contains("'$attrs'")
+                    || diag.message.contains("'$slots'")
+                    || diag.message.contains("'$refs'")
+                    || diag.message.contains("'$emit'");
+
+                if is_unused_warning && is_internal_var {
+                    tracing::debug!(
+                        "skipping internal variable warning: {}",
+                        &diag.message[..diag.message.len().min(80)]
+                    );
+                    return None;
+                }
+
+                // Determine if this is a script error or template error
+                let is_template_error = diag.range.start.line >= template_scope_start_line;
+
+                let (start_line, end_line, start_char, end_char) = if is_template_error {
+                    // Template scope error - try to find source mapping from @vize-map comments
+                    let virtual_line = diag.range.start.line as usize;
+
+                    // @vize-map comments are placed AFTER the code line they map.
+                    // So for an error at line N, the mapping is at line N (from comment at N+1).
+                    // Search forward (down) from the error line to find the mapping.
+                    let mapping = (0..=10)
+                        .filter_map(|offset| {
+                            let search_line = virtual_line + offset;
+                            line_mappings.get(search_line).and_then(|m| m.as_ref())
+                        })
+                        .next();
+
+                    if let Some(src_mapping) = mapping {
+                        // Found a source mapping - convert byte offset to line/column
+                        let (start_line, start_col) = offset_to_position(src_mapping.start);
+                        let (end_line, end_col) = offset_to_position(src_mapping.end);
+
+                        tracing::info!(
+                            "template error with mapping: virtual_line={} -> offset {}:{} -> sfc_line={} (message: {})",
+                            diag.range.start.line,
+                            src_mapping.start,
+                            src_mapping.end,
+                            start_line,
+                            &diag.message[..diag.message.len().min(50)]
+                        );
+                        (start_line, end_line, start_col, end_col)
+                    } else {
+                        // No mapping found - skip this diagnostic
+                        tracing::debug!(
+                            "skipping unmapped template error at line {}: {}",
+                            diag.range.start.line,
+                            &diag.message[..diag.message.len().min(50)]
+                        );
+                        return None;
+                    }
+                } else {
+                    // Script error - map using user code offset
+                    let user_code_offset = diag.range.start.line.saturating_sub(user_code_start_line);
+                    let user_code_offset_end = diag.range.end.line.saturating_sub(user_code_start_line);
+
+                    // sfc_script_start_line is 1-indexed, convert to 0-indexed
+                    let start = (sfc_script_start_line.saturating_sub(1)) + user_code_offset;
+                    let end = (sfc_script_start_line.saturating_sub(1)) + user_code_offset_end;
+
+                    // Adjust character offset: virtual TS adds 2 spaces of indentation
+                    let start_ch = diag.range.start.character.saturating_sub(2);
+                    let end_ch = diag.range.end.character.saturating_sub(2);
+
+                    tracing::debug!(
+                        "script error: virtual_line={} -> sfc_line={} (message: {})",
+                        diag.range.start.line,
+                        start,
+                        &diag.message[..diag.message.len().min(50)]
+                    );
+                    (start, end, start_ch, end_ch)
+                };
 
                 Some(Diagnostic {
                     range: Range {
                         start: Position {
-                            line: diag.range.start.line.saturating_sub(20),
-                            character: diag.range.start.character,
+                            line: start_line,
+                            character: start_char,
                         },
                         end: Position {
-                            line: diag.range.end.line.saturating_sub(20),
-                            character: diag.range.end.character,
+                            line: end_line,
+                            character: end_char,
                         },
                     },
                     severity: diag.severity.map(|s| match s {
@@ -173,7 +379,7 @@ impl DiagnosticService {
 
     /// Generate virtual TypeScript for a Vue SFC.
     #[cfg(feature = "native")]
-    fn generate_virtual_ts(uri: &Url, content: &str) -> Option<String> {
+    fn generate_virtual_ts(uri: &Url, content: &str) -> Option<VirtualTsResult> {
         use vize_atelier_sfc::{parse_sfc, SfcParseOptions};
         use vize_canon::virtual_ts::generate_virtual_ts;
         use vize_croquis::{Analyzer, AnalyzerOptions};
@@ -185,11 +391,17 @@ impl DiagnosticService {
 
         let descriptor = parse_sfc(content, options).ok()?;
 
-        let script_content = descriptor
+        // Get script block info
+        let (script_content, sfc_script_start_line) = descriptor
             .script_setup
             .as_ref()
-            .map(|s| s.content.as_ref())
-            .or_else(|| descriptor.script.as_ref().map(|s| s.content.as_ref()));
+            .map(|s| (s.content.as_ref(), s.loc.start_line as u32))
+            .or_else(|| {
+                descriptor
+                    .script
+                    .as_ref()
+                    .map(|s| (s.content.as_ref(), s.loc.start_line as u32))
+            })?;
 
         let template_block = descriptor.template.as_ref()?;
         let template_offset = template_block.loc.start as u32;
@@ -198,18 +410,107 @@ impl DiagnosticService {
         let (template_ast, _) = vize_armature::parse(&allocator, &template_block.content);
 
         let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
-        if let Some(script) = script_content {
-            analyzer.analyze_script(script);
-        }
+        analyzer.analyze_script(script_content);
         analyzer.analyze_template(&template_ast);
 
         let summary = analyzer.finish();
-        Some(generate_virtual_ts(
+        let code = generate_virtual_ts(
             &summary,
-            script_content,
+            Some(script_content),
             Some(&template_ast),
             template_offset,
-        ))
+        );
+
+        // Find where user code starts in generated virtual TS
+        // Look for "// User setup code" comment
+        let user_code_start_line = code
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains("// User setup code"))
+            .map(|(i, _)| i as u32 + 1) // +1 because user code is on next line
+            .unwrap_or(0);
+
+        // Find where template scope starts in generated virtual TS
+        // Look for "// Template Scope" or "// ========== Template Scope" comment
+        let template_scope_start_line = code
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains("Template Scope"))
+            .map(|(i, _)| i as u32)
+            .unwrap_or(u32::MAX);
+
+        // Parse @vize-map comments to build line mappings
+        // Format: // @vize-map: TYPE -> START:END
+        // Where START:END are byte offsets in the SFC
+        let line_mappings = Self::parse_vize_map_comments(&code);
+
+        Some(VirtualTsResult {
+            code,
+            user_code_start_line,
+            sfc_script_start_line,
+            template_scope_start_line,
+            line_mappings,
+        })
+    }
+
+    /// Parse @vize-map comments from generated virtual TS code.
+    /// Returns a vector where index is line number and value is source mapping.
+    #[cfg(feature = "native")]
+    fn parse_vize_map_comments(code: &str) -> Vec<Option<SourceMapping>> {
+        let mut mappings: Vec<Option<SourceMapping>> = vec![None; code.lines().count()];
+        let mut found_count = 0;
+
+        // Parse @vize-map comments without regex
+        // Format: // @vize-map: TYPE -> START:END
+        for (line_idx, line) in code.lines().enumerate() {
+            // Find @vize-map comment
+            if let Some(map_idx) = line.find("@vize-map:") {
+                // Extract the part after @vize-map:
+                let rest = &line[map_idx + "@vize-map:".len()..];
+
+                // Find -> separator
+                if let Some(arrow_idx) = rest.find("->") {
+                    // Extract START:END part after ->
+                    let offsets_part = rest[arrow_idx + 2..].trim();
+
+                    // Parse START:END
+                    if let Some(colon_idx) = offsets_part.find(':') {
+                        let start_str = offsets_part[..colon_idx].trim();
+                        let end_str = offsets_part[colon_idx + 1..].trim();
+
+                        // Remove any trailing non-digit characters
+                        let end_str = end_str
+                            .chars()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect::<String>();
+
+                        if let (Ok(start_val), Ok(end_val)) =
+                            (start_str.parse::<u32>(), end_str.parse::<u32>())
+                        {
+                            // The mapping applies to the line BEFORE the comment
+                            // (the actual code that will produce the error)
+                            if line_idx > 0 {
+                                mappings[line_idx - 1] = Some(SourceMapping {
+                                    start: start_val,
+                                    end: end_val,
+                                });
+                                found_count += 1;
+                                tracing::debug!(
+                                    "vize-map: line {} -> offset {}:{} (from: {})",
+                                    line_idx - 1,
+                                    start_val,
+                                    end_val,
+                                    &line[..line.len().min(80)]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("parse_vize_map_comments: found {} mappings", found_count);
+        mappings
     }
 
     /// Collect diagnostics for Art files (*.art.vue) using vize_patina's MuseaLinter.

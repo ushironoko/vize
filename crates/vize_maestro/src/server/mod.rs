@@ -106,7 +106,25 @@ impl MaestroServer {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for MaestroServer {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Set workspace root from root_uri or workspace_folders
+        #[cfg(feature = "native")]
+        {
+            if let Some(root_uri) = params.root_uri.as_ref() {
+                if let Ok(path) = root_uri.to_file_path() {
+                    tracing::info!("Setting workspace root: {:?}", path);
+                    self.state.set_workspace_root(path);
+                }
+            } else if let Some(folders) = params.workspace_folders.as_ref() {
+                if let Some(folder) = folders.first() {
+                    if let Ok(path) = folder.uri.to_file_path() {
+                        tracing::info!("Setting workspace root from folder: {:?}", path);
+                        self.state.set_workspace_root(path);
+                    }
+                }
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: server_capabilities(),
             server_info: Some(ServerInfo {
