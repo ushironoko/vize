@@ -2,6 +2,7 @@
 //!
 //! Integrates vize_vitrine's strict type checker with the LSP server.
 //! Uses croquis for semantic analysis and provides comprehensive type diagnostics.
+//! Also supports batch type checking via tsgo CLI.
 
 use tower_lsp::lsp_types::{
     CodeDescription, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location,
@@ -11,6 +12,20 @@ use vize_vitrine::{type_check_sfc, TypeCheckOptions, TypeSeverity};
 
 use super::IdeContext;
 use crate::server::ServerState;
+
+/// Batch type check result summary.
+#[cfg(feature = "native")]
+#[derive(Debug, Clone, Default)]
+pub struct BatchTypeCheckSummary {
+    /// Total number of files checked.
+    pub file_count: usize,
+    /// Number of errors.
+    pub error_count: usize,
+    /// Number of warnings.
+    pub warning_count: usize,
+    /// Whether the check succeeded (exit code 0).
+    pub success: bool,
+}
 
 /// Type checking options for LSP.
 #[derive(Debug, Clone)]
@@ -605,6 +620,53 @@ impl TypeService {
                 vize_canon::TypeKind::Function,
             ),
         );
+    }
+
+    /// Run batch type checking on the entire project.
+    ///
+    /// This uses tsgo CLI to perform comprehensive TypeScript type checking
+    /// on all Vue SFC files in the project. Results are cached for fast access.
+    #[cfg(feature = "native")]
+    pub fn run_batch_type_check(state: &ServerState) -> Option<BatchTypeCheckSummary> {
+        let result = state.run_batch_type_check()?;
+
+        Some(BatchTypeCheckSummary {
+            file_count: state
+                .get_batch_checker()
+                .map(|c| c.read().file_count())
+                .unwrap_or(0),
+            error_count: result.error_count(),
+            warning_count: result.warning_count(),
+            success: result.success,
+        })
+    }
+
+    /// Check if batch type checking is available.
+    #[cfg(feature = "native")]
+    pub fn is_batch_available(state: &ServerState) -> bool {
+        state.get_batch_checker().is_some()
+    }
+
+    /// Get batch type check diagnostics for a specific file.
+    #[cfg(feature = "native")]
+    pub fn get_batch_diagnostics_for_file(
+        state: &ServerState,
+        uri: &Url,
+    ) -> Vec<vize_canon::BatchDiagnostic> {
+        let file_path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return vec![],
+        };
+
+        let cache = state.get_batch_cache();
+        cache.get_diagnostics(&file_path)
+    }
+
+    /// Invalidate batch type check cache.
+    /// Should be called when files are modified.
+    #[cfg(feature = "native")]
+    pub fn invalidate_batch_cache(state: &ServerState) {
+        state.invalidate_batch_cache();
     }
 }
 

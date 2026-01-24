@@ -6,10 +6,16 @@
 //! - Script bindings and imports
 //! - CSS properties and Vue-specific selectors
 //! - TypeScript type information from croquis analysis
+//! - Real type information from tsgo (when available)
+
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Range};
 use vize_croquis::{Analyzer, AnalyzerOptions};
 use vize_relief::BindingType;
+
+#[cfg(feature = "native")]
+use vize_canon::{LspHover, LspHoverContents, LspMarkedString, TsgoBridge};
 
 use super::IdeContext;
 use crate::virtual_code::BlockType;
@@ -26,6 +32,269 @@ impl HoverService {
             BlockType::ScriptSetup => Self::hover_script(ctx, true),
             BlockType::Style(index) => Self::hover_style(ctx, index),
         }
+    }
+
+    /// Get hover information with tsgo support (async version).
+    ///
+    /// This method first tries to get type information from tsgo,
+    /// then falls back to the synchronous analysis.
+    #[cfg(feature = "native")]
+    pub async fn hover_with_tsgo(
+        ctx: &IdeContext<'_>,
+        tsgo_bridge: Option<Arc<TsgoBridge>>,
+    ) -> Option<Hover> {
+        match ctx.block_type? {
+            BlockType::Template => Self::hover_template_with_tsgo(ctx, tsgo_bridge).await,
+            BlockType::Script => Self::hover_script_with_tsgo(ctx, false, tsgo_bridge).await,
+            BlockType::ScriptSetup => Self::hover_script_with_tsgo(ctx, true, tsgo_bridge).await,
+            BlockType::Style(index) => Self::hover_style(ctx, index),
+        }
+    }
+
+    /// Get hover for template context with tsgo support.
+    #[cfg(feature = "native")]
+    async fn hover_template_with_tsgo(
+        ctx: &IdeContext<'_>,
+        tsgo_bridge: Option<Arc<TsgoBridge>>,
+    ) -> Option<Hover> {
+        let word = Self::get_word_at_offset(&ctx.content, ctx.offset);
+
+        if word.is_empty() {
+            return None;
+        }
+
+        // Check for Vue directives first (these don't need tsgo)
+        if let Some(hover) = Self::hover_directive(&word) {
+            return Some(hover);
+        }
+
+        // Try to get type information from tsgo via virtual TypeScript
+        if let Some(bridge) = tsgo_bridge {
+            if let Some(ref virtual_docs) = ctx.virtual_docs {
+                if let Some(ref template) = virtual_docs.template {
+                    // Calculate position in virtual TS
+                    if let Some(vts_offset) = Self::sfc_to_virtual_ts_offset(ctx, ctx.offset) {
+                        let (line, character) =
+                            super::offset_to_position(&template.content, vts_offset);
+                        let uri = format!("vize-virtual://{}.template.ts", ctx.uri.path());
+
+                        // Open/update virtual document
+                        if bridge.is_initialized() {
+                            let _ = bridge
+                                .open_virtual_document(
+                                    &format!("{}.template.ts", ctx.uri.path()),
+                                    &template.content,
+                                )
+                                .await;
+
+                            // Request hover from tsgo
+                            if let Ok(Some(hover)) = bridge.hover(&uri, line, character).await {
+                                return Some(Self::convert_lsp_hover(hover));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to croquis analysis
+        Self::hover_template(ctx)
+    }
+
+    /// Get hover for script context with tsgo support.
+    #[cfg(feature = "native")]
+    async fn hover_script_with_tsgo(
+        ctx: &IdeContext<'_>,
+        is_setup: bool,
+        tsgo_bridge: Option<Arc<TsgoBridge>>,
+    ) -> Option<Hover> {
+        let word = Self::get_word_at_offset(&ctx.content, ctx.offset);
+
+        if word.is_empty() {
+            return None;
+        }
+
+        // Check for Vue Composition API and macros first
+        if let Some(hover) = Self::hover_vue_api(&word) {
+            return Some(hover);
+        }
+
+        if is_setup {
+            if let Some(hover) = Self::hover_vue_macro(&word) {
+                return Some(hover);
+            }
+        }
+
+        // Try to get type information from tsgo via virtual TypeScript
+        if let Some(bridge) = tsgo_bridge {
+            if let Some(ref virtual_docs) = ctx.virtual_docs {
+                let script_doc = if is_setup {
+                    virtual_docs.script_setup.as_ref()
+                } else {
+                    virtual_docs.script.as_ref()
+                };
+
+                if let Some(script) = script_doc {
+                    // Calculate position in virtual TS
+                    if let Some(vts_offset) = Self::sfc_to_virtual_ts_script_offset(ctx, ctx.offset)
+                    {
+                        let (line, character) =
+                            super::offset_to_position(&script.content, vts_offset);
+                        let suffix = if is_setup { "setup.ts" } else { "script.ts" };
+                        let uri = format!("vize-virtual://{}.{}", ctx.uri.path(), suffix);
+
+                        // Open/update virtual document
+                        if bridge.is_initialized() {
+                            let _ = bridge
+                                .open_virtual_document(
+                                    &format!("{}.{}", ctx.uri.path(), suffix),
+                                    &script.content,
+                                )
+                                .await;
+
+                            // Request hover from tsgo
+                            if let Ok(Some(hover)) = bridge.hover(&uri, line, character).await {
+                                return Some(Self::convert_lsp_hover(hover));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to croquis analysis
+        Self::hover_script(ctx, is_setup)
+    }
+
+    /// Convert SFC offset to virtual TS template offset.
+    #[cfg(feature = "native")]
+    pub(crate) fn sfc_to_virtual_ts_offset(
+        ctx: &IdeContext<'_>,
+        sfc_offset: usize,
+    ) -> Option<usize> {
+        let virtual_docs = ctx.virtual_docs.as_ref()?;
+        let template = virtual_docs.template.as_ref()?;
+
+        // Get template block start offset in SFC
+        let options = vize_atelier_sfc::SfcParseOptions {
+            filename: ctx.uri.path().to_string(),
+            ..Default::default()
+        };
+
+        let descriptor = vize_atelier_sfc::parse_sfc(&ctx.content, options).ok()?;
+        let template_block = descriptor.template.as_ref()?;
+        let template_start = template_block.loc.start;
+
+        // Check if offset is within template
+        if sfc_offset < template_start || sfc_offset > template_block.loc.end {
+            return None;
+        }
+
+        // Calculate relative offset
+        let relative_offset = sfc_offset - template_start;
+
+        // Use source map to convert offset
+        template
+            .source_map
+            .to_generated(relative_offset as u32)
+            .map(|o| o as usize)
+            .or(Some(relative_offset))
+    }
+
+    /// Convert SFC offset to virtual TS script offset.
+    #[cfg(feature = "native")]
+    pub(crate) fn sfc_to_virtual_ts_script_offset(
+        ctx: &IdeContext<'_>,
+        sfc_offset: usize,
+    ) -> Option<usize> {
+        let virtual_docs = ctx.virtual_docs.as_ref()?;
+
+        let options = vize_atelier_sfc::SfcParseOptions {
+            filename: ctx.uri.path().to_string(),
+            ..Default::default()
+        };
+
+        let descriptor = vize_atelier_sfc::parse_sfc(&ctx.content, options).ok()?;
+
+        // Try script setup first
+        if let Some(ref script_setup) = descriptor.script_setup {
+            if sfc_offset >= script_setup.loc.start && sfc_offset <= script_setup.loc.end {
+                let relative_offset = sfc_offset - script_setup.loc.start;
+                if let Some(ref script_setup_doc) = virtual_docs.script_setup {
+                    return script_setup_doc
+                        .source_map
+                        .to_generated(relative_offset as u32)
+                        .map(|o| o as usize)
+                        .or(Some(relative_offset));
+                }
+                return Some(relative_offset);
+            }
+        }
+
+        // Try regular script
+        if let Some(ref script) = descriptor.script {
+            if sfc_offset >= script.loc.start && sfc_offset <= script.loc.end {
+                let relative_offset = sfc_offset - script.loc.start;
+                if let Some(ref script_doc) = virtual_docs.script {
+                    return script_doc
+                        .source_map
+                        .to_generated(relative_offset as u32)
+                        .map(|o| o as usize)
+                        .or(Some(relative_offset));
+                }
+                return Some(relative_offset);
+            }
+        }
+
+        None
+    }
+
+    /// Convert tsgo LspHover to tower-lsp Hover.
+    #[cfg(feature = "native")]
+    fn convert_lsp_hover(lsp_hover: LspHover) -> Hover {
+        let contents = match lsp_hover.contents {
+            LspHoverContents::Markup(markup) => HoverContents::Markup(MarkupContent {
+                kind: if markup.kind == "markdown" {
+                    MarkupKind::Markdown
+                } else {
+                    MarkupKind::PlainText
+                },
+                value: markup.value,
+            }),
+            LspHoverContents::String(s) => HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::PlainText,
+                value: s,
+            }),
+            LspHoverContents::Array(items) => {
+                let value = items
+                    .into_iter()
+                    .map(|item| match item {
+                        LspMarkedString::String(s) => s,
+                        LspMarkedString::LanguageString { language, value } => {
+                            format!("```{}\n{}\n```", language, value)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                })
+            }
+        };
+
+        let range = lsp_hover.range.map(|r| Range {
+            start: tower_lsp::lsp_types::Position {
+                line: r.start.line,
+                character: r.start.character,
+            },
+            end: tower_lsp::lsp_types::Position {
+                line: r.end.line,
+                character: r.end.character,
+            },
+        });
+
+        Hover { contents, range }
     }
 
     /// Get hover for template context.
@@ -101,6 +370,13 @@ impl HoverService {
 
         let descriptor = vize_atelier_sfc::parse_sfc(&ctx.content, options).ok()?;
 
+        // Get the script content for type inference
+        let script_content = descriptor
+            .script_setup
+            .as_ref()
+            .map(|s| s.content.as_ref())
+            .or_else(|| descriptor.script.as_ref().map(|s| s.content.as_ref()));
+
         // Create analyzer and analyze script
         let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
 
@@ -122,13 +398,17 @@ impl HoverService {
         // Look up the binding in the analysis summary
         let binding_type = summary.get_binding_type(word)?;
 
+        // Try to infer a more specific type from the script content
+        let inferred_type = script_content
+            .and_then(|content| Self::infer_type_from_script(content, word, binding_type))
+            .unwrap_or_else(|| Self::binding_type_to_ts_display(binding_type).to_string());
+
         // Format the hover content
-        let ts_type = Self::binding_type_to_ts_display(binding_type);
         let kind_desc = Self::binding_type_to_description(binding_type);
 
         let value = format!(
             "```typescript\n{}: {}\n```\n\n{}\n\n*Source: `<script setup>`*",
-            word, ts_type, kind_desc
+            word, inferred_type, kind_desc
         );
 
         Some(Hover {
@@ -138,6 +418,242 @@ impl HoverService {
             }),
             range: None,
         })
+    }
+
+    /// Infer a more specific type from the script content.
+    fn infer_type_from_script(
+        content: &str,
+        name: &str,
+        binding_type: BindingType,
+    ) -> Option<String> {
+        // Patterns to look for initialization
+        let patterns = [
+            format!("const {} = ref(", name),
+            format!("const {} = ref<", name),
+            format!("let {} = ref(", name),
+            format!("const {} = shallowRef(", name),
+            format!("const {} = reactive(", name),
+            format!("const {} = reactive<", name),
+            format!("const {} = computed(", name),
+            format!("const {} = computed<", name),
+        ];
+
+        for pattern in &patterns {
+            if let Some(pos) = content.find(pattern.as_str()) {
+                let after_pattern = &content[pos + pattern.len()..];
+
+                // Check if it's a generic type annotation: ref<Type>
+                if pattern.ends_with('<') {
+                    // Find the closing >
+                    if let Some(end) = Self::find_matching_bracket(after_pattern, '<', '>') {
+                        let type_arg = &after_pattern[..end];
+                        return Some(Self::format_wrapper_type(pattern, type_arg));
+                    }
+                }
+
+                // Try to infer from the argument
+                if let Some(arg_type) = Self::infer_type_from_arg(after_pattern) {
+                    return Some(Self::format_wrapper_type(pattern, &arg_type));
+                }
+            }
+        }
+
+        // Check for explicit type annotation: const name: Type = ...
+        let type_annotation_patterns = [format!("const {}: ", name), format!("let {}: ", name)];
+
+        for pattern in &type_annotation_patterns {
+            if let Some(pos) = content.find(pattern.as_str()) {
+                let after_pattern = &content[pos + pattern.len()..];
+                // Find = or end of type
+                if let Some(type_str) = Self::extract_type_annotation(after_pattern) {
+                    return Some(type_str);
+                }
+            }
+        }
+
+        // For Props, try to get the actual prop type
+        if binding_type == BindingType::Props {
+            return Self::infer_prop_type(content, name);
+        }
+
+        None
+    }
+
+    /// Format the wrapper type (Ref, Reactive, etc.) with the inner type.
+    fn format_wrapper_type(pattern: &str, inner_type: &str) -> String {
+        if pattern.contains("ref(") || pattern.contains("ref<") || pattern.contains("shallowRef(") {
+            format!("Ref<{}>", inner_type)
+        } else if pattern.contains("reactive(") || pattern.contains("reactive<") {
+            format!("Reactive<{}>", inner_type)
+        } else if pattern.contains("computed(") || pattern.contains("computed<") {
+            format!("ComputedRef<{}>", inner_type)
+        } else {
+            inner_type.to_string()
+        }
+    }
+
+    /// Infer type from an argument value (literal or expression).
+    fn infer_type_from_arg(arg_str: &str) -> Option<String> {
+        let arg_str = arg_str.trim();
+
+        // Number literal
+        if arg_str.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+            let num_end = arg_str
+                .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-' && c != 'e' && c != 'E')
+                .unwrap_or(arg_str.len());
+            let num_str = &arg_str[..num_end];
+            if num_str.contains('.') || num_str.contains('e') || num_str.contains('E') {
+                return Some("number".to_string());
+            }
+            return Some("number".to_string());
+        }
+
+        // String literal
+        if arg_str.starts_with('"') || arg_str.starts_with('\'') || arg_str.starts_with('`') {
+            return Some("string".to_string());
+        }
+
+        // Boolean literal
+        if arg_str.starts_with("true") || arg_str.starts_with("false") {
+            return Some("boolean".to_string());
+        }
+
+        // Array literal
+        if arg_str.starts_with('[') {
+            // Try to infer array element type
+            if arg_str.starts_with("[]") {
+                return Some("unknown[]".to_string());
+            }
+            return Some("unknown[]".to_string());
+        }
+
+        // Object literal
+        if arg_str.starts_with('{') {
+            // Could try to infer object structure, but keep it simple for now
+            return Some("object".to_string());
+        }
+
+        // null/undefined
+        if arg_str.starts_with("null") {
+            return Some("null".to_string());
+        }
+        if arg_str.starts_with("undefined") {
+            return Some("undefined".to_string());
+        }
+
+        None
+    }
+
+    /// Extract type annotation from a string like "Type = ..."
+    fn extract_type_annotation(s: &str) -> Option<String> {
+        let s = s.trim();
+        let mut depth = 0;
+        let mut end = 0;
+
+        for (i, c) in s.chars().enumerate() {
+            match c {
+                '<' | '(' | '[' | '{' => depth += 1,
+                '>' | ')' | ']' | '}' => depth -= 1,
+                '=' if depth == 0 => {
+                    end = i;
+                    break;
+                }
+                ';' | '\n' if depth == 0 => {
+                    end = i;
+                    break;
+                }
+                _ => {}
+            }
+            end = i + 1;
+        }
+
+        if end > 0 {
+            let type_str = s[..end].trim();
+            if !type_str.is_empty() {
+                return Some(type_str.to_string());
+            }
+        }
+
+        None
+    }
+
+    /// Find matching bracket position.
+    fn find_matching_bracket(s: &str, open: char, close: char) -> Option<usize> {
+        let mut depth = 1;
+        for (i, c) in s.chars().enumerate() {
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
+    /// Infer prop type from defineProps.
+    fn infer_prop_type(content: &str, prop_name: &str) -> Option<String> {
+        // Look for defineProps<{ propName: Type }>
+        if let Some(props_start) = content.find("defineProps<") {
+            let after = &content[props_start + "defineProps<".len()..];
+            if let Some(end) = Self::find_matching_bracket(after, '<', '>') {
+                let props_type = &after[..end];
+                // Look for the property
+                let prop_pattern = format!("{}: ", prop_name);
+                if let Some(prop_pos) = props_type.find(&prop_pattern) {
+                    let after_prop = &props_type[prop_pos + prop_pattern.len()..];
+                    if let Some(type_str) = Self::extract_prop_type(after_prop) {
+                        return Some(type_str);
+                    }
+                }
+                // Also check for optional: propName?: Type
+                let opt_pattern = format!("{}?: ", prop_name);
+                if let Some(prop_pos) = props_type.find(&opt_pattern) {
+                    let after_prop = &props_type[prop_pos + opt_pattern.len()..];
+                    if let Some(type_str) = Self::extract_prop_type(after_prop) {
+                        return Some(format!("{} | undefined", type_str));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract a prop type from the remaining string.
+    fn extract_prop_type(s: &str) -> Option<String> {
+        let s = s.trim();
+        let mut depth = 0;
+        let mut end = 0;
+
+        for (i, c) in s.chars().enumerate() {
+            match c {
+                '<' | '(' | '[' | '{' => depth += 1,
+                '>' | ')' | ']' | '}' => {
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                    depth -= 1;
+                }
+                ',' | ';' | '\n' if depth == 0 => {
+                    end = i;
+                    break;
+                }
+                _ => {}
+            }
+            end = i + 1;
+        }
+
+        if end > 0 {
+            let type_str = s[..end].trim();
+            if !type_str.is_empty() {
+                return Some(type_str.to_string());
+            }
+        }
+
+        None
     }
 
     /// Convert BindingType to TypeScript type display string.
@@ -224,6 +740,13 @@ impl HoverService {
 
         let descriptor = vize_atelier_sfc::parse_sfc(&ctx.content, options).ok()?;
 
+        // Get the script content for type inference
+        let script_content = descriptor
+            .script_setup
+            .as_ref()
+            .map(|s| s.content.as_ref())
+            .or_else(|| descriptor.script.as_ref().map(|s| s.content.as_ref()));
+
         // Create analyzer and analyze script
         let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
 
@@ -238,8 +761,12 @@ impl HoverService {
         // Look up the binding in the analysis summary
         let binding_type = summary.get_binding_type(word)?;
 
+        // Try to infer a more specific type from the script content
+        let inferred_type = script_content
+            .and_then(|content| Self::infer_type_from_script(content, word, binding_type))
+            .unwrap_or_else(|| Self::binding_type_to_ts_display(binding_type).to_string());
+
         // Format the hover content with reactivity hints for script context
-        let ts_type = Self::binding_type_to_ts_display(binding_type);
         let kind_desc = Self::binding_type_to_description(binding_type);
 
         // Add .value hint for refs in script
@@ -254,7 +781,7 @@ impl HoverService {
 
         let value = format!(
             "```typescript\n{}: {}\n```\n\n{}{}",
-            word, ts_type, kind_desc, value_hint
+            word, inferred_type, kind_desc, value_hint
         );
 
         Some(Hover {

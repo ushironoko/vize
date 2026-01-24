@@ -8,17 +8,27 @@ description = "Canon - The standard of correctness for Vize type checking"
 
 [features]
 default = ["native"]
-native = ["dep:tokio", "dep:which"]
+native = ["dep:tokio", "dep:which", "dep:walkdir", "dep:dirs"]
 
 [dependencies]
 vize_carton.workspace = true
 vize_croquis.workspace = true
 vize_relief.workspace = true
+vize_armature.workspace = true
 vize_atelier_core.workspace = true
 vize_atelier_sfc.workspace = true
 
+# OXC for parsing and AST manipulation (import rewriting)
+oxc_parser.workspace = true
+oxc_ast.workspace = true
+oxc_span.workspace = true
+oxc_allocator.workspace = true
+
 # Async runtime (optional, not available on WASM)
 tokio = { version = "1", features = ["process", "io-util", "sync", "time", "rt"], optional = true }
+
+# File system walking (for batch type checking)
+walkdir = { version = "2.5", optional = true }
 
 # Serialization
 serde.workspace = true
@@ -28,6 +38,8 @@ serde_json.workspace = true
 dashmap.workspace = true
 tracing = "0.1"
 which = { version = "7", optional = true }
+dirs = { version = "5", optional = true }
+thiserror.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

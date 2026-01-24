@@ -95,13 +95,16 @@ pub fn is_keyword(s: &str) -> bool {
 /// - String literals, computed property names, etc.
 #[inline]
 pub fn extract_identifiers_oxc(expr: &str) -> Vec<CompactString> {
-    // Fast path: if no object literal, use fast string-based extraction
-    if !expr.contains('{') {
-        return extract_identifiers_fast(expr);
+    // Use OXC parser for complex expressions:
+    // - Object literals: { }
+    // - Type assertions: as Type
+    // - Arrow functions: () =>
+    if expr.contains('{') || expr.contains(" as ") || expr.contains("=>") {
+        return extract_identifiers_oxc_slow(expr);
     }
 
-    // Slow path: use OXC for expressions with object literals
-    extract_identifiers_oxc_slow(expr)
+    // Fast path: simple expressions without complex constructs
+    extract_identifiers_fast(expr)
 }
 
 /// Fast string-based identifier extraction for simple expressions.
@@ -231,7 +234,9 @@ fn extract_identifiers_fast(expr: &str) -> Vec<CompactString> {
 /// OXC-based identifier extraction for expressions with object literals.
 #[inline]
 fn extract_identifiers_oxc_slow(expr: &str) -> Vec<CompactString> {
-    use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectPropertyKind, PropertyKey};
+    use oxc_ast::ast::{
+        ArrayExpressionElement, BindingPatternKind, Expression, ObjectPropertyKind, PropertyKey,
+    };
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path("expr.ts").unwrap_or_default();
@@ -243,6 +248,34 @@ fn extract_identifiers_oxc_slow(expr: &str) -> Vec<CompactString> {
     };
 
     let mut identifiers = Vec::with_capacity(4);
+
+    // Collect binding names from a pattern (for arrow function parameters)
+    fn collect_binding_names<'a>(pattern: &'a BindingPatternKind<'a>, names: &mut Vec<&'a str>) {
+        match pattern {
+            BindingPatternKind::BindingIdentifier(id) => {
+                names.push(id.name.as_str());
+            }
+            BindingPatternKind::ObjectPattern(obj) => {
+                for prop in obj.properties.iter() {
+                    collect_binding_names(&prop.value.kind, names);
+                }
+                if let Some(rest) = &obj.rest {
+                    collect_binding_names(&rest.argument.kind, names);
+                }
+            }
+            BindingPatternKind::ArrayPattern(arr) => {
+                for elem in arr.elements.iter().flatten() {
+                    collect_binding_names(&elem.kind, names);
+                }
+                if let Some(rest) = &arr.rest {
+                    collect_binding_names(&rest.argument.kind, names);
+                }
+            }
+            BindingPatternKind::AssignmentPattern(assign) => {
+                collect_binding_names(&assign.left.kind, names);
+            }
+        }
+    }
 
     // Recursive AST walker to collect identifier references
     fn walk_expr(expr: &Expression<'_>, identifiers: &mut Vec<CompactString>) {
@@ -360,13 +393,26 @@ fn extract_identifiers_oxc_slow(expr: &str) -> Vec<CompactString> {
                 }
             }
 
-            // Arrow/Function expressions
+            // Arrow/Function expressions - parameters are local scope, don't extract them
             Expression::ArrowFunctionExpression(arrow) => {
+                // Collect parameter names to exclude from identifiers
+                let mut param_names: Vec<&str> = Vec::new();
+                for param in arrow.params.items.iter() {
+                    collect_binding_names(&param.pattern.kind, &mut param_names);
+                }
+
                 if arrow.expression {
                     if let Some(oxc_ast::ast::Statement::ExpressionStatement(expr_stmt)) =
                         arrow.body.statements.first()
                     {
-                        walk_expr(&expr_stmt.expression, identifiers);
+                        // Walk body but filter out parameter references
+                        let mut body_idents = Vec::new();
+                        walk_expr(&expr_stmt.expression, &mut body_idents);
+                        for ident in body_idents {
+                            if !param_names.contains(&ident.as_str()) {
+                                identifiers.push(ident);
+                            }
+                        }
                     }
                 }
             }

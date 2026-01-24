@@ -12,26 +12,34 @@
 //!
 //! ## Architecture
 //!
+//! ### Batch Type Checking (via tsgo CLI)
+//!
 //! ```text
-//! +----------------------------------------------------------+
-//! |                      vize_canon                           |
-//! +----------------------------------------------------------+
-//! |                                                           |
-//! |  +-------------------+     +------------------------+     |
-//! |  | TypeChecker       |     | TypeContext            |     |
-//! |  | - check_template  |<--->| - bindings: HashMap    |     |
-//! |  | - get_type_at     |     | - imports: Vec<Import> |     |
-//! |  | - get_completions |     | - props: Vec<Prop>     |     |
-//! |  +-------------------+     +------------------------+     |
-//! |           |                                               |
-//! |           v                                               |
-//! |  +-------------------+     +------------------------+     |
-//! |  | TypeDiagnostic    |     | TypeInfo               |     |
-//! |  | - error/warning   |     | - display: String      |     |
-//! |  | - location        |     | - kind: TypeKind       |     |
-//! |  +-------------------+     +------------------------+     |
-//! |                                                           |
-//! +----------------------------------------------------------+
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                         vize Process                            │
+//! │                                                                 │
+//! │  Project                    Virtual Project                     │
+//! │  ┌──────────────┐          ┌──────────────────────────┐        │
+//! │  │ src/         │          │ node_modules/.vize/canon │        │
+//! │  │ ├─ App.vue   │ ──────▶  │ ├─ src/                  │        │
+//! │  │ ├─ utils.ts  │          │ │  ├─ App.vue.ts         │        │
+//! │  │ └─ ...       │          │ │  ├─ utils.ts           │        │
+//! │  └──────────────┘          │ │  └─ ...                │        │
+//! │                            │ └─ tsconfig.json         │        │
+//! │                            └──────────────────────────┘        │
+//! │                                       │                         │
+//! │                                       ▼                         │
+//! │                            ┌──────────────────────────┐        │
+//! │                            │  tsgo (CLI)              │        │
+//! │                            │  Pure TypeScript only    │        │
+//! │                            └──────────┬───────────────┘        │
+//! │                                       │                         │
+//! │                                       ▼                         │
+//! │                            ┌──────────────────────────┐        │
+//! │                            │ Diagnostics + SourceMap  │        │
+//! │                            │ → Map to original SFC    │        │
+//! │                            └──────────────────────────┘        │
+//! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
 mod checker;
@@ -42,6 +50,10 @@ pub mod sfc_typecheck;
 pub mod source_map;
 mod types;
 pub mod virtual_ts;
+
+// Batch type checking module (requires native feature)
+#[cfg(feature = "native")]
+pub mod batch;
 
 #[cfg(feature = "native")]
 pub mod tsgo_bridge;
@@ -80,8 +92,19 @@ pub use vize_carton::i18n::Locale;
 
 #[cfg(feature = "native")]
 pub use tsgo_bridge::{
-    BatchTypeChecker, LspDiagnostic, LspPosition, LspRange, TsgoBridge, TsgoBridgeConfig,
-    TsgoBridgeError, TypeCheckResult, VIRTUAL_URI_SCHEME,
+    LspCompletionItem, LspCompletionList, LspCompletionResponse, LspDefinitionResponse,
+    LspDiagnostic, LspDocumentation, LspHover, LspHoverContents, LspLocation, LspLocationLink,
+    LspMarkedString, LspMarkupContent, LspPosition, LspRange, TsgoBridge, TsgoBridgeConfig,
+    TsgoBridgeError, VIRTUAL_URI_SCHEME,
+};
+
+// Re-export batch type checker
+#[cfg(feature = "native")]
+pub use batch::{
+    BatchTypeChecker, Diagnostic as BatchDiagnostic, ImportRewriter, ImportSourceMap,
+    PackageManager, SfcBlockType, TsgoError, TsgoExecutor, TsgoNotFoundError,
+    TypeCheckResult as BatchTypeCheckResult, TypeChecker as BatchTypeCheckerTrait, VirtualFile,
+    VirtualProject, VirtualTsGenerator,
 };
 
 #[cfg(feature = "native")]

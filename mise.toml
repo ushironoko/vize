@@ -68,8 +68,14 @@ run = "cargo build --release -p vize"
 #   --continue-on-error         Continue compilation even on errors
 
 [tasks.cli]
-description = "Install vize CLI to cargo bin (accessible from PATH)"
-run = "cargo install --path crates/vize --force"
+description = "Build and install vize CLI globally (use --debug for dev build)"
+run = """
+if [ "{{flag(name='debug')}}" = "true" ]; then
+  cargo install --path crates/vize --force --debug && echo '✅ vize CLI installed (debug build)'
+else
+  cargo install --path crates/vize --force && echo '✅ vize CLI installed (release build)'
+fi
+"""
 
 [tasks."cli:help"]
 description = "Show vize CLI help"

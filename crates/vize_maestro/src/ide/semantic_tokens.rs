@@ -199,6 +199,9 @@ impl SemanticTokensService {
 
         // Find v-bind :prop
         Self::collect_bind_tokens(template, base_line, tokens);
+
+        // Find directive attribute expressions (v-bind="expr", v-if="expr", :prop="expr", @click="expr")
+        Self::collect_directive_expression_tokens(template, base_line, tokens);
     }
 
     /// Collect directive tokens (v-if, v-for, v-model, etc.)
@@ -345,6 +348,118 @@ impl SemanticTokensService {
 
             pos = abs_start + 1;
         }
+    }
+
+    /// Collect tokens from directive expressions (v-bind="expr", v-if="expr", :prop="expr", @click="expr")
+    fn collect_directive_expression_tokens(
+        template: &str,
+        base_line: u32,
+        tokens: &mut Vec<AbsoluteToken>,
+    ) {
+        // Patterns to match directive attributes with expressions
+        // v-bind="...", v-if="...", v-for="...", v-show="...", v-model="..."
+        // :prop="...", @event="..."
+        let bytes = template.as_bytes();
+        let mut pos = 0;
+
+        while pos < bytes.len() {
+            // Look for attribute patterns
+            let attr_start = if bytes[pos] == b':' || bytes[pos] == b'@' {
+                // Shorthand :prop or @event
+                if pos > 0
+                    && (bytes[pos - 1] == b' '
+                        || bytes[pos - 1] == b'\n'
+                        || bytes[pos - 1] == b'\t')
+                {
+                    Some(pos)
+                } else {
+                    None
+                }
+            } else if pos + 2 < bytes.len() && bytes[pos] == b'v' && bytes[pos + 1] == b'-' {
+                // v-* directive
+                if pos == 0
+                    || bytes[pos - 1] == b' '
+                    || bytes[pos - 1] == b'\n'
+                    || bytes[pos - 1] == b'\t'
+                {
+                    Some(pos)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(start) = attr_start {
+                // Find the = and the quoted value
+                let remaining = &template[start..];
+                if let Some(eq_pos) = remaining.find('=') {
+                    let after_eq = &remaining[eq_pos + 1..];
+                    let after_eq_trimmed = after_eq.trim_start();
+                    let skip_ws = after_eq.len() - after_eq_trimmed.len();
+
+                    // Check for quote
+                    if !after_eq_trimmed.is_empty() {
+                        let quote = after_eq_trimmed.as_bytes()[0];
+                        if quote == b'"' || quote == b'\'' {
+                            // Find closing quote
+                            let expr_start = eq_pos + 1 + skip_ws + 1;
+                            if let Some(end) = remaining[expr_start..].find(quote as char) {
+                                let expr = &remaining[expr_start..expr_start + end];
+
+                                // Extract and highlight identifiers in the expression
+                                for (ident, offset) in Self::extract_identifiers(expr) {
+                                    let abs_offset = start + expr_start + offset;
+                                    let (line, col) =
+                                        Self::offset_to_line_col(template, abs_offset);
+
+                                    // Determine token type based on context
+                                    let token_type = if Self::looks_like_function_call(expr, offset)
+                                    {
+                                        TokenType::Function
+                                    } else if Self::looks_like_property_access(expr, offset) {
+                                        TokenType::Property
+                                    } else {
+                                        TokenType::Variable
+                                    };
+
+                                    tokens.push(AbsoluteToken {
+                                        line: base_line + line - 1,
+                                        start: col,
+                                        length: ident.len() as u32,
+                                        token_type: token_type as u32,
+                                        modifiers: 0,
+                                    });
+                                }
+
+                                pos = start + expr_start + end + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            pos += 1;
+        }
+    }
+
+    /// Check if identifier looks like a property access (preceded by .)
+    fn looks_like_property_access(expr: &str, offset: usize) -> bool {
+        if offset == 0 {
+            return false;
+        }
+
+        let bytes = expr.as_bytes();
+        let mut i = offset - 1;
+
+        // Skip whitespace
+        while i > 0 && (bytes[i] as char).is_whitespace() {
+            i -= 1;
+        }
+
+        // Check for dot
+        bytes[i] == b'.'
     }
 
     /// Collect tokens from script content.
@@ -1000,5 +1115,40 @@ import Button from './Button.vue'
 
         // Should find import, from, and string literal
         assert!(tokens.len() >= 3);
+    }
+
+    #[test]
+    fn test_interpolation_tokens() {
+        let template = "  {{ message }}";
+        let mut tokens = Vec::new();
+        SemanticTokensService::collect_interpolation_tokens(template, 1, &mut tokens);
+
+        // Should find 'message' as a variable
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].token_type, TokenType::Variable as u32);
+        assert_eq!(tokens[0].length, 7); // "message"
+    }
+
+    #[test]
+    fn test_full_sfc_semantic_tokens() {
+        let content = r#"<template>
+  <div>{{ count }}</div>
+</template>
+
+<script setup>
+const count = ref(0)
+</script>
+"#;
+
+        let uri = tower_lsp::lsp_types::Url::parse("file:///test.vue").unwrap();
+        let result = SemanticTokensService::get_tokens(content, &uri);
+        assert!(result.is_some());
+
+        if let Some(SemanticTokensResult::Tokens(tokens)) = result {
+            // Should have tokens for:
+            // - 'count' in template interpolation
+            // - 'ref' in script
+            assert!(!tokens.data.is_empty(), "Should have semantic tokens");
+        }
     }
 }

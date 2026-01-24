@@ -79,6 +79,139 @@ impl DiagnosticService {
         diagnostics
     }
 
+    /// Collect diagnostics asynchronously (includes tsgo diagnostics when available).
+    #[cfg(feature = "native")]
+    pub async fn collect_async(state: &ServerState, uri: &Url) -> Vec<Diagnostic> {
+        // Start with sync diagnostics (patina, etc.)
+        let mut diagnostics = Self::collect(state, uri);
+
+        // Try to get tsgo diagnostics (with timeout, skip on failure)
+        let tsgo_future = Self::collect_tsgo_diagnostics(state, uri);
+        if let Ok(tsgo_diags) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), tsgo_future).await
+        {
+            diagnostics.extend(tsgo_diags);
+        }
+
+        diagnostics
+    }
+
+    /// Collect diagnostics from tsgo LSP.
+    #[cfg(feature = "native")]
+    async fn collect_tsgo_diagnostics(state: &ServerState, uri: &Url) -> Vec<Diagnostic> {
+        // Only process .vue files
+        if !uri.path().ends_with(".vue") {
+            return vec![];
+        }
+
+        // Get document content
+        let Some(doc) = state.documents.get(uri) else {
+            return vec![];
+        };
+        let content = doc.text();
+
+        // Get tsgo bridge
+        let Some(bridge) = state.get_tsgo_bridge().await else {
+            return vec![];
+        };
+
+        // Generate virtual TypeScript
+        let Some(virtual_ts) = Self::generate_virtual_ts(uri, &content) else {
+            return vec![];
+        };
+
+        // Create virtual URI
+        let virtual_uri = format!("file://{}.ts", uri.path());
+
+        // Open document in tsgo
+        if bridge
+            .open_virtual_document(&virtual_uri, &virtual_ts)
+            .await
+            .is_err()
+        {
+            return vec![];
+        }
+
+        // Get diagnostics
+        let Ok(tsgo_diags) = bridge.get_diagnostics(&virtual_uri).await else {
+            return vec![];
+        };
+
+        // Convert to LSP diagnostics
+        tsgo_diags
+            .into_iter()
+            .filter_map(|diag| {
+                // Skip diagnostics in preamble (before script content)
+                if diag.range.start.line < 20 {
+                    return None;
+                }
+
+                Some(Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: diag.range.start.line.saturating_sub(20),
+                            character: diag.range.start.character,
+                        },
+                        end: Position {
+                            line: diag.range.end.line.saturating_sub(20),
+                            character: diag.range.end.character,
+                        },
+                    },
+                    severity: diag.severity.map(|s| match s {
+                        1 => DiagnosticSeverity::ERROR,
+                        2 => DiagnosticSeverity::WARNING,
+                        3 => DiagnosticSeverity::INFORMATION,
+                        _ => DiagnosticSeverity::HINT,
+                    }),
+                    source: Some("vize/tsgo".to_string()),
+                    message: diag.message,
+                    ..Default::default()
+                })
+            })
+            .collect()
+    }
+
+    /// Generate virtual TypeScript for a Vue SFC.
+    #[cfg(feature = "native")]
+    fn generate_virtual_ts(uri: &Url, content: &str) -> Option<String> {
+        use vize_atelier_sfc::{parse_sfc, SfcParseOptions};
+        use vize_canon::virtual_ts::generate_virtual_ts;
+        use vize_croquis::{Analyzer, AnalyzerOptions};
+
+        let options = SfcParseOptions {
+            filename: uri.path().to_string(),
+            ..Default::default()
+        };
+
+        let descriptor = parse_sfc(content, options).ok()?;
+
+        let script_content = descriptor
+            .script_setup
+            .as_ref()
+            .map(|s| s.content.as_ref())
+            .or_else(|| descriptor.script.as_ref().map(|s| s.content.as_ref()));
+
+        let template_block = descriptor.template.as_ref()?;
+        let template_offset = template_block.loc.start as u32;
+
+        let allocator = vize_carton::Bump::new();
+        let (template_ast, _) = vize_armature::parse(&allocator, &template_block.content);
+
+        let mut analyzer = Analyzer::with_options(AnalyzerOptions::full());
+        if let Some(script) = script_content {
+            analyzer.analyze_script(script);
+        }
+        analyzer.analyze_template(&template_ast);
+
+        let summary = analyzer.finish();
+        Some(generate_virtual_ts(
+            &summary,
+            script_content,
+            Some(&template_ast),
+            template_offset,
+        ))
+    }
+
     /// Collect diagnostics for Art files (*.art.vue) using vize_patina's MuseaLinter.
     fn collect_musea_diagnostics(_uri: &Url, content: &str) -> Vec<Diagnostic> {
         use vize_patina::rules::musea::MuseaLinter;

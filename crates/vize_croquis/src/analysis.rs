@@ -214,6 +214,8 @@ pub struct TemplateExpression {
     pub end: u32,
     /// The scope this expression belongs to
     pub scope_id: crate::scope::ScopeId,
+    /// v-if guard condition (if this expression is inside a v-if block)
+    pub vif_guard: Option<CompactString>,
 }
 
 /// Kind of template expression.

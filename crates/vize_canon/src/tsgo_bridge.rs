@@ -105,6 +105,157 @@ pub struct LspLocation {
     pub range: LspRange,
 }
 
+/// LSP hover response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspHover {
+    /// The hover's content
+    pub contents: LspHoverContents,
+    /// An optional range
+    pub range: Option<LspRange>,
+}
+
+/// LSP hover contents - can be markup or multiple items.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum LspHoverContents {
+    /// A single MarkupContent
+    Markup(LspMarkupContent),
+    /// A single string
+    String(String),
+    /// Array of marked strings or MarkupContent
+    Array(Vec<LspMarkedString>),
+}
+
+/// LSP markup content.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspMarkupContent {
+    /// The type of the Markup ("markdown" | "plaintext")
+    pub kind: String,
+    /// The content itself
+    pub value: String,
+}
+
+/// LSP marked string (for hover arrays).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum LspMarkedString {
+    /// A simple string
+    String(String),
+    /// Language-tagged code block
+    LanguageString { language: String, value: String },
+}
+
+/// LSP completion item.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspCompletionItem {
+    /// The label of this completion item
+    pub label: String,
+    /// The kind of this completion item (1=Text, 2=Method, 3=Function, 4=Constructor, 5=Field, 6=Variable, etc.)
+    pub kind: Option<u32>,
+    /// A human-readable string with additional information
+    pub detail: Option<String>,
+    /// A human-readable string that represents a doc-comment
+    pub documentation: Option<LspDocumentation>,
+    /// A string that should be inserted when selecting this completion
+    #[serde(rename = "insertText")]
+    pub insert_text: Option<String>,
+    /// The format of the insert text (1=PlainText, 2=Snippet)
+    #[serde(rename = "insertTextFormat")]
+    pub insert_text_format: Option<u32>,
+    /// A string that should be used when filtering a set of completions
+    #[serde(rename = "filterText")]
+    pub filter_text: Option<String>,
+    /// A string that should be used when comparing this item with other items
+    #[serde(rename = "sortText")]
+    pub sort_text: Option<String>,
+}
+
+/// LSP documentation - can be string or MarkupContent.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum LspDocumentation {
+    /// A simple string
+    String(String),
+    /// Markup content
+    Markup(LspMarkupContent),
+}
+
+/// LSP completion list.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspCompletionList {
+    /// This list is not complete
+    #[serde(rename = "isIncomplete")]
+    pub is_incomplete: bool,
+    /// The completion items
+    pub items: Vec<LspCompletionItem>,
+}
+
+/// LSP completion response - can be array or list.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum LspCompletionResponse {
+    /// Array of completion items
+    Array(Vec<LspCompletionItem>),
+    /// Completion list with metadata
+    List(LspCompletionList),
+}
+
+impl LspCompletionResponse {
+    /// Get items from either variant.
+    pub fn items(self) -> Vec<LspCompletionItem> {
+        match self {
+            LspCompletionResponse::Array(items) => items,
+            LspCompletionResponse::List(list) => list.items,
+        }
+    }
+}
+
+/// LSP location link (for definition responses).
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspLocationLink {
+    /// Span of the origin of this link
+    #[serde(rename = "originSelectionRange")]
+    pub origin_selection_range: Option<LspRange>,
+    /// The target resource identifier
+    #[serde(rename = "targetUri")]
+    pub target_uri: String,
+    /// The full target range
+    #[serde(rename = "targetRange")]
+    pub target_range: LspRange,
+    /// The range that should be selected and revealed
+    #[serde(rename = "targetSelectionRange")]
+    pub target_selection_range: LspRange,
+}
+
+/// LSP definition response - can be location, array, or location links.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum LspDefinitionResponse {
+    /// A single location
+    Scalar(LspLocation),
+    /// Array of locations
+    Array(Vec<LspLocation>),
+    /// Array of location links
+    Links(Vec<LspLocationLink>),
+}
+
+impl LspDefinitionResponse {
+    /// Get locations from any variant.
+    pub fn into_locations(self) -> Vec<LspLocation> {
+        match self {
+            LspDefinitionResponse::Scalar(loc) => vec![loc],
+            LspDefinitionResponse::Array(locs) => locs,
+            LspDefinitionResponse::Links(links) => links
+                .into_iter()
+                .map(|link| LspLocation {
+                    uri: link.target_uri,
+                    range: link.target_selection_range,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Result of type checking a document.
 #[derive(Debug, Clone, Default)]
 pub struct TypeCheckResult {
@@ -306,34 +457,44 @@ impl TsgoBridge {
     }
 
     /// Find tsgo executable path.
+    ///
+    /// Search order:
+    /// 1. Explicit config.tsgo_path
+    /// 2. Local node_modules (relative to working_dir or cwd)
+    /// 3. Global PATH
     fn find_tsgo_path(&self) -> Result<PathBuf, TsgoBridgeError> {
+        // 1. Use explicit path if provided
         if let Some(ref path) = self.config.tsgo_path {
             if path.exists() {
                 return Ok(path.clone());
             }
         }
 
-        // Try to find in PATH
+        // 2. Try local node_modules first (prefer local installation)
+        let base_dir = self
+            .config
+            .working_dir
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+        let local_candidates = [
+            base_dir.join("node_modules/.bin/tsgo"),
+            base_dir.join("node_modules/@typescript/native-preview/bin/tsgo"),
+        ];
+
+        for candidate in &local_candidates {
+            if candidate.exists() {
+                return Ok(candidate.clone());
+            }
+        }
+
+        // 3. Try global PATH
         if let Ok(path) = which::which("tsgo") {
             return Ok(path);
         }
 
-        // Try common locations (npm global, local node_modules)
-        let candidates = [
-            "node_modules/.bin/tsgo",
-            "node_modules/@typescript/native-preview/bin/tsgo",
-        ];
-
-        for candidate in candidates {
-            let path = PathBuf::from(candidate);
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-
         Err(TsgoBridgeError::SpawnFailed(
-            "tsgo executable not found. Install with: npm install -g @typescript/native-preview"
-                .to_string(),
+            "tsgo not found. Install with: npm install -D @typescript/native-preview".to_string(),
         ))
     }
 
@@ -644,8 +805,9 @@ impl TsgoBridge {
 
         self.cache_stats.miss();
 
-        // Wait for diagnostics to be published (reduced from 100ms for faster batch processing)
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        // Wait for diagnostics to be published
+        // Note: This is a heuristic; tsgo publishes diagnostics asynchronously
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Return cached diagnostics or empty
         Ok(self
@@ -722,6 +884,146 @@ impl TsgoBridge {
     pub fn clear_cache(&self) {
         self.diagnostics_cache.clear();
         self.cache_stats.reset();
+    }
+
+    /// Get hover information at a position.
+    ///
+    /// Sends a textDocument/hover request to tsgo.
+    pub async fn hover(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Option<LspHover>, TsgoBridgeError> {
+        if !self.initialized.load(Ordering::SeqCst) {
+            return Err(TsgoBridgeError::NotInitialized);
+        }
+
+        let _timer = self.profiler.timer("tsgo_hover");
+
+        let params = json!({
+            "textDocument": {
+                "uri": uri
+            },
+            "position": {
+                "line": line,
+                "character": character
+            }
+        });
+
+        let result = self
+            .send_request("textDocument/hover", Some(params))
+            .await?;
+
+        if let Some(timer) = _timer {
+            timer.record(&self.profiler);
+        }
+
+        // null response means no hover info
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let hover: LspHover = serde_json::from_value(result).map_err(|e| {
+            TsgoBridgeError::CommunicationError(format!("Failed to parse hover: {}", e))
+        })?;
+
+        Ok(Some(hover))
+    }
+
+    /// Get definition location for a symbol at a position.
+    ///
+    /// Sends a textDocument/definition request to tsgo.
+    pub async fn definition(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<LspLocation>, TsgoBridgeError> {
+        if !self.initialized.load(Ordering::SeqCst) {
+            return Err(TsgoBridgeError::NotInitialized);
+        }
+
+        let _timer = self.profiler.timer("tsgo_definition");
+
+        let params = json!({
+            "textDocument": {
+                "uri": uri
+            },
+            "position": {
+                "line": line,
+                "character": character
+            }
+        });
+
+        let result = self
+            .send_request("textDocument/definition", Some(params))
+            .await?;
+
+        if let Some(timer) = _timer {
+            timer.record(&self.profiler);
+        }
+
+        // null response means no definition
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
+
+        // Try parsing as definition response (can be location, array, or links)
+        let response: LspDefinitionResponse = serde_json::from_value(result).map_err(|e| {
+            TsgoBridgeError::CommunicationError(format!("Failed to parse definition: {}", e))
+        })?;
+
+        Ok(response.into_locations())
+    }
+
+    /// Get completion items at a position.
+    ///
+    /// Sends a textDocument/completion request to tsgo.
+    pub async fn completion(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<LspCompletionItem>, TsgoBridgeError> {
+        if !self.initialized.load(Ordering::SeqCst) {
+            return Err(TsgoBridgeError::NotInitialized);
+        }
+
+        let _timer = self.profiler.timer("tsgo_completion");
+
+        let params = json!({
+            "textDocument": {
+                "uri": uri
+            },
+            "position": {
+                "line": line,
+                "character": character
+            },
+            "context": {
+                "triggerKind": 1  // Invoked
+            }
+        });
+
+        let result = self
+            .send_request("textDocument/completion", Some(params))
+            .await?;
+
+        if let Some(timer) = _timer {
+            timer.record(&self.profiler);
+        }
+
+        // null response means no completions
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
+
+        // Try parsing as completion response (can be array or list)
+        let response: LspCompletionResponse = serde_json::from_value(result).map_err(|e| {
+            TsgoBridgeError::CommunicationError(format!("Failed to parse completion: {}", e))
+        })?;
+
+        Ok(response.items())
     }
 }
 

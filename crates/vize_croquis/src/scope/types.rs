@@ -210,6 +210,9 @@ pub struct EventHandlerScopeData {
     pub param_names: ParamNames,
     /// The handler expression (e.g., "handleClick" or "handleClick($event)")
     pub handler_expression: Option<CompactString>,
+    /// Target component name (for component custom events, e.g., "TodoItem")
+    /// None for DOM element events
+    pub target_component: Option<CompactString>,
 }
 
 /// Data specific to callback scope

@@ -7,18 +7,23 @@
 //! Key design: Uses closures from Croquis scope information instead of
 //! `declare const` to properly model Vue's template scoping.
 
-use vize_croquis::{Croquis, ScopeData, ScopeKind};
+use vize_croquis::{naming::to_pascal_case, Croquis, ScopeData, ScopeKind};
 
 /// Vue compiler macros - these are defined inside setup scope, NOT globally.
 /// This ensures they're only valid within <script setup>.
+/// Parameters and type parameters are prefixed with _ to avoid "unused" warnings.
 const VUE_SETUP_COMPILER_MACROS: &str = r#"  // Compiler macros (only valid in setup scope, not global)
-  function defineProps<T>(): T { return undefined as unknown as T; }
-  function defineEmits<T>(): T { return undefined as unknown as T; }
-  function defineExpose<T>(exposed?: T): void { }
-  function defineModel<T>(name?: string, options?: any): any { return undefined as unknown as any; }
-  function defineSlots<T>(): T { return undefined as unknown as T; }
-  function withDefaults<T, D>(props: T, defaults: D): T & D { return undefined as unknown as T & D; }
-  function useTemplateRef<T extends Element | import('vue').ComponentPublicInstance = Element>(key: string): import('vue').ShallowRef<T | null> { return undefined as unknown as import('vue').ShallowRef<T | null>; }"#;
+  // Emit type helper: converts { event: [args] } to callable emit function
+  type __EmitFn<T> = T extends Record<string, any[]> ? <K extends keyof T>(event: K, ...args: T[K]) => void : T;
+  function defineProps<_T = unknown>(): _T { return undefined as unknown as _T; }
+  function defineEmits<_T = unknown>(): __EmitFn<_T> { return (() => {}) as any; }
+  function defineExpose<_T = unknown>(_exposed?: _T): void { void _exposed; }
+  function defineModel<_T = unknown>(_name?: string, _options?: any): _T { void _name; void _options; return undefined as unknown as _T; }
+  function defineSlots<_T = unknown>(): _T { return undefined as unknown as _T; }
+  function withDefaults<_T = unknown, _D = unknown>(_props: _T, _defaults: _D): _T & _D { void _props; void _defaults; return undefined as unknown as _T & _D; }
+  function useTemplateRef<_T extends Element | import('vue').ComponentPublicInstance = Element>(_key: string): import('vue').ShallowRef<_T | null> { void _key; return undefined as unknown as import('vue').ShallowRef<_T | null>; }
+  // Mark compiler macros as used
+  void defineProps; void defineEmits; void defineExpose; void defineModel; void defineSlots; void withDefaults; void useTemplateRef;"#;
 
 /// Vue template context - available inside template expressions
 /// Note: $event is declared in event handler closures, not here
@@ -26,7 +31,9 @@ const VUE_TEMPLATE_CONTEXT: &str = r#"  // Vue instance context (available in te
   const $attrs: Record<string, unknown> = {} as any;
   const $slots: Record<string, (...args: any[]) => any> = {} as any;
   const $refs: Record<string, any> = {} as any;
-  const $emit: (...args: any[]) => void = (() => {}) as any;"#;
+  const $emit: (...args: any[]) => void = (() => {}) as any;
+  // Mark template context as used
+  void $attrs; void $slots; void $refs; void $emit;"#;
 
 /// Get the TypeScript event type for a DOM event name.
 /// Returns the specific event interface (MouseEvent, KeyboardEvent, etc.)
@@ -103,6 +110,32 @@ fn get_dom_event_type(event_name: &str) -> &'static str {
     }
 }
 
+/// Convert kebab-case or PascalCase prop name to camelCase.
+/// Vue normalizes prop names to camelCase internally.
+/// Examples: "my-prop" -> "myProp", "MyProp" -> "myProp"
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize_next = false;
+    let mut first = true;
+
+    for c in s.chars() {
+        if c == '-' || c == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(c.to_ascii_uppercase());
+            capitalize_next = false;
+        } else if first {
+            // First character should be lowercase
+            result.push(c.to_ascii_lowercase());
+            first = false;
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
 /// Generate virtual TypeScript from Vue SFC analysis.
 ///
 /// The generated TypeScript uses proper scope hierarchy:
@@ -126,7 +159,7 @@ pub fn generate_virtual_ts(
     ts.push_str("// ============================================\n\n");
 
     // Check for generic type parameter from <script setup generic="T">
-    let (generic_param, is_async) = summary
+    let (generic_param, mut is_async) = summary
         .scopes
         .iter()
         .find(|s| matches!(s.kind, ScopeKind::ScriptSetup))
@@ -139,14 +172,40 @@ pub fn generate_virtual_ts(
         })
         .unwrap_or((None, false));
 
-    // Module scope: Extract and emit imports
-    ts.push_str("// ========== Module Scope (imports) ==========\n");
+    // Also detect top-level await in script content (Vue 3 script setup supports this)
     if let Some(script) = script_content {
-        for line in script.lines() {
+        if script.contains("await ") && !is_async {
+            is_async = true;
+        }
+    }
+
+    // Module scope: Extract and emit imports (handles multi-line imports)
+    ts.push_str("// ========== Module Scope (imports) ==========\n");
+    let mut import_lines: Vec<usize> = Vec::new();
+    if let Some(script) = script_content {
+        let lines: Vec<&str> = script.lines().collect();
+        let mut in_import = false;
+
+        for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
+
             if trimmed.starts_with("import ") {
+                in_import = true;
+                import_lines.push(i);
                 ts.push_str(line);
                 ts.push('\n');
+                // Check if this is a single-line import (ends with ; or contains 'from')
+                if trimmed.ends_with(';') || trimmed.contains(" from ") {
+                    in_import = false;
+                }
+            } else if in_import {
+                import_lines.push(i);
+                ts.push_str(line);
+                ts.push('\n');
+                // Check if this line ends the import (ends with ;)
+                if trimmed.ends_with(';') {
+                    in_import = false;
+                }
             }
         }
     }
@@ -171,13 +230,15 @@ pub fn generate_virtual_ts(
     if let Some(script) = script_content {
         ts.push_str("  // User setup code\n");
         let script_gen_start = ts.len();
-        for line in script.lines() {
-            let trimmed = line.trim();
-            if !trimmed.starts_with("import ") {
-                ts.push_str("  ");
-                ts.push_str(line);
-                ts.push('\n');
+        let lines: Vec<&str> = script.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            // Skip lines that are part of import statements
+            if import_lines.contains(&i) {
+                continue;
             }
+            ts.push_str("  ");
+            ts.push_str(line);
+            ts.push('\n');
         }
         let script_gen_end = ts.len();
         ts.push_str(&format!(
@@ -202,8 +263,19 @@ pub fn generate_virtual_ts(
         }
         ts.push('\n');
 
+        // Props are available in template as variables
+        generate_props_variables(&mut ts, summary);
+
         // Generate scope closures
         generate_scope_closures(&mut ts, summary, template_offset);
+
+        // Mark used components as referenced to avoid TS6133 "declared but never read"
+        if !summary.used_components.is_empty() {
+            ts.push_str("\n  // Mark imported components as used\n");
+            for component in &summary.used_components {
+                ts.push_str(&format!("  void {};\n", component));
+            }
+        }
 
         ts.push_str("  })();\n");
     }
@@ -318,18 +390,81 @@ fn generate_props_type(ts: &mut String, summary: &Croquis) {
         ts.push_str("export type Props = {};\n");
     }
 
-    // Props variable declarations for template access
+    ts.push('\n');
+}
+
+/// Generate props variables inside template closure
+fn generate_props_variables(ts: &mut String, summary: &Croquis) {
+    let props = summary.macros.props();
+    let has_props = !props.is_empty();
+    let define_props_type_args = summary
+        .macros
+        .define_props()
+        .and_then(|m| m.type_args.as_ref());
+
     if has_props || define_props_type_args.is_some() {
-        ts.push_str("\n// Props are available in template as variables\n");
-        ts.push_str("const __props: Props = {} as Props;\n");
+        ts.push_str("  // Props are available in template as variables\n");
+        ts.push_str("  // Access via `propName` or `props.propName`\n");
+        ts.push_str("  const props: Props = {} as Props;\n");
+
+        // Generate individual prop variables for direct access pattern {{ propName }}
+        // Note: If only props.propName is used, the individual variable will show as unused
         for prop in props {
             ts.push_str(&format!(
-                "const {} = __props[\"{}\"];\n",
+                "  const {} = props[\"{}\"];\n",
                 prop.name, prop.name
             ));
         }
+        ts.push('\n');
     }
-    ts.push('\n');
+}
+
+/// Generate a template expression with optional v-if narrowing.
+///
+/// When the expression has a `vif_guard`, wraps it in an if block to enable TypeScript type narrowing.
+/// For example, `{{ todo.description }}` inside `v-if="todo.description"` generates:
+/// ```typescript
+/// if (todo.description) {
+///   const __expr_X = todo.description;
+/// }
+/// ```
+fn generate_expression(
+    ts: &mut String,
+    expr: &vize_croquis::TemplateExpression,
+    template_offset: u32,
+    indent: &str,
+) {
+    let src_start = template_offset + expr.start;
+    let src_end = template_offset + expr.end;
+
+    if let Some(ref guard) = expr.vif_guard {
+        // Wrap in if block for type narrowing
+        ts.push_str(&format!("{}if ({}) {{\n", indent, guard));
+        ts.push_str(&format!(
+            "{}  const __expr_{} = {}; // {}\n",
+            indent,
+            expr.start,
+            expr.content,
+            expr.kind.as_str()
+        ));
+        ts.push_str(&format!(
+            "{}  // @vize-map: expr -> {}:{}\n",
+            indent, src_start, src_end
+        ));
+        ts.push_str(&format!("{}}}\n", indent));
+    } else {
+        ts.push_str(&format!(
+            "{}const __expr_{} = {}; // {}\n",
+            indent,
+            expr.start,
+            expr.content,
+            expr.kind.as_str()
+        ));
+        ts.push_str(&format!(
+            "{}// @vize-map: expr -> {}:{}\n",
+            indent, src_start, src_end
+        ));
+    }
 }
 
 /// Generate scope closures from Croquis scope chain
@@ -348,11 +483,12 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
     // Track generated scopes to avoid duplicates
     let mut generated_scopes = std::collections::HashSet::new();
 
-    // Generate closures for each scope that has expressions or creates bindings
+    // First, handle expressions in global scopes (Template, ScriptSetup without special scope)
+    // These expressions don't have a dedicated closure, so we process them at template level
     for scope in summary.scopes.iter() {
         let scope_id = scope.id.as_u32();
 
-        // Skip root/global scopes
+        // Process global scopes first - just generate expressions directly
         if matches!(
             scope.kind,
             ScopeKind::JsGlobalUniversal
@@ -360,6 +496,12 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                 | ScopeKind::JsGlobalNode
                 | ScopeKind::VueGlobal
         ) {
+            if let Some(exprs) = expressions_by_scope.get(&scope_id) {
+                for expr in exprs {
+                    generate_expression(ts, expr, template_offset, "  ");
+                }
+            }
+            generated_scopes.insert(scope_id);
             continue;
         }
 
@@ -373,13 +515,21 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                     ));
 
                     // Infer element type from source
-                    let element_type = format!("typeof {}[number]", data.source);
+                    // For complex expressions (containing parentheses, dots, etc.), use 'any'
+                    // For simple identifiers, use typeof source[number]
+                    let is_simple_identifier =
+                        data.source.chars().all(|c| c.is_alphanumeric() || c == '_');
+                    let element_type = if is_simple_identifier {
+                        format!("typeof {}[number]", data.source)
+                    } else {
+                        "any".to_string()
+                    };
 
                     // Build parameter list with proper types
                     // For arrays: (item: T, index: number)
                     // For objects: (value: T, key: string, index: number)
                     ts.push_str(&format!(
-                        "  {}.forEach(({}: {}",
+                        "  ({}).forEach(({}: {}",
                         data.source, data.value_alias, element_type
                     ));
 
@@ -401,19 +551,7 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                     // Generate expressions in this scope
                     if let Some(exprs) = expressions_by_scope.get(&scope_id) {
                         for expr in exprs {
-                            let src_start = template_offset + expr.start;
-                            let src_end = template_offset + expr.end;
-
-                            ts.push_str(&format!(
-                                "    const __expr_{} = {}; // {}\n",
-                                expr.start,
-                                expr.content,
-                                expr.kind.as_str()
-                            ));
-                            ts.push_str(&format!(
-                                "    // @vize-map: expr -> {}:{}\n",
-                                src_start, src_end
-                            ));
+                            generate_expression(ts, expr, template_offset, "    ");
                         }
                     }
 
@@ -434,19 +572,7 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
                     // Generate expressions in this scope
                     if let Some(exprs) = expressions_by_scope.get(&scope_id) {
                         for expr in exprs {
-                            let src_start = template_offset + expr.start;
-                            let src_end = template_offset + expr.end;
-
-                            ts.push_str(&format!(
-                                "    const __expr_{} = {}; // {}\n",
-                                expr.start,
-                                expr.content,
-                                expr.kind.as_str()
-                            ));
-                            ts.push_str(&format!(
-                                "    // @vize-map: expr -> {}:{}\n",
-                                src_start, src_end
-                            ));
+                            generate_expression(ts, expr, template_offset, "    ");
                         }
                     }
 
@@ -456,39 +582,102 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
             ScopeData::EventHandler(data) => {
                 if generated_scopes.insert(scope_id) {
                     // Generate event handler closure
-                    let event_type = get_dom_event_type(data.event_name.as_str());
                     ts.push_str(&format!("\n  // @{} handler\n", data.event_name));
 
-                    // Use $event as parameter with proper event type
-                    ts.push_str(&format!("  (($event: {}) => {{\n", event_type));
+                    // Determine event type based on target
+                    if let Some(ref component_name) = data.target_component {
+                        // Component custom event: extract type from component's props
+                        // Vue 3 exposes event handlers as onEventName in props
+                        let pascal_event = to_pascal_case(data.event_name.as_str());
+                        let on_handler = format!("on{}", pascal_event);
 
-                    // Generate expressions in this scope
-                    if let Some(exprs) = expressions_by_scope.get(&scope_id) {
-                        for expr in exprs {
-                            ts.push_str(&format!("    {};  // handler expression\n", expr.content));
+                        // Generate type extraction for component event
+                        ts.push_str(&format!(
+                            "  type __{}_{}_event = typeof {} extends {{ new (): {{ $props: infer P }} }}\n",
+                            component_name, data.event_name, component_name
+                        ));
+                        ts.push_str(&format!(
+                            "    ? P extends {{ {}?: (arg: infer A, ...rest: any[]) => any }} ? A : unknown\n",
+                            on_handler
+                        ));
+                        ts.push_str(&format!(
+                            "    : typeof {} extends (props: infer P) => any\n",
+                            component_name
+                        ));
+                        ts.push_str(&format!(
+                            "      ? P extends {{ {}?: (arg: infer A, ...rest: any[]) => any }} ? A : unknown\n",
+                            on_handler
+                        ));
+                        ts.push_str("      : unknown;\n");
+
+                        let event_type = format!("__{}_{}_event", component_name, data.event_name);
+                        ts.push_str(&format!("  (($event: {}) => {{\n", event_type));
+
+                        // Generate expressions in this scope
+                        if let Some(exprs) = expressions_by_scope.get(&scope_id) {
+                            for expr in exprs {
+                                let content = expr.content.as_str();
+                                let is_simple_identifier = content
+                                    .chars()
+                                    .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+
+                                if data.has_implicit_event
+                                    && is_simple_identifier
+                                    && !content.is_empty()
+                                {
+                                    ts.push_str(&format!(
+                                        "    {}($event);  // handler expression\n",
+                                        content
+                                    ));
+                                } else {
+                                    ts.push_str(&format!(
+                                        "    {};  // handler expression\n",
+                                        content
+                                    ));
+                                }
+                            }
                         }
-                    }
 
-                    ts.push_str(&format!("  }})({{}} as {});\n", event_type));
+                        ts.push_str(&format!("  }})({{}} as {});\n", event_type));
+                    } else {
+                        // DOM element event: use standard DOM event type
+                        let event_type = get_dom_event_type(data.event_name.as_str());
+                        ts.push_str(&format!("  (($event: {}) => {{\n", event_type));
+
+                        // Generate expressions in this scope
+                        if let Some(exprs) = expressions_by_scope.get(&scope_id) {
+                            for expr in exprs {
+                                let content = expr.content.as_str();
+                                let is_simple_identifier = content
+                                    .chars()
+                                    .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+
+                                if data.has_implicit_event
+                                    && is_simple_identifier
+                                    && !content.is_empty()
+                                {
+                                    ts.push_str(&format!(
+                                        "    {}($event);  // handler expression\n",
+                                        content
+                                    ));
+                                } else {
+                                    ts.push_str(&format!(
+                                        "    {};  // handler expression\n",
+                                        content
+                                    ));
+                                }
+                            }
+                        }
+
+                        ts.push_str(&format!("  }})({{}} as {});\n", event_type));
+                    }
                 }
             }
             _ => {
                 // For other scopes (Template, ScriptSetup, etc.), just generate expressions
                 if let Some(exprs) = expressions_by_scope.get(&scope_id) {
                     for expr in exprs {
-                        let src_start = template_offset + expr.start;
-                        let src_end = template_offset + expr.end;
-
-                        ts.push_str(&format!(
-                            "  const __expr_{} = {}; // {}\n",
-                            expr.start,
-                            expr.content,
-                            expr.kind.as_str()
-                        ));
-                        ts.push_str(&format!(
-                            "  // @vize-map: expr -> {}:{}\n",
-                            src_start, src_end
-                        ));
+                        generate_expression(ts, expr, template_offset, "  ");
                     }
                 }
             }
@@ -520,6 +709,70 @@ fn generate_scope_closures(ts: &mut String, summary: &Croquis, template_offset: 
             ));
         }
     }
+
+    // Generate component props type checks
+    // Note: Props that use v-for variables are currently not checked
+    // because we'd need to generate these checks inside the v-for scope.
+    // TODO: Add scope-aware component prop checking
+    if !summary.component_usages.is_empty() {
+        ts.push_str("\n  // Component props type checks\n");
+        for (idx, usage) in summary.component_usages.iter().enumerate() {
+            let component_name = &usage.name;
+            let src_start = template_offset + usage.start;
+            let src_end = template_offset + usage.end;
+
+            ts.push_str(&format!(
+                "  // @vize-map: component -> {}:{}\n",
+                src_start, src_end
+            ));
+            // Extract Props type from Vue component instance's $props
+            // Vue 3 components expose props via $props on the instance type
+            ts.push_str(&format!(
+                "  type __{}_Props_{} = typeof {} extends {{ new (): {{ $props: infer P }} }} ? P : (typeof {} extends (props: infer P) => any ? P : {{}});\n",
+                component_name, idx, component_name, component_name
+            ));
+
+            // Check each prop passed to the component
+            for prop in &usage.props {
+                // Skip special Vue attributes that are not component props
+                if prop.name.as_str() == "key" || prop.name.as_str() == "ref" {
+                    continue;
+                }
+
+                if let Some(ref value) = prop.value {
+                    if prop.is_dynamic {
+                        // Dynamic prop: :propName="expression"
+                        // Extract expected type from component props and verify
+                        // Note: v-for variables may cause scope issues but will still be checked
+                        let prop_src_start = template_offset + prop.start;
+                        let prop_src_end = template_offset + prop.end;
+                        ts.push_str(&format!(
+                            "  // @vize-map: prop -> {}:{}\n",
+                            prop_src_start, prop_src_end
+                        ));
+
+                        // Convert prop name to camelCase for type lookup (Vue normalizes kebab-case)
+                        let camel_prop_name = to_camel_case(prop.name.as_str());
+                        let safe_prop_name = prop.name.replace('-', "_");
+
+                        // Extract expected type for this prop (handles both optional and required)
+                        ts.push_str(&format!(
+                            "  type __{}_{}_prop_{} = __{}_Props_{} extends {{ '{}'?: infer T }} ? T : __{}_Props_{} extends {{ '{}': infer T }} ? T : unknown;\n",
+                            component_name, idx, safe_prop_name,
+                            component_name, idx, camel_prop_name,
+                            component_name, idx, camel_prop_name
+                        ));
+
+                        // Check value against expected type
+                        ts.push_str(&format!(
+                            "  const __prop_{}_{}: __{}_{}_prop_{} = {};\n",
+                            idx, safe_prop_name, component_name, idx, safe_prop_name, value
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -530,12 +783,15 @@ mod tests {
     fn test_vue_setup_compiler_macros_are_actual_functions() {
         // Compiler macros should be actual functions (NOT declare)
         // This ensures they're scoped to setup only
-        assert!(VUE_SETUP_COMPILER_MACROS.contains("function defineProps<T>(): T"));
-        assert!(VUE_SETUP_COMPILER_MACROS.contains("function defineEmits<T>(): T"));
+        // Type parameters use _ prefix to avoid "unused type parameter" warnings
+        assert!(VUE_SETUP_COMPILER_MACROS.contains("function defineProps<_T"));
+        assert!(VUE_SETUP_COMPILER_MACROS.contains("function defineEmits<_T"));
         assert!(VUE_SETUP_COMPILER_MACROS.contains("function defineExpose"));
         assert!(VUE_SETUP_COMPILER_MACROS.contains("function defineSlots"));
         // Should NOT contain declare (would make them global)
         assert!(!VUE_SETUP_COMPILER_MACROS.contains("declare function"));
+        // Should mark macros as used with void statements
+        assert!(VUE_SETUP_COMPILER_MACROS.contains("void defineProps"));
     }
 
     #[test]

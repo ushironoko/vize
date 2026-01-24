@@ -51,6 +51,9 @@ enum Commands {
     /// Start Language Server Protocol server
     #[command(visible_alias = "maestro")]
     Lsp(commands::lsp::LspArgs),
+
+    /// IDE integration - LSP server and editor extension management
+    Ide(commands::ide::IdeArgs),
 }
 
 fn main() {
@@ -64,6 +67,7 @@ fn main() {
         Some(Commands::CheckServer(args)) => commands::check_server::run(args),
         Some(Commands::Musea(args)) => commands::musea::run(args),
         Some(Commands::Lsp(args)) => commands::lsp::run(args),
+        Some(Commands::Ide(args)) => commands::ide::run(args),
         None => {
             // Default to build command with default args
             commands::build::run(commands::build::BuildArgs::default());

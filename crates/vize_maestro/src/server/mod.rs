@@ -43,7 +43,13 @@ impl MaestroServer {
 
     /// Publish diagnostics for a document.
     async fn publish_diagnostics(&self, uri: &Url) {
+        // Use async version when native feature is enabled (includes tsgo diagnostics)
+        #[cfg(feature = "native")]
+        let diagnostics = DiagnosticService::collect_async(&self.state, uri).await;
+
+        #[cfg(not(feature = "native"))]
         let diagnostics = DiagnosticService::collect(&self.state, uri);
+
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;

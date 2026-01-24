@@ -4,11 +4,17 @@
 //! - Template expressions and directives
 //! - Script bindings and imports
 //! - CSS properties and Vue-specific selectors
+//! - Real completions from tsgo (when available)
+
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, InsertTextFormat, MarkupContent, MarkupKind,
 };
+
+#[cfg(feature = "native")]
+use vize_canon::{LspCompletionItem, LspDocumentation, TsgoBridge};
 
 use super::IdeContext;
 use crate::virtual_code::BlockType;
@@ -35,6 +41,198 @@ impl CompletionService {
             None
         } else {
             Some(CompletionResponse::Array(items))
+        }
+    }
+
+    /// Get completions with tsgo support (async version).
+    #[cfg(feature = "native")]
+    pub async fn complete_with_tsgo(
+        ctx: &IdeContext<'_>,
+        tsgo_bridge: Option<Arc<TsgoBridge>>,
+    ) -> Option<CompletionResponse> {
+        // Check if this is an Art file
+        if ctx.uri.path().ends_with(".art.vue") {
+            return Self::complete_art(ctx);
+        }
+
+        let block_type = ctx.block_type?;
+
+        // Try tsgo completion first
+        if let Some(bridge) = tsgo_bridge {
+            let tsgo_items = match block_type {
+                BlockType::Template => Self::complete_template_with_tsgo(ctx, &bridge).await,
+                BlockType::Script => Self::complete_script_with_tsgo(ctx, false, &bridge).await,
+                BlockType::ScriptSetup => Self::complete_script_with_tsgo(ctx, true, &bridge).await,
+                BlockType::Style(_) => vec![],
+            };
+
+            if !tsgo_items.is_empty() {
+                // Merge tsgo items with static completions
+                let mut items = tsgo_items;
+                items.extend(match block_type {
+                    BlockType::Template => Self::directive_completions(),
+                    BlockType::Script => Self::composition_api_completions(),
+                    BlockType::ScriptSetup => {
+                        let mut v = Self::composition_api_completions();
+                        v.extend(Self::macro_completions());
+                        v
+                    }
+                    BlockType::Style(_) => Self::vue_css_completions(),
+                });
+
+                return Some(CompletionResponse::Array(items));
+            }
+        }
+
+        // Fall back to synchronous completions
+        Self::complete(ctx)
+    }
+
+    /// Get completions for template with tsgo.
+    #[cfg(feature = "native")]
+    async fn complete_template_with_tsgo(
+        ctx: &IdeContext<'_>,
+        bridge: &TsgoBridge,
+    ) -> Vec<CompletionItem> {
+        if let Some(ref virtual_docs) = ctx.virtual_docs {
+            if let Some(ref template) = virtual_docs.template {
+                if let Some(vts_offset) =
+                    crate::ide::hover::HoverService::sfc_to_virtual_ts_offset(ctx, ctx.offset)
+                {
+                    let (line, character) =
+                        super::offset_to_position(&template.content, vts_offset);
+                    let uri = format!("vize-virtual://{}.template.ts", ctx.uri.path());
+
+                    if bridge.is_initialized() {
+                        let _ = bridge
+                            .open_virtual_document(
+                                &format!("{}.template.ts", ctx.uri.path()),
+                                &template.content,
+                            )
+                            .await;
+
+                        if let Ok(items) = bridge.completion(&uri, line, character).await {
+                            return items
+                                .into_iter()
+                                .map(Self::convert_lsp_completion)
+                                .collect();
+                        }
+                    }
+                }
+            }
+        }
+
+        vec![]
+    }
+
+    /// Get completions for script with tsgo.
+    #[cfg(feature = "native")]
+    async fn complete_script_with_tsgo(
+        ctx: &IdeContext<'_>,
+        is_setup: bool,
+        bridge: &TsgoBridge,
+    ) -> Vec<CompletionItem> {
+        if let Some(ref virtual_docs) = ctx.virtual_docs {
+            let script_doc = if is_setup {
+                virtual_docs.script_setup.as_ref()
+            } else {
+                virtual_docs.script.as_ref()
+            };
+
+            if let Some(script) = script_doc {
+                if let Some(vts_offset) =
+                    crate::ide::hover::HoverService::sfc_to_virtual_ts_script_offset(
+                        ctx, ctx.offset,
+                    )
+                {
+                    let (line, character) = super::offset_to_position(&script.content, vts_offset);
+                    let suffix = if is_setup { "setup.ts" } else { "script.ts" };
+                    let uri = format!("vize-virtual://{}.{}", ctx.uri.path(), suffix);
+
+                    if bridge.is_initialized() {
+                        let _ = bridge
+                            .open_virtual_document(
+                                &format!("{}.{}", ctx.uri.path(), suffix),
+                                &script.content,
+                            )
+                            .await;
+
+                        if let Ok(items) = bridge.completion(&uri, line, character).await {
+                            return items
+                                .into_iter()
+                                .map(Self::convert_lsp_completion)
+                                .collect();
+                        }
+                    }
+                }
+            }
+        }
+
+        vec![]
+    }
+
+    /// Convert tsgo LspCompletionItem to tower-lsp CompletionItem.
+    #[cfg(feature = "native")]
+    fn convert_lsp_completion(item: LspCompletionItem) -> CompletionItem {
+        CompletionItem {
+            label: item.label,
+            kind: item.kind.map(Self::convert_completion_kind),
+            detail: item.detail,
+            documentation: item.documentation.map(|doc| match doc {
+                LspDocumentation::String(s) => Documentation::String(s),
+                LspDocumentation::Markup(m) => Documentation::MarkupContent(MarkupContent {
+                    kind: if m.kind == "markdown" {
+                        MarkupKind::Markdown
+                    } else {
+                        MarkupKind::PlainText
+                    },
+                    value: m.value,
+                }),
+            }),
+            insert_text: item.insert_text,
+            insert_text_format: item.insert_text_format.map(|f| {
+                if f == 2 {
+                    InsertTextFormat::SNIPPET
+                } else {
+                    InsertTextFormat::PLAIN_TEXT
+                }
+            }),
+            filter_text: item.filter_text,
+            sort_text: item.sort_text,
+            ..Default::default()
+        }
+    }
+
+    /// Convert LSP completion item kind number to CompletionItemKind.
+    #[cfg(feature = "native")]
+    fn convert_completion_kind(kind: u32) -> CompletionItemKind {
+        match kind {
+            1 => CompletionItemKind::TEXT,
+            2 => CompletionItemKind::METHOD,
+            3 => CompletionItemKind::FUNCTION,
+            4 => CompletionItemKind::CONSTRUCTOR,
+            5 => CompletionItemKind::FIELD,
+            6 => CompletionItemKind::VARIABLE,
+            7 => CompletionItemKind::CLASS,
+            8 => CompletionItemKind::INTERFACE,
+            9 => CompletionItemKind::MODULE,
+            10 => CompletionItemKind::PROPERTY,
+            11 => CompletionItemKind::UNIT,
+            12 => CompletionItemKind::VALUE,
+            13 => CompletionItemKind::ENUM,
+            14 => CompletionItemKind::KEYWORD,
+            15 => CompletionItemKind::SNIPPET,
+            16 => CompletionItemKind::COLOR,
+            17 => CompletionItemKind::FILE,
+            18 => CompletionItemKind::REFERENCE,
+            19 => CompletionItemKind::FOLDER,
+            20 => CompletionItemKind::ENUM_MEMBER,
+            21 => CompletionItemKind::CONSTANT,
+            22 => CompletionItemKind::STRUCT,
+            23 => CompletionItemKind::EVENT,
+            24 => CompletionItemKind::OPERATOR,
+            25 => CompletionItemKind::TYPE_PARAMETER,
+            _ => CompletionItemKind::TEXT,
         }
     }
 

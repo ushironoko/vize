@@ -38,7 +38,7 @@ pub struct CheckArgs {
     #[arg(short, long)]
     pub quiet: bool,
 
-    /// Profile mode - output Virtual TS and timing to .vize directory
+    /// Profile mode - output Virtual TS and timing to node_modules/.vize directory
     #[arg(long)]
     pub profile: bool,
 
@@ -426,9 +426,9 @@ fn run_direct(args: &CheckArgs) {
         }
     }
 
-    // Profile mode: write Virtual TS and timing to .vize directory
+    // Profile mode: write Virtual TS and timing to node_modules/.vize directory
     if args.profile {
-        let profile_dir = PathBuf::from(".vize/check-profile");
+        let profile_dir = PathBuf::from("node_modules/.vize/check-profile");
         if let Err(e) = fs::create_dir_all(&profile_dir) {
             eprintln!("Failed to create profile directory: {}", e);
         } else {
@@ -747,7 +747,7 @@ fn run_direct(args: &CheckArgs) {
 
     // Profile mode: write timing report
     if args.profile {
-        let profile_dir = PathBuf::from(".vize/check-profile");
+        let profile_dir = PathBuf::from("node_modules/.vize/check-profile");
         let timing_report = serde_json::json!({
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

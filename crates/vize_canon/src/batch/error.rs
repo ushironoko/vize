@@ -1,0 +1,190 @@
+//! Error types for batch type checking.
+
+use std::path::{Path, PathBuf};
+
+/// Error type for tsgo operations.
+#[derive(Debug, thiserror::Error)]
+pub enum TsgoError {
+    /// tsgo executable not found.
+    #[error("{0}")]
+    TsgoNotFound(#[from] TsgoNotFoundError),
+
+    /// IO error.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// SFC parse error.
+    #[error("SFC parse error: {0}")]
+    SfcParse(String),
+
+    /// Path error.
+    #[error("Path error: {path}")]
+    PathError { path: PathBuf },
+
+    /// tsgo returned an error.
+    #[error("tsgo error (exit code {exit_code}): {message}")]
+    TsgoExecution { exit_code: i32, message: String },
+
+    /// JSON parse error.
+    #[error("JSON parse error: {0}")]
+    JsonParse(#[from] serde_json::Error),
+
+    /// Project not initialized.
+    #[error("Virtual project not initialized. Call scan_project() first.")]
+    NotInitialized,
+
+    /// Strip prefix error.
+    #[error("Failed to strip prefix from path: {0}")]
+    StripPrefix(#[from] std::path::StripPrefixError),
+
+    /// Walkdir error.
+    #[error("Directory walk error: {0}")]
+    WalkDir(#[from] walkdir::Error),
+}
+
+/// Result type for tsgo operations.
+pub type TsgoResult<T> = Result<T, TsgoError>;
+
+/// Package manager type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageManager {
+    Pnpm,
+    Npm,
+    Yarn,
+    Bun,
+}
+
+/// Error when tsgo is not found.
+#[derive(Debug)]
+pub struct TsgoNotFoundError {
+    detected_pm: Option<PackageManager>,
+}
+
+impl TsgoNotFoundError {
+    /// Create a new TsgoNotFoundError.
+    pub fn new(project_root: &Path) -> Self {
+        let detected_pm = detect_package_manager(project_root);
+        Self { detected_pm }
+    }
+
+    /// Get the detected package manager.
+    pub fn detected_package_manager(&self) -> Option<PackageManager> {
+        self.detected_pm
+    }
+
+    /// Generate CLI error message with installation instructions.
+    pub fn display_message(&self) -> String {
+        let mut msg = String::new();
+
+        msg.push_str("error: tsgo not found\n\n");
+        msg.push_str("vize check requires '@typescript/native-preview' to be installed.\n\n");
+
+        if let Some(pm) = self.detected_pm {
+            msg.push_str("To install, run:\n\n");
+            msg.push_str(&format!("  {}\n", self.install_command(pm)));
+        } else {
+            msg.push_str("To install, run one of the following:\n\n");
+            msg.push_str(&format!(
+                "  {}  # npm\n",
+                self.install_command(PackageManager::Npm)
+            ));
+            msg.push_str(&format!(
+                "  {}  # pnpm\n",
+                self.install_command(PackageManager::Pnpm)
+            ));
+            msg.push_str(&format!(
+                "  {}  # yarn\n",
+                self.install_command(PackageManager::Yarn)
+            ));
+            msg.push_str(&format!(
+                "  {}  # bun\n",
+                self.install_command(PackageManager::Bun)
+            ));
+        }
+
+        msg
+    }
+
+    fn install_command(&self, pm: PackageManager) -> String {
+        match pm {
+            PackageManager::Npm => "npm install -D @typescript/native-preview".to_string(),
+            PackageManager::Pnpm => "pnpm add -D @typescript/native-preview".to_string(),
+            PackageManager::Yarn => "yarn add -D @typescript/native-preview".to_string(),
+            PackageManager::Bun => "bun add -D @typescript/native-preview".to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for TsgoNotFoundError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_message())
+    }
+}
+
+impl std::error::Error for TsgoNotFoundError {}
+
+/// Detect the project's package manager.
+pub fn detect_package_manager(project_root: &Path) -> Option<PackageManager> {
+    // 1. Detect from lockfile (priority order)
+    if project_root.join("pnpm-lock.yaml").exists() {
+        return Some(PackageManager::Pnpm);
+    }
+    if project_root.join("bun.lockb").exists() || project_root.join("bun.lock").exists() {
+        return Some(PackageManager::Bun);
+    }
+    if project_root.join("yarn.lock").exists() {
+        return Some(PackageManager::Yarn);
+    }
+    if project_root.join("package-lock.json").exists() {
+        return Some(PackageManager::Npm);
+    }
+
+    // 2. Detect from package.json packageManager field
+    let pkg_json = project_root.join("package.json");
+    if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(pm) = json.get("packageManager").and_then(|v| v.as_str()) {
+                if pm.starts_with("pnpm") {
+                    return Some(PackageManager::Pnpm);
+                }
+                if pm.starts_with("yarn") {
+                    return Some(PackageManager::Yarn);
+                }
+                if pm.starts_with("bun") {
+                    return Some(PackageManager::Bun);
+                }
+                if pm.starts_with("npm") {
+                    return Some(PackageManager::Npm);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tsgo_not_found_error_message() {
+        let error = TsgoNotFoundError {
+            detected_pm: Some(PackageManager::Pnpm),
+        };
+
+        let msg = error.display_message();
+        assert!(msg.contains("pnpm add -D @typescript/native-preview"));
+    }
+
+    #[test]
+    fn test_tsgo_not_found_no_pm() {
+        let error = TsgoNotFoundError { detected_pm: None };
+
+        let msg = error.display_message();
+        assert!(msg.contains("npm install"));
+        assert!(msg.contains("pnpm add"));
+        assert!(msg.contains("yarn add"));
+        assert!(msg.contains("bun add"));
+    }
+}

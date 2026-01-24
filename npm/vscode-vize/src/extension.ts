@@ -149,6 +149,7 @@ async function findServerPath(
 
   // 4. Check bundled server in extension
   const bundledPaths = [
+    path.join(context.extensionPath, "dist", exeName),
     path.join(context.extensionPath, "server", exeName),
   ];
 

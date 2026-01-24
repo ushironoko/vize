@@ -132,6 +132,7 @@ impl Analyzer {
                             start: loc.start.offset,
                             end: loc.end.offset,
                             scope_id,
+                            vif_guard: self.current_vif_guard(),
                         });
                 }
                 if self.options.detect_undefined && self.script_analyzed {
@@ -194,7 +195,10 @@ impl Analyzer {
 
         let mut key_expression: Option<CompactString> = None;
 
-        // Check directives
+        // Collect v-if condition for type narrowing
+        let mut vif_condition: Option<CompactString> = None;
+
+        // First pass: collect v-for, v-slot scope info, and :key (need to enter scope before processing other directives)
         for prop in &el.props {
             if let PropNode::Directive(dir) = prop {
                 // Track directive usage
@@ -221,74 +225,32 @@ impl Analyzer {
                         }
                     }
                 }
-                // Handle v-bind
+                // Extract :key for v-for scope (needed before entering scope)
                 else if dir.name == "bind" {
-                    self.handle_v_bind_directive(dir, el, scope_vars, &mut key_expression);
-                }
-                // Handle v-if/v-else-if
-                else if dir.name == "if" || dir.name == "else-if" {
-                    if self.options.collect_template_expressions {
-                        if let Some(ref exp) = dir.exp {
-                            let content = match exp {
-                                ExpressionNode::Simple(s) => s.content.as_str(),
-                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
-                            };
-                            let loc = exp.loc();
-                            let scope_id = self.summary.scopes.current_id();
-                            self.summary.template_expressions.push(
-                                crate::analysis::TemplateExpression {
-                                    content: CompactString::new(content),
-                                    kind: crate::analysis::TemplateExpressionKind::VIf,
-                                    start: loc.start.offset,
-                                    end: loc.end.offset,
-                                    scope_id,
-                                },
-                            );
+                    if let Some(ref arg) = dir.arg {
+                        let arg_name = match arg {
+                            ExpressionNode::Simple(s) => s.content.as_str(),
+                            ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                        };
+                        if arg_name == "key" {
+                            if let Some(ref exp) = dir.exp {
+                                let content = match exp {
+                                    ExpressionNode::Simple(s) => s.content.as_str(),
+                                    ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                                };
+                                key_expression = Some(CompactString::new(content));
+                            }
                         }
                     }
                 }
-                // Handle v-show
-                else if dir.name == "show" {
-                    if self.options.collect_template_expressions {
-                        if let Some(ref exp) = dir.exp {
-                            let content = match exp {
-                                ExpressionNode::Simple(s) => s.content.as_str(),
-                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
-                            };
-                            let loc = exp.loc();
-                            let scope_id = self.summary.scopes.current_id();
-                            self.summary.template_expressions.push(
-                                crate::analysis::TemplateExpression {
-                                    content: CompactString::new(content),
-                                    kind: crate::analysis::TemplateExpressionKind::VShow,
-                                    start: loc.start.offset,
-                                    end: loc.end.offset,
-                                    scope_id,
-                                },
-                            );
-                        }
-                    }
-                }
-                // Handle v-model
-                else if dir.name == "model" {
-                    if self.options.collect_template_expressions {
-                        if let Some(ref exp) = dir.exp {
-                            let content = match exp {
-                                ExpressionNode::Simple(s) => s.content.as_str(),
-                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
-                            };
-                            let loc = exp.loc();
-                            let scope_id = self.summary.scopes.current_id();
-                            self.summary.template_expressions.push(
-                                crate::analysis::TemplateExpression {
-                                    content: CompactString::new(content),
-                                    kind: crate::analysis::TemplateExpressionKind::VModel,
-                                    start: loc.start.offset,
-                                    end: loc.end.offset,
-                                    scope_id,
-                                },
-                            );
-                        }
+                // Handle v-if (extract condition for type narrowing)
+                else if dir.name == "if" {
+                    if let Some(ref exp) = dir.exp {
+                        let content = match exp {
+                            ExpressionNode::Simple(s) => s.content.as_str(),
+                            ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                        };
+                        vif_condition = Some(CompactString::new(content));
                     }
                 }
                 // Handle v-slot
@@ -315,10 +277,6 @@ impl Analyzer {
                     };
 
                     slot_scope = Some((slot_name, prop_names, dir.loc.start.offset));
-                }
-                // Handle v-on
-                else if dir.name == "on" && self.options.analyze_template_scopes {
-                    self.handle_v_on_directive(dir, scope_vars);
                 }
             }
         }
@@ -383,12 +341,101 @@ impl Analyzer {
             0
         };
 
+        // Second pass: process other directives AFTER entering v-for/v-slot scopes
+        // This ensures expressions like `:todo="todo"` in v-for are in the correct scope
+        for prop in &el.props {
+            if let PropNode::Directive(dir) = prop {
+                // Handle v-bind (key_expression already extracted in first pass)
+                if dir.name == "bind" {
+                    self.handle_v_bind_directive(dir, el, scope_vars);
+                }
+                // Handle v-if/v-else-if
+                else if dir.name == "if" || dir.name == "else-if" {
+                    if self.options.collect_template_expressions {
+                        if let Some(ref exp) = dir.exp {
+                            let content = match exp {
+                                ExpressionNode::Simple(s) => s.content.as_str(),
+                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                            };
+                            let loc = exp.loc();
+                            let scope_id = self.summary.scopes.current_id();
+                            self.summary.template_expressions.push(
+                                crate::analysis::TemplateExpression {
+                                    content: CompactString::new(content),
+                                    kind: crate::analysis::TemplateExpressionKind::VIf,
+                                    start: loc.start.offset,
+                                    end: loc.end.offset,
+                                    scope_id,
+                                    vif_guard: self.current_vif_guard(),
+                                },
+                            );
+                        }
+                    }
+                }
+                // Handle v-show
+                else if dir.name == "show" {
+                    if self.options.collect_template_expressions {
+                        if let Some(ref exp) = dir.exp {
+                            let content = match exp {
+                                ExpressionNode::Simple(s) => s.content.as_str(),
+                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                            };
+                            let loc = exp.loc();
+                            let scope_id = self.summary.scopes.current_id();
+                            self.summary.template_expressions.push(
+                                crate::analysis::TemplateExpression {
+                                    content: CompactString::new(content),
+                                    kind: crate::analysis::TemplateExpressionKind::VShow,
+                                    start: loc.start.offset,
+                                    end: loc.end.offset,
+                                    scope_id,
+                                    vif_guard: self.current_vif_guard(),
+                                },
+                            );
+                        }
+                    }
+                }
+                // Handle v-model
+                else if dir.name == "model" {
+                    if self.options.collect_template_expressions {
+                        if let Some(ref exp) = dir.exp {
+                            let content = match exp {
+                                ExpressionNode::Simple(s) => s.content.as_str(),
+                                ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                            };
+                            let loc = exp.loc();
+                            let scope_id = self.summary.scopes.current_id();
+                            self.summary.template_expressions.push(
+                                crate::analysis::TemplateExpression {
+                                    content: CompactString::new(content),
+                                    kind: crate::analysis::TemplateExpressionKind::VModel,
+                                    start: loc.start.offset,
+                                    end: loc.end.offset,
+                                    scope_id,
+                                    vif_guard: self.current_vif_guard(),
+                                },
+                            );
+                        }
+                    }
+                }
+                // Handle v-on
+                else if dir.name == "on" && self.options.analyze_template_scopes {
+                    let target_component = if is_component {
+                        Some(CompactString::new(tag))
+                    } else {
+                        None
+                    };
+                    self.handle_v_on_directive(dir, scope_vars, target_component);
+                }
+            }
+        }
+
         // Check directive expressions for undefined refs
         if self.options.detect_undefined && self.script_analyzed {
             for prop in &el.props {
                 if let PropNode::Directive(dir) = prop {
                     if let Some(ref exp) = dir.exp {
-                        if dir.name != "for" && dir.name != "on" {
+                        if dir.name != "for" && dir.name != "on" && dir.name != "bind" {
                             self.check_expression_refs(exp, scope_vars, dir.loc.start.offset);
                         }
                     }
@@ -396,9 +443,22 @@ impl Analyzer {
             }
         }
 
+        // Push v-if guard for type narrowing (before visiting children)
+        let vif_guard_pushed = if let Some(ref cond) = vif_condition {
+            self.vif_guard_stack.push(cond.clone());
+            true
+        } else {
+            false
+        };
+
         // Visit children
         for child in el.children.iter() {
             self.visit_template_child(child, scope_vars);
+        }
+
+        // Pop v-if guard after visiting children
+        if vif_guard_pushed {
+            self.vif_guard_stack.pop();
         }
 
         // Exit v-for scope
@@ -432,12 +492,12 @@ impl Analyzer {
     }
 
     /// Handle v-bind directive
+    /// Note: :key extraction is done in first pass before scope creation
     fn handle_v_bind_directive(
         &mut self,
         dir: &vize_relief::ast::DirectiveNode<'_>,
         _el: &ElementNode<'_>,
         scope_vars: &mut Vec<CompactString>,
-        key_expression: &mut Option<CompactString>,
     ) {
         if let Some(ref exp) = dir.exp {
             let content = match exp {
@@ -457,6 +517,7 @@ impl Analyzer {
                         start: loc.start.offset,
                         end: loc.end.offset,
                         scope_id,
+                        vif_guard: self.current_vif_guard(),
                     });
             }
 
@@ -465,17 +526,6 @@ impl Analyzer {
                 self.summary.template_info.uses_attrs = true;
                 if dir.arg.is_none() && content.trim() == "$attrs" {
                     self.summary.template_info.binds_attrs_explicitly = true;
-                }
-            }
-
-            // Extract :key
-            if let Some(ref arg) = dir.arg {
-                let arg_name = match arg {
-                    ExpressionNode::Simple(s) => s.content.as_str(),
-                    ExpressionNode::Compound(c) => c.loc.source.as_str(),
-                };
-                if arg_name == "key" {
-                    *key_expression = Some(CompactString::new(content));
                 }
             }
 
@@ -537,6 +587,7 @@ impl Analyzer {
         &mut self,
         dir: &vize_relief::ast::DirectiveNode<'_>,
         scope_vars: &mut Vec<CompactString>,
+        target_component: Option<CompactString>,
     ) {
         if let Some(ref exp) = dir.exp {
             let content = match exp {
@@ -561,6 +612,7 @@ impl Analyzer {
                         has_implicit_event: false,
                         param_names: params.into_iter().collect(),
                         handler_expression: Some(CompactString::new(content)),
+                        target_component: target_component.clone(),
                     },
                     dir.loc.start.offset,
                     dir.loc.end.offset,
@@ -576,6 +628,7 @@ impl Analyzer {
                             start: dir.loc.start.offset,
                             end: dir.loc.end.offset,
                             scope_id,
+                            vif_guard: self.current_vif_guard(),
                         });
                 }
 
@@ -623,6 +676,7 @@ impl Analyzer {
                             has_implicit_event: true,
                             param_names: smallvec![],
                             handler_expression: Some(CompactString::new(content)),
+                            target_component,
                         },
                         dir.loc.start.offset,
                         dir.loc.end.offset,
@@ -637,6 +691,7 @@ impl Analyzer {
                                 start: dir.loc.start.offset,
                                 end: dir.loc.end.offset,
                                 scope_id,
+                                vif_guard: self.current_vif_guard(),
                             },
                         );
                     }
@@ -659,6 +714,7 @@ impl Analyzer {
                                 start: dir.loc.start.offset,
                                 end: dir.loc.end.offset,
                                 scope_id,
+                                vif_guard: self.current_vif_guard(),
                             },
                         );
                     }
@@ -797,8 +853,25 @@ impl Analyzer {
                 }
             }
 
+            // Push v-if guard for type narrowing
+            let guard_pushed = if let Some(ref cond) = branch.condition {
+                let cond_str = match cond {
+                    ExpressionNode::Simple(s) => s.content.as_str(),
+                    ExpressionNode::Compound(c) => c.loc.source.as_str(),
+                };
+                self.vif_guard_stack.push(CompactString::new(cond_str));
+                true
+            } else {
+                false
+            };
+
             for child in branch.children.iter() {
                 self.visit_template_child(child, scope_vars);
+            }
+
+            // Pop v-if guard
+            if guard_pushed {
+                self.vif_guard_stack.pop();
             }
         }
     }

@@ -56,12 +56,14 @@ impl TsgoLspClient {
     /// tsgo path resolution order:
     /// 1. Explicit tsgo_path argument
     /// 2. TSGO_PATH environment variable
-    /// 3. Common npm global install locations
-    /// 4. "tsgo" in PATH
+    /// 3. Local node_modules (relative to working_dir or cwd)
+    /// 4. Common npm global install locations
+    /// 5. "tsgo" in PATH
     pub fn new(tsgo_path: Option<&str>, working_dir: Option<&str>) -> Result<Self, String> {
         let tsgo = tsgo_path
             .map(String::from)
             .or_else(|| std::env::var("TSGO_PATH").ok())
+            .or_else(|| Self::find_tsgo_in_local_node_modules(working_dir))
             .or_else(Self::find_tsgo_in_common_locations)
             .unwrap_or_else(|| "tsgo".to_string());
 
@@ -602,6 +604,26 @@ impl TsgoLspClient {
         let _ = self.process.kill();
         let _ = self.process.wait();
         Ok(())
+    }
+
+    /// Find tsgo in local node_modules
+    fn find_tsgo_in_local_node_modules(working_dir: Option<&str>) -> Option<String> {
+        let base_dir = working_dir
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())?;
+
+        let candidates = [
+            base_dir.join("node_modules/.bin/tsgo"),
+            base_dir.join("node_modules/@typescript/native-preview/bin/tsgo"),
+        ];
+
+        for candidate in &candidates {
+            if candidate.exists() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+
+        None
     }
 
     /// Find tsgo in common npm global install locations
