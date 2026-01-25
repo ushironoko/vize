@@ -1,0 +1,59 @@
+{
+  "name": "@vizejs/fresco",
+  "version": "0.0.1-alpha.31",
+  "description": "Vue TUI framework - Build terminal UIs with Vue.js",
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./components": {
+      "import": "./dist/components/index.js",
+      "types": "./dist/components/index.d.ts"
+    },
+    "./composables": {
+      "import": "./dist/composables/index.js",
+      "types": "./dist/composables/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "vue",
+    "tui",
+    "terminal",
+    "cli",
+    "ink",
+    "fresco",
+    "vize"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ubugeeei/vize",
+    "directory": "npm/fresco"
+  },
+  "dependencies": {
+    "@vizejs/fresco-native": "workspace:*"
+  },
+  "peerDependencies": {
+    "@vue/runtime-core": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vue/runtime-core": "^3.5.0",
+    "typescript": "~5.6.0"
+  }
+}

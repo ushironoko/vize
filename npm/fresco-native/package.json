@@ -1,0 +1,50 @@
+{
+  "name": "@vizejs/fresco-native",
+  "version": "0.0.1-alpha.31",
+  "description": "Vue TUI framework - Native bindings",
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "vize-fresco",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-msvc"
+      ]
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release --cargo-cwd=../../crates/vize_fresco --cargo-name=vize_fresco --features napi",
+    "build:debug": "napi build --platform --cargo-cwd=../../crates/vize_fresco --cargo-name=vize_fresco --features napi",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ubugeeei/vize"
+  },
+  "keywords": [
+    "vue",
+    "tui",
+    "terminal",
+    "native",
+    "napi",
+    "vize",
+    "fresco"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}
