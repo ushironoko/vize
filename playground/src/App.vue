@@ -759,6 +759,11 @@ onMounted(async () => {
               <option value="sfc">SFC</option>
             </select>
           </label>
+
+          <label class="option checkbox">
+            <input type="checkbox" v-model="options.ssr" />
+            <span>SSR</span>
+          </label>
         </template>
 
         <a

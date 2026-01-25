@@ -8,6 +8,7 @@ members = [
     "crates/vize_atelier_core",
     "crates/vize_atelier_dom",
     "crates/vize_atelier_vapor",
+    "crates/vize_atelier_ssr",
     "crates/vize_atelier_sfc",
     "crates/vize_vitrine",
     "crates/vize",
@@ -35,6 +36,7 @@ vize_croquis = { path = "crates/vize_croquis", version = "0.0.1-alpha.31" }
 vize_atelier_core = { path = "crates/vize_atelier_core", version = "0.0.1-alpha.31" }
 vize_atelier_dom = { path = "crates/vize_atelier_dom", version = "0.0.1-alpha.31" }
 vize_atelier_vapor = { path = "crates/vize_atelier_vapor", version = "0.0.1-alpha.31" }
+vize_atelier_ssr = { path = "crates/vize_atelier_ssr", version = "0.0.1-alpha.31" }
 vize_atelier_sfc = { path = "crates/vize_atelier_sfc", version = "0.0.1-alpha.31", default-features = false }
 vize_vitrine = { path = "crates/vize_vitrine", version = "0.0.1-alpha.31", default-features = false }
 vize_musea = { path = "crates/vize_musea", version = "0.0.1-alpha.31" }

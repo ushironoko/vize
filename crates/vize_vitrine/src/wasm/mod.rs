@@ -30,6 +30,7 @@ use vize_atelier_sfc::{
     compile_sfc as sfc_compile, parse_sfc, ScriptCompileOptions, SfcCompileOptions, SfcDescriptor,
     SfcParseOptions, StyleCompileOptions, TemplateCompileOptions,
 };
+use vize_atelier_ssr::compile_ssr as ssr_compile;
 use vize_atelier_vapor::{compile_vapor as vapor_compile, VaporCompilerOptions};
 
 /// Helper function to serialize values to JsValue with maps as objects
@@ -299,6 +300,30 @@ fn compile_internal(
     vapor: bool,
 ) -> Result<CompileResult, String> {
     let allocator = Bump::new();
+
+    // SSR mode - use dedicated SSR compiler
+    if opts.ssr.unwrap_or(false) && !vapor {
+        let (root, errors, result) = ssr_compile(&allocator, template);
+
+        if !errors.is_empty() {
+            return Err(format!("SSR compile errors: {:?}", errors));
+        }
+
+        // Collect helpers
+        let helpers: Vec<String> = root.helpers.iter().map(|h| h.name().to_string()).collect();
+
+        // Build AST JSON
+        let ast = build_ast_json(&root);
+
+        return Ok(CompileResult {
+            code: result.code.to_string(),
+            preamble: result.preamble.to_string(),
+            ast,
+            map: None,
+            helpers,
+            templates: None,
+        });
+    }
 
     if vapor {
         // Use actual Vapor compiler

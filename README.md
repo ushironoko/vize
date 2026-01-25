@@ -70,6 +70,10 @@
     <td>SFC (.vue) compiler</td>
   </tr>
   <tr>
+    <td><img src="./crates/vize_atelier_ssr/logo.png" width="32" align="center" /> <a href="./crates/vize_atelier_ssr">vize_atelier_ssr</a></td>
+    <td>SSR (Server-Side Rendering) compiler</td>
+  </tr>
+  <tr>
     <td><img src="./crates/vize_vitrine/logo.png" width="32" align="center" /> <a href="./crates/vize_vitrine">vize_vitrine</a></td>
     <td>Node.js / WASM bindings</td>
   </tr>

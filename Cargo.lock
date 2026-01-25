@@ -3111,6 +3111,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vize_atelier_ssr"
+version = "0.0.1-alpha.31"
+dependencies = [
+ "insta",
+ "serde",
+ "vize_armature",
+ "vize_atelier_core",
+ "vize_carton",
+ "vize_relief",
+]
+
+[[package]]
 name = "vize_atelier_vapor"
 version = "0.0.1-alpha.31"
 dependencies = [
@@ -3328,6 +3340,7 @@ dependencies = [
  "vize_atelier_core",
  "vize_atelier_dom",
  "vize_atelier_sfc",
+ "vize_atelier_ssr",
  "vize_atelier_vapor",
  "vize_canon",
  "vize_carton",

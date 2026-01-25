@@ -42,6 +42,7 @@ pub fn is_valid_js_identifier(s: &str) -> bool {
 /// Default helper alias function
 pub fn default_helper_alias(helper: RuntimeHelper) -> &'static str {
     match helper {
+        // Core helpers
         RuntimeHelper::Fragment => "_Fragment",
         RuntimeHelper::Teleport => "_Teleport",
         RuntimeHelper::Suspense => "_Suspense",
@@ -91,6 +92,27 @@ pub fn default_helper_alias(helper: RuntimeHelper) -> &'static str {
         RuntimeHelper::IsMemoSame => "_isMemoSame",
         RuntimeHelper::WithModifiers => "_withModifiers",
         RuntimeHelper::WithKeys => "_withKeys",
+
+        // SSR helpers
+        RuntimeHelper::SsrInterpolate => "_ssrInterpolate",
+        RuntimeHelper::SsrRenderVNode => "_ssrRenderVNode",
+        RuntimeHelper::SsrRenderComponent => "_ssrRenderComponent",
+        RuntimeHelper::SsrRenderSlot => "_ssrRenderSlot",
+        RuntimeHelper::SsrRenderSlotInner => "_ssrRenderSlotInner",
+        RuntimeHelper::SsrRenderAttrs => "_ssrRenderAttrs",
+        RuntimeHelper::SsrRenderAttr => "_ssrRenderAttr",
+        RuntimeHelper::SsrRenderDynamicAttr => "_ssrRenderDynamicAttr",
+        RuntimeHelper::SsrIncludeBooleanAttr => "_ssrIncludeBooleanAttr",
+        RuntimeHelper::SsrRenderClass => "_ssrRenderClass",
+        RuntimeHelper::SsrRenderStyle => "_ssrRenderStyle",
+        RuntimeHelper::SsrRenderDynamicModel => "_ssrRenderDynamicModel",
+        RuntimeHelper::SsrGetDynamicModelProps => "_ssrGetDynamicModelProps",
+        RuntimeHelper::SsrRenderList => "_ssrRenderList",
+        RuntimeHelper::SsrLooseEqual => "_ssrLooseEqual",
+        RuntimeHelper::SsrLooseContain => "_ssrLooseContain",
+        RuntimeHelper::SsrGetDirectiveProps => "_ssrGetDirectiveProps",
+        RuntimeHelper::SsrRenderTeleport => "_ssrRenderTeleport",
+        RuntimeHelper::SsrRenderSuspense => "_ssrRenderSuspense",
     }
 }
 
