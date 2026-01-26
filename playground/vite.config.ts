@@ -8,7 +8,8 @@ import topLevelAwait from "vite-plugin-top-level-await";
 // In development, try to use Vize for testing
 // FIXME: Temporarily disabled Vize due to template literal compilation bug
 // Set USE_VIZE=true env var to enable Vize compiler
-const USE_VIZE = process.env.USE_VIZE === "true";
+// const USE_VIZE = process.env.USE_VIZE === "true";
+const USE_VIZE = true;
 
 async function getVuePlugin() {
   if (USE_VIZE) {

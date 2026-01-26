@@ -1153,6 +1153,54 @@ const localItems = ref(['a', 'b', 'c'])
 """
 
 # =============================================================================
+# v-model on components with ref bindings (regression test)
+# =============================================================================
+
+[[cases]]
+name = "v-model on component with ref binding should not duplicate .value"
+input = """
+<script setup lang="ts">
+import { ref } from 'vue';
+import MyInput from './MyInput.vue';
+const message = ref('hello');
+</script>
+
+<template>
+  <MyInput v-model="message" />
+</template>
+"""
+
+[[cases]]
+name = "v-model with named prop on component with ref binding"
+input = """
+<script setup lang="ts">
+import { ref } from 'vue';
+import MyEditor from './MyEditor.vue';
+const content = ref('');
+const title = ref('Untitled');
+</script>
+
+<template>
+  <MyEditor v-model="content" v-model:title="title" />
+</template>
+"""
+
+[[cases]]
+name = "multiple v-model bindings on component with refs"
+input = """
+<script setup lang="ts">
+import { ref } from 'vue';
+import Dialog from './Dialog.vue';
+const isOpen = ref(false);
+const formValue = ref('');
+</script>
+
+<template>
+  <Dialog v-model="isOpen" v-model:value="formValue" />
+</template>
+"""
+
+# =============================================================================
 # Multiline type definitions (regression tests)
 # =============================================================================
 
