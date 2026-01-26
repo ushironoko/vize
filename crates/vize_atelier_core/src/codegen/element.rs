@@ -838,8 +838,16 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
 pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
     match el.tag_type {
         ElementType::Element => {
-            // Check for v-show directive
-            let has_vshow = has_vshow_directive(el);
+            // Check for v-model directive on native elements (only if no v-show)
+            let has_vmodel = has_vmodel_directive(el);
+            if has_vmodel {
+                ctx.use_helper(RuntimeHelper::WithDirectives);
+                ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
+                ctx.push("(");
+            }
+
+            // Check for v-show directive (only if no v-model)
+            let has_vshow = has_vshow_directive(el) && !has_vmodel;
             if has_vshow {
                 ctx.use_helper(RuntimeHelper::WithDirectives);
                 ctx.use_helper(RuntimeHelper::VShow);
@@ -855,13 +863,13 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             ctx.push(&el.tag);
             ctx.push("\"");
 
-            // Calculate patch flag for v-show (NEED_PATCH)
-            let (patch_flag, _) = calculate_element_patch_info(
+            // Calculate patch flag and dynamic props
+            let (patch_flag, dynamic_props) = calculate_element_patch_info(
                 el,
                 ctx.options.binding_metadata.as_ref(),
                 ctx.options.cache_handlers,
             );
-            let has_patch_info = patch_flag.is_some();
+            let has_patch_info = patch_flag.is_some() || dynamic_props.is_some();
 
             // Generate props (only if there are renderable props, not just v-show)
             // If props are hoisted, use the hoisted reference
@@ -883,13 +891,32 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                 ctx.push(", null");
             }
 
-            // Generate patch flag for v-show
+            // Generate patch flag
             if let Some(flag) = patch_flag {
                 ctx.push(", ");
                 ctx.push(&format!("{} /* {} */", flag, patch_flag_name(flag)));
             }
 
+            // Generate dynamic props
+            if let Some(props) = dynamic_props {
+                ctx.push(", [");
+                for (i, prop) in props.iter().enumerate() {
+                    if i > 0 {
+                        ctx.push(", ");
+                    }
+                    ctx.push("\"");
+                    ctx.push(prop);
+                    ctx.push("\"");
+                }
+                ctx.push("]");
+            }
+
             ctx.push(")");
+
+            // Close withDirectives for v-model
+            if has_vmodel {
+                generate_vmodel_closing(ctx, el);
+            }
 
             // Close withDirectives for v-show
             if has_vshow {

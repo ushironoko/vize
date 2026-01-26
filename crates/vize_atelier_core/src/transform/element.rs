@@ -376,7 +376,17 @@ fn process_element_props<'a>(ctx: &mut TransformContext<'a>, el: &mut Box<'a, El
                         allocator,
                     ))),
                     exp: Some(ExpressionNode::Simple(Box::new_in(
-                        SimpleExpressionNode::new(&handler, false, data.dir_loc.clone()),
+                        SimpleExpressionNode {
+                            content: String::new(&handler),
+                            is_static: false,
+                            const_type: ConstantType::NotConstant,
+                            loc: data.dir_loc.clone(),
+                            js_ast: None,
+                            hoisted: None,
+                            identifiers: None,
+                            is_handler_key: true,
+                            is_ref_transformed: true, // Handler contains already-processed refs
+                        },
                         allocator,
                     ))),
                     modifiers: Vec::new_in(allocator),
