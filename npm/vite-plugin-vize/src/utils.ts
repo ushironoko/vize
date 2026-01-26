@@ -52,6 +52,10 @@ export function generateOutput(
   const hasExportDefault = output.includes('export default');
   if (hasExportDefault) {
     output = output.replace('export default', 'const _sfc_main =');
+    // Add __scopeId for scoped CSS support
+    if (compiled.hasScoped && compiled.scopeId) {
+      output += `\n_sfc_main.__scopeId = "data-v-${compiled.scopeId}";`;
+    }
     output += '\nexport default _sfc_main;';
   }
 
