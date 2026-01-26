@@ -274,6 +274,8 @@ pub fn compile_sfc(
 
     // Compile
     let has_scoped = descriptor.styles.iter().any(|s| s.scoped);
+    // Preserve TypeScript in output - let Vite/esbuild handle TS transformation
+    // This avoids issues with OXC transformer incorrectly removing code
     let compile_opts = SfcCompileOptions {
         parse: SfcParseOptions {
             filename: filename.clone(),
@@ -281,12 +283,14 @@ pub fn compile_sfc(
         },
         script: ScriptCompileOptions {
             id: Some(filename.clone()),
+            is_ts: true, // Preserve TypeScript
             ..Default::default()
         },
         template: TemplateCompileOptions {
             id: Some(filename.clone()),
             scoped: has_scoped,
             ssr: opts.ssr.unwrap_or(false),
+            is_ts: true, // Preserve TypeScript
             ..Default::default()
         },
         style: StyleCompileOptions {
@@ -588,6 +592,7 @@ pub fn compile_sfc_batch_with_results(
         let script_hash = descriptor.script_hash();
 
         // Compile
+        // Preserve TypeScript in output - let Vite/esbuild handle TS transformation
         let actual_has_scoped = descriptor.styles.iter().any(|s| s.scoped);
         let compile_opts = SfcCompileOptions {
             parse: SfcParseOptions {
@@ -596,12 +601,14 @@ pub fn compile_sfc_batch_with_results(
             },
             script: ScriptCompileOptions {
                 id: Some(filename.clone()),
+                is_ts: true, // Preserve TypeScript
                 ..Default::default()
             },
             template: TemplateCompileOptions {
                 id: Some(filename.clone()),
                 scoped: actual_has_scoped,
                 ssr,
+                is_ts: true, // Preserve TypeScript
                 ..Default::default()
             },
             style: StyleCompileOptions {

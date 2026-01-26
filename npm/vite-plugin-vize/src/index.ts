@@ -78,7 +78,12 @@ export function vize(options: VizeOptions = {}): Plugin {
 
   function resolveVuePath(id: string, importer?: string): string {
     let resolved: string;
-    if (path.isAbsolute(id)) {
+    // Check if it's a web-root relative path (starts with / but not a real absolute path)
+    // These are relative to the project root, not the filesystem root
+    if (id.startsWith('/') && !fs.existsSync(id)) {
+      // Remove leading slash and resolve relative to root
+      resolved = path.resolve(root, id.slice(1));
+    } else if (path.isAbsolute(id)) {
       resolved = id;
     } else if (importer) {
       // Remove virtual prefix from importer if present

@@ -41,6 +41,11 @@ fn is_static_element(el: &ElementNode<'_>) -> bool {
         if matches!(child, TemplateChildNode::Comment(_)) {
             return false;
         }
+        // Nested elements cannot be fully hoisted yet because create_children_expression
+        // doesn't recursively create VNodeCalls for them - this would cause children to be omitted
+        if matches!(child, TemplateChildNode::Element(_)) {
+            return false;
+        }
         if !is_static_node(child) {
             return false;
         }
@@ -82,10 +87,10 @@ fn get_element_static_type(el: &ElementNode<'_>) -> StaticType {
             TemplateChildNode::Interpolation(_) => {
                 has_dynamic_text = true;
             }
-            TemplateChildNode::Element(child_el) => {
-                if get_element_static_type(child_el) == StaticType::NotStatic {
-                    return StaticType::NotStatic;
-                }
+            // Nested elements cannot be fully hoisted yet because create_children_expression
+            // doesn't recursively create VNodeCalls for them - this would cause children to be omitted
+            TemplateChildNode::Element(_) => {
+                return StaticType::NotStatic;
             }
             TemplateChildNode::If(_) | TemplateChildNode::For(_) => {
                 return StaticType::NotStatic;
