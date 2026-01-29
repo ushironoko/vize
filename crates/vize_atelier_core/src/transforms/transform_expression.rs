@@ -540,7 +540,7 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
     }
 
     fn visit_member_expression(&mut self, expr: &oxc_ast_types::MemberExpression<'_>) {
-        // Visit the object part normally
+        // Visit the object part, but skip .value addition if already accessing .value
         match expr {
             oxc_ast_types::MemberExpression::ComputedMemberExpression(computed) => {
                 self.visit_expression(&computed.object);
@@ -548,6 +548,22 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
                 self.visit_expression(&computed.expression);
             }
             oxc_ast_types::MemberExpression::StaticMemberExpression(static_expr) => {
+                // If this is `ref.value`, don't add another .value to the ref object
+                let property_name = static_expr.property.name.as_str();
+                if property_name == "value" {
+                    // Check if object is a simple identifier that is a ref
+                    if let oxc_ast_types::Expression::Identifier(ident) = &static_expr.object {
+                        let name = ident.name.as_str();
+                        if self.is_ref_binding(name) {
+                            // Skip adding .value - it's already accessed via .value
+                            // But still add _ctx. prefix if needed
+                            if let Some(prefix) = get_identifier_prefix(name, self.ctx) {
+                                self.rewrites.insert((ident.span.start as usize, prefix));
+                            }
+                            return;
+                        }
+                    }
+                }
                 self.visit_expression(&static_expr.object);
                 // Don't visit the property - it's a static name, not a reference
             }
@@ -603,7 +619,8 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
 
 /// Check if identifier should be prefixed
 /// Determine what prefix (if any) an identifier needs
-/// Returns: None = no prefix, Some("_ctx.") = context prefix, Some("__props.") = props prefix
+/// Returns: None = no prefix, Some("_ctx.") = context prefix, Some("__props.") = props prefix,
+///          Some("$setup.") = setup context prefix (for function mode with binding metadata)
 fn get_identifier_prefix(name: &str, ctx: &TransformContext<'_>) -> Option<&'static str> {
     // Don't prefix globals
     if is_global_allowed(name) {
@@ -615,30 +632,36 @@ fn get_identifier_prefix(name: &str, ctx: &TransformContext<'_>) -> Option<&'sta
         return None;
     }
 
-    // In inline mode, check binding metadata
-    if ctx.options.inline {
-        if let Some(bindings) = &ctx.options.binding_metadata {
-            if let Some(binding_type) = bindings.bindings.get(name) {
-                // Props need __props. prefix
-                if matches!(
-                    binding_type,
-                    crate::options::BindingType::Props | crate::options::BindingType::PropsAliased
-                ) {
+    // Check binding metadata for setup bindings
+    if let Some(bindings) = &ctx.options.binding_metadata {
+        if let Some(binding_type) = bindings.bindings.get(name) {
+            // Props need prefix based on mode
+            if matches!(
+                binding_type,
+                crate::options::BindingType::Props | crate::options::BindingType::PropsAliased
+            ) {
+                // In inline mode: use __props. (local variable in setup)
+                // In function mode: use $props. (render function parameter)
+                if ctx.options.inline {
                     return Some("__props.");
+                } else {
+                    return Some("$props.");
                 }
-                // Other setup bindings are accessed directly
+            }
+
+            if ctx.options.inline {
+                // In inline mode, setup bindings are accessed directly via closure
                 return None;
+            } else {
+                // In function mode (inline = false), setup bindings use $setup. prefix
+                // This is the pattern Vue's @vitejs/plugin-vue uses for proper reactivity tracking
+                return Some("$setup.");
             }
         }
     }
 
     // Default: prefix with _ctx.
     Some("_ctx.")
-}
-
-/// Check if identifier should get a prefix (legacy helper for compatibility)
-fn should_prefix_identifier(name: &str, ctx: &TransformContext<'_>) -> bool {
-    get_identifier_prefix(name, ctx).is_some()
 }
 
 /// Check if a simple identifier is a ref binding in inline mode
@@ -767,12 +790,16 @@ pub fn process_inline_handler<'a>(
             // Check if it's a simple identifier (method name)
             // Vue passes method references directly, no wrapping needed
             if is_simple_identifier(content) {
-                let new_content =
-                    if ctx.options.prefix_identifiers && should_prefix_identifier(content, ctx) {
-                        ["_ctx.", content].concat()
+                let new_content = if ctx.options.prefix_identifiers {
+                    // Use the same prefix logic as get_identifier_prefix for consistency
+                    if let Some(prefix) = get_identifier_prefix(content, ctx) {
+                        [prefix, content].concat()
                     } else {
                         content.to_string()
-                    };
+                    }
+                } else {
+                    content.to_string()
+                };
 
                 return ExpressionNode::Simple(Box::new_in(
                     SimpleExpressionNode {

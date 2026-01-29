@@ -381,7 +381,20 @@ function applyDiagnostics(diagnostics: Diagnostic[] | undefined) {
 // Update diagnostics markers
 watch(() => props.diagnostics, (diagnostics) => {
   applyDiagnostics(diagnostics);
-}, { immediate: true });
+}, { immediate: true, deep: true });
+
+// Set editor value programmatically (workaround for vite-plugin-vize v-model issue)
+function setValue(value: string) {
+  if (editorInstance.value) {
+    editorInstance.value.setValue(value);
+  }
+}
+
+// Expose methods for direct calls (workaround for vite-plugin-vize reactivity issue)
+defineExpose({
+  applyDiagnostics,
+  setValue,
+});
 
 // Scope decoration IDs
 let scopeDecorationIds: string[] = [];

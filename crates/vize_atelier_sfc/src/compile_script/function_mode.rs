@@ -61,7 +61,20 @@ pub fn compile_script_setup(
     let mut in_paren_macro_call = false;
     let mut paren_macro_depth: i32 = 0;
 
+    // Track template literal depth to avoid treating content inside backtick strings as code
+    let mut template_literal_depth: i32 = 0;
+
+    // Track TypeScript-only declarations (interface, type) to skip them
+    let mut in_ts_interface = false;
+    let mut ts_interface_brace_depth: i32 = 0;
+    let mut in_ts_type = false;
+    let mut ts_type_depth: i32 = 0;
+
     for line in content.lines() {
+        // Update template literal depth by counting unescaped backticks
+        // This is a simplified approach - we count backticks that aren't preceded by backslash
+        // and aren't inside regular strings (approximation)
+        template_literal_depth += count_unescaped_backticks(line);
         let trimmed = line.trim();
 
         // Handle multi-line macro call: const emit = defineEmits<{ ... }>()
@@ -214,17 +227,21 @@ pub fn compile_script_setup(
             continue;
         }
 
-        // Handle single-line props destructure
-        if is_props_destructure_line(trimmed) {
+        // Handle single-line props destructure (only when outside template literals)
+        if template_literal_depth % 2 == 0 && is_props_destructure_line(trimmed) {
             continue;
         }
 
-        if trimmed.starts_with("import ") {
+        // Only process imports when outside template literals (depth is even)
+        // When inside a template literal (depth is odd), treat as regular content
+        let outside_template_literal = template_literal_depth % 2 == 0;
+
+        if outside_template_literal && trimmed.starts_with("import ") {
             in_import = true;
             import_buffer.clear();
         }
 
-        if in_import {
+        if in_import && outside_template_literal {
             import_buffer.push_str(line);
             import_buffer.push('\n');
 
@@ -232,9 +249,96 @@ pub fn compile_script_setup(
                 imports.push(import_buffer.clone());
                 in_import = false;
             }
-        } else if !trimmed.is_empty() {
-            // Skip compiler macro calls
-            if is_macro_call_line(trimmed) {
+            continue;
+        }
+
+        // Handle TypeScript interface declarations (skip them)
+        if in_ts_interface {
+            ts_interface_brace_depth += trimmed.matches('{').count() as i32;
+            ts_interface_brace_depth -= trimmed.matches('}').count() as i32;
+            if ts_interface_brace_depth <= 0 {
+                in_ts_interface = false;
+            }
+            continue;
+        }
+
+        // Detect TypeScript interface start
+        if outside_template_literal
+            && (trimmed.starts_with("interface ") || trimmed.starts_with("export interface "))
+        {
+            in_ts_interface = true;
+            ts_interface_brace_depth =
+                trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+            if ts_interface_brace_depth <= 0 {
+                in_ts_interface = false;
+            }
+            continue;
+        }
+
+        // Handle TypeScript type declarations (skip them)
+        if in_ts_type {
+            // Track balanced brackets for complex types like: type X = { a: string } | { b: number }
+            ts_type_depth += trimmed.matches('{').count() as i32;
+            ts_type_depth -= trimmed.matches('}').count() as i32;
+            ts_type_depth += trimmed.matches('<').count() as i32;
+            ts_type_depth -= trimmed.matches('>').count() as i32;
+            ts_type_depth += trimmed.matches('(').count() as i32;
+            ts_type_depth -= trimmed.matches(')').count() as i32;
+            // Type declaration ends when balanced and NOT a continuation line
+            let is_union_continuation = trimmed.starts_with('|') || trimmed.starts_with('&');
+            if ts_type_depth <= 0
+                && !is_union_continuation
+                && (trimmed.ends_with(';')
+                    || (!trimmed.ends_with('|')
+                        && !trimmed.ends_with('&')
+                        && !trimmed.ends_with(',')
+                        && !trimmed.ends_with('{')))
+            {
+                in_ts_type = false;
+            }
+            continue;
+        }
+
+        // Detect TypeScript type alias start
+        if outside_template_literal
+            && (trimmed.starts_with("type ") || trimmed.starts_with("export type "))
+        {
+            // Check if it's a single-line type
+            let has_equals = trimmed.contains('=');
+            if has_equals {
+                ts_type_depth = trimmed.matches('{').count() as i32
+                    - trimmed.matches('}').count() as i32
+                    + trimmed.matches('<').count() as i32
+                    - trimmed.matches('>').count() as i32
+                    + trimmed.matches('(').count() as i32
+                    - trimmed.matches(')').count() as i32;
+                if ts_type_depth <= 0
+                    && (trimmed.ends_with(';')
+                        || (!trimmed.ends_with('|')
+                            && !trimmed.ends_with('&')
+                            && !trimmed.ends_with(',')
+                            && !trimmed.ends_with('{')
+                            && !trimmed.ends_with('=')))
+                {
+                    // Single line type, just skip
+                    continue;
+                }
+                in_ts_type = true;
+            }
+            continue;
+        }
+
+        if !trimmed.is_empty() {
+            // If we were in an import but now inside a template literal, reset import state
+            if in_import && !outside_template_literal {
+                // We started an import but crossed into a template literal
+                // This shouldn't normally happen, but handle it gracefully
+                setup_lines.push(import_buffer.clone());
+                in_import = false;
+                import_buffer.clear();
+            }
+            // Skip compiler macro calls (only when outside template literals)
+            if outside_template_literal && is_macro_call_line(trimmed) {
                 continue;
             }
             setup_lines.push(line.to_string());
@@ -484,16 +588,31 @@ pub fn compile_script_setup(
         .map(|d| d.bindings.values().map(|b| b.local.clone()).collect())
         .unwrap_or_default();
 
+    // Collect prop names from type-based defineProps to exclude from __returned__
+    let typed_prop_names: HashSet<String> = ctx
+        .macros
+        .define_props
+        .as_ref()
+        .and_then(|p| p.type_args.as_ref())
+        .map(|type_args| {
+            extract_prop_types_from_type(type_args)
+                .keys()
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Generate __returned__ object
     let mut returned_bindings: Vec<String> = ctx
         .bindings
         .bindings
         .keys()
         .filter(|name| {
-            // Exclude compiler macros, destructured props, and props bindings
+            // Exclude compiler macros, destructured props, props bindings, and typed props
             !compiler_macros.contains(name.as_str())
                 && !destructured_prop_locals.contains(*name)
                 && !props_binding_names.contains(*name)
+                && !typed_prop_names.contains(*name)
         })
         .cloned()
         .collect();
@@ -576,4 +695,35 @@ pub fn compile_script_setup(
         code: final_code,
         bindings: Some(ctx.bindings),
     })
+}
+
+/// Count unescaped backticks in a line, ignoring those inside regular strings.
+/// Returns the change in template literal depth (positive = more opens, negative = more closes).
+/// Since backticks toggle depth, we return the count which should be added to track depth.
+fn count_unescaped_backticks(line: &str) -> i32 {
+    let mut count = 0;
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    while i < chars.len() {
+        let c = chars[i];
+        let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+
+        // Track regular string state (but don't track template literals here,
+        // we're counting backticks to determine template literal depth)
+        if c == '\'' && prev != Some('\\') && !in_double_quote {
+            in_single_quote = !in_single_quote;
+        } else if c == '"' && prev != Some('\\') && !in_single_quote {
+            in_double_quote = !in_double_quote;
+        } else if c == '`' && prev != Some('\\') && !in_single_quote && !in_double_quote {
+            // Found an unescaped backtick outside of regular strings
+            count += 1;
+        }
+
+        i += 1;
+    }
+
+    count
 }

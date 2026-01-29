@@ -1,8 +1,24 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import MonacoEditor from './MonacoEditor.vue';
 import type { Diagnostic } from './MonacoEditor.vue';
 import type { WasmModule, CroquisResult, CrossFileResult, CrossFileInput, CrossFileOptions as WasmCrossFileOptions } from '../wasm/index';
+import { getWasm } from '../wasm/index';
+import {
+  mdiDiamond,
+  mdiFlash,
+  mdiAlert,
+  mdiArrowTopRight,
+  mdiFileTree,
+  mdiArrowDown,
+  mdiLanguageTypescript,
+  mdiVuejs,
+  mdiFile,
+  mdiClose,
+  mdiInformation,
+  mdiCheck,
+  mdiLightbulbOn,
+} from '@mdi/js';
 
 const props = defineProps<{
   compiler: WasmModule | null;
@@ -22,7 +38,7 @@ const PRESETS: Preset[] = [
     id: 'default',
     name: 'Overview',
     description: 'General cross-file analysis patterns',
-    icon: '◈',
+    icon: mdiDiamond,
     files: {
       'App.vue': `<script setup lang="ts">
 import { provide, ref } from 'vue'
@@ -124,7 +140,7 @@ function handleClick(item: { id: number; name: string }) {
     id: 'reactivity-loss',
     name: 'Reactivity Loss',
     description: 'Patterns that break Vue reactivity',
-    icon: '⚡',
+    icon: mdiFlash,
     files: {
       'App.vue': `<script setup lang="ts">
 import { reactive, ref, provide } from 'vue'
@@ -295,7 +311,7 @@ logUser(user)
     id: 'setup-context',
     name: 'Setup Context',
     description: 'Vue APIs called outside setup (CSRP/Memory Leak)',
-    icon: '⚠',
+    icon: mdiAlert,
     files: {
       'App.vue': `<script setup lang="ts">
 import ComponentWithLeaks from './ComponentWithLeaks.vue'
@@ -438,7 +454,7 @@ export function createGlobalState() {
     id: 'reference-escape',
     name: 'Reference Escape',
     description: 'Reactive references escaping scope (Rust-like tracking)',
-    icon: '↗',
+    icon: mdiArrowTopRight,
     files: {
       'App.vue': `<script setup lang="ts">
 import { reactive, ref, provide } from 'vue'
@@ -612,7 +628,7 @@ onUnmounted(() => {
     id: 'provide-inject',
     name: 'Provide/Inject Tree',
     description: 'Complex dependency injection patterns',
-    icon: '🌳',
+    icon: mdiFileTree,
     files: {
       'App.vue': `<script setup lang="ts">
 import { provide, ref, reactive, readonly } from 'vue'
@@ -754,7 +770,7 @@ const themeClass = computed(() => theme?.isDark.value ? 'dark-mode' : 'light-mod
     id: 'fallthrough-attrs',
     name: 'Fallthrough Attrs',
     description: '$attrs, useAttrs(), and inheritAttrs patterns',
-    icon: '⬇',
+    icon: mdiArrowDown,
     files: {
       'App.vue': `<script setup lang="ts">
 import BaseButton from './BaseButton.vue'
@@ -919,6 +935,16 @@ const currentPreset = ref<string>('default');
 const currentPresetData = computed(() => PRESETS.find(p => p.id === currentPreset.value) || PRESETS[0]);
 const files = ref<Record<string, string>>({ ...currentPresetData.value.files });
 const activeFile = ref<string>(Object.keys(currentPresetData.value.files)[0]);
+
+// Monaco editor ref (for direct setValue calls - vite-plugin-vize workaround)
+const monacoEditorRef = ref<InstanceType<typeof MonacoEditor> | null>(null);
+
+// File names array for v-for (workaround for vite-plugin-vize object iteration issue)
+// Using ref + watch instead of computed to ensure reactivity works correctly
+const fileNames = ref<string[]>(Object.keys(files.value));
+watch(files, (newFiles) => {
+  fileNames.value = Object.keys(newFiles);
+}, { deep: true });
 const croquisResults = ref<Record<string, CroquisResult | null>>({});
 const crossFileIssues = ref<CrossFileIssue[]>([]);
 const analysisTime = ref<number>(0);
@@ -998,17 +1024,24 @@ interface CrossFileIssue {
   suggestion?: string;
 }
 
-// === Computed ===
-const currentSource = computed({
-  get: () => files.value[activeFile.value] || '',
-  set: (val) => { files.value[activeFile.value] = val; }
-});
+// === Source State (workaround for vite-plugin-vize reactivity issue) ===
+const currentSource = ref(files.value[activeFile.value] || '');
+
+// Sync currentSource when activeFile changes
+watch(activeFile, (newFile) => {
+  currentSource.value = files.value[newFile] || '';
+}, { immediate: false });
+
+// Sync files when currentSource changes (for editor input)
+watch(currentSource, (newSource) => {
+  files.value[activeFile.value] = newSource;
+}, { immediate: false });
 
 const currentDiagnostics = computed((): Diagnostic[] => {
   return crossFileIssues.value
     .filter(issue => issue.file === activeFile.value)
     .map(issue => ({
-      message: `[${issue.code}] ${issue.message}${issue.suggestion ? `\n\n💡 ${issue.suggestion}` : ''}`,
+      message: `[${issue.code}] ${issue.message}${issue.suggestion ? `\n\nTip: ${issue.suggestion}` : ''}`,
       startLine: issue.line,
       startColumn: issue.column,
       endLine: issue.endLine,
@@ -1248,7 +1281,9 @@ function findLineAndColumnAtOffset(source: string, offset: number, length: numbe
 }
 
 async function analyzeAll() {
-  if (!props.compiler) return;
+  // Use getWasm() directly instead of props (workaround for vite-plugin-vize reactivity issue)
+  const compiler = getWasm();
+  if (!compiler) return;
 
   isAnalyzing.value = true;
   const startTime = performance.now();
@@ -1258,7 +1293,7 @@ async function analyzeAll() {
   const results: Record<string, CroquisResult | null> = {};
   for (const [filename, source] of Object.entries(files.value)) {
     try {
-      results[filename] = props.compiler.analyzeSfc(source, { filename });
+      results[filename] = compiler.analyzeSfc(source, { filename });
     } catch {
       results[filename] = null;
     }
@@ -1286,15 +1321,14 @@ async function analyzeAll() {
 
   // Try WASM cross-file analysis first
   try {
-    if (props.compiler.analyzeCrossFile) {
-      const crossFileResult: CrossFileResult = props.compiler.analyzeCrossFile(crossFileInputs, wasmOptions);
+    if (compiler.analyzeCrossFile) {
+      const crossFileResult: CrossFileResult = compiler.analyzeCrossFile(crossFileInputs, wasmOptions);
 
       // Convert WASM diagnostics to CrossFileIssue format
       for (const diag of crossFileResult.diagnostics) {
         const source = files.value[diag.file] || '';
         const loc = offsetToLineColumn(source, diag.offset);
         const endLoc = offsetToLineColumn(source, diag.endOffset);
-        console.log(`[DEBUG] ${diag.file}: offset=${diag.offset}-${diag.endOffset}, line=${loc.line}, col=${loc.column}, code=${diag.code}, msg=${diag.message.slice(0,50)}`);
 
         issues.push({
           id: `issue-${++issueIdCounter}`,
@@ -2105,16 +2139,30 @@ function selectPreset(presetId: string) {
 function selectIssue(issue: CrossFileIssue) {
   selectedIssue.value = issue;
   activeFile.value = issue.file;
+  // Workaround: directly update currentSource (vite-plugin-vize watch issue)
+  const newSource = files.value[issue.file] || '';
+  currentSource.value = newSource;
+  // Workaround: directly call Monaco setValue (vite-plugin-vize v-model issue)
+  monacoEditorRef.value?.setValue(newSource);
+}
+
+function selectFile(name: string) {
+  activeFile.value = name;
+  // Workaround: directly update currentSource (vite-plugin-vize watch issue)
+  const newSource = files.value[name] || '';
+  currentSource.value = newSource;
+  // Workaround: directly call Monaco setValue (vite-plugin-vize v-model issue)
+  monacoEditorRef.value?.setValue(newSource);
 }
 
 function getFileIcon(filename: string): string {
-  if (filename.endsWith('.vue')) return '◇';
-  if (filename.endsWith('.ts')) return '⬡';
-  return '◆';
+  if (filename.endsWith('.vue')) return mdiVuejs;
+  if (filename.endsWith('.ts')) return mdiLanguageTypescript;
+  return mdiFile;
 }
 
 function getSeverityIcon(severity: string): string {
-  return severity === 'error' ? '✕' : severity === 'warning' ? '⚠' : 'ℹ';
+  return severity === 'error' ? mdiClose : severity === 'warning' ? mdiAlert : mdiInformation;
 }
 
 function getTypeLabel(type: string): string {
@@ -2155,12 +2203,45 @@ watch([files, options], () => {
   debouncedAnalyze();
 }, { deep: true });
 
-watch(() => props.compiler, () => {
-  if (props.compiler) analyzeAll();
-});
+// Workaround for vite-plugin-vize prop reactivity issue
+// Use getWasm() directly with polling instead of props.compiler
+let hasCompilerInitialized = false;
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+function tryInitialize() {
+  const compiler = getWasm();
+  if (compiler && !hasCompilerInitialized) {
+    hasCompilerInitialized = true;
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    analyzeAll();
+  }
+}
 
 onMounted(() => {
-  if (props.compiler) analyzeAll();
+  // Try to initialize immediately if compiler is available
+  tryInitialize();
+
+  // If not, poll for it
+  if (!hasCompilerInitialized) {
+    pollInterval = setInterval(tryInitialize, 100);
+    // Stop polling after 10 seconds
+    setTimeout(() => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }, 10000);
+  }
+});
+
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
 });
 </script>
 
@@ -2181,7 +2262,7 @@ onMounted(() => {
             @click="selectPreset(preset.id)"
             :title="preset.description"
           >
-            <span class="preset-icon">{{ preset.icon }}</span>
+            <svg class="preset-icon" viewBox="0 0 24 24"><path :d="preset.icon" fill="currentColor" /></svg>
             <span class="preset-name">{{ preset.name }}</span>
           </button>
         </div>
@@ -2197,17 +2278,17 @@ onMounted(() => {
         </div>
         <nav class="file-tree">
           <div
-            v-for="(_, name) in files"
+            v-for="name in fileNames"
             :key="name"
             :class="['file-item', { active: activeFile === name, 'has-errors': issuesByFile[name]?.some(i => i.severity === 'error'), 'has-warnings': issuesByFile[name]?.some(i => i.severity === 'warning') }]"
-            @click="activeFile = name"
+            @click="selectFile(name)"
           >
-            <span class="file-icon">{{ getFileIcon(name) }}</span>
+            <svg class="file-icon" viewBox="0 0 24 24"><path :d="getFileIcon(name)" fill="currentColor" /></svg>
             <span class="file-name">{{ name }}</span>
             <span v-if="issuesByFile[name]?.length" class="file-badge" :class="issuesByFile[name].some(i => i.severity === 'error') ? 'error' : 'warning'">
-              {{ issuesByFile[name].length }}
+              <span class="badge-count">{{ issuesByFile[name].length }}</span>
             </span>
-            <button v-if="Object.keys(files).length > 1" @click.stop="removeFile(name)" class="file-delete">×</button>
+            <button v-if="fileNames.length > 1" @click.stop="removeFile(name)" class="file-delete">×</button>
           </div>
         </nav>
       </div>
@@ -2222,7 +2303,7 @@ onMounted(() => {
             <div v-if="deps.length" class="dep-arrows">
               <div v-for="dep in deps" :key="dep" class="dep-edge">
                 <span class="dep-arrow">→</span>
-                <span class="dep-target" @click="activeFile = dep">{{ dep }}</span>
+                <span class="dep-target" @click="selectFile(dep)">{{ dep }}</span>
               </div>
             </div>
           </div>
@@ -2271,15 +2352,15 @@ onMounted(() => {
       <div class="editor-header">
         <div class="editor-tabs">
           <button
-            v-for="(_, name) in files"
+            v-for="name in fileNames"
             :key="name"
             :class="['editor-tab', { active: activeFile === name }]"
-            @click="activeFile = name"
+            @click="selectFile(name)"
           >
-            <span class="tab-icon">{{ getFileIcon(name) }}</span>
-            {{ name }}
+            <svg class="tab-icon" viewBox="0 0 24 24"><path :d="getFileIcon(name)" fill="currentColor" /></svg>
+            <span class="tab-name">{{ name }}</span>
             <span v-if="issuesByFile[name]?.length" class="tab-badge" :class="issuesByFile[name].some(i => i.severity === 'error') ? 'error' : 'warning'">
-              {{ issuesByFile[name].length }}
+              <span class="badge-count">{{ issuesByFile[name].length }}</span>
             </span>
           </button>
         </div>
@@ -2290,6 +2371,7 @@ onMounted(() => {
       </div>
       <div class="editor-content">
         <MonacoEditor
+          ref="monacoEditorRef"
           v-model="currentSource"
           :language="editorLanguage"
           :diagnostics="currentDiagnostics"
@@ -2312,7 +2394,7 @@ onMounted(() => {
       </div>
 
       <div v-if="crossFileIssues.length === 0" class="diagnostics-empty">
-        <span class="empty-icon">✓</span>
+        <svg class="empty-icon" viewBox="0 0 24 24"><path :d="mdiCheck" fill="currentColor" /></svg>
         <span>No issues detected</span>
       </div>
 
@@ -2331,14 +2413,14 @@ onMounted(() => {
               @click="selectIssue(issue)"
             >
               <div class="issue-header">
-                <span class="severity-icon">{{ getSeverityIcon(issue.severity) }}</span>
+                <svg class="severity-icon" viewBox="0 0 24 24"><path :d="getSeverityIcon(issue.severity)" fill="currentColor" /></svg>
                 <span class="issue-code">{{ issue.code }}</span>
                 <span class="issue-location">{{ issue.file }}:{{ issue.line }}</span>
               </div>
               <div class="issue-message">{{ issue.message }}</div>
               <div v-if="issue.suggestion" class="issue-suggestion">
                 <span class="suggestion-icon">→</span>
-                {{ issue.suggestion }}
+                <span class="suggestion-text">{{ issue.suggestion }}</span>
               </div>
               <div v-if="issue.relatedLocations?.length" class="issue-related">
                 <div v-for="(rel, i) in issue.relatedLocations" :key="i" class="related-item">
@@ -2486,7 +2568,8 @@ onMounted(() => {
 }
 
 .preset-icon {
-  font-size: 12px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 
@@ -2552,8 +2635,10 @@ onMounted(() => {
 .file-item.has-warnings .file-icon { color: #f59e0b; }
 
 .file-icon {
-  font-size: 10px;
+  width: 12px;
+  height: 12px;
   color: var(--accent-rust);
+  flex-shrink: 0;
 }
 
 .file-name {
@@ -2731,8 +2816,10 @@ onMounted(() => {
 }
 
 .tab-icon {
-  font-size: 10px;
+  width: 12px;
+  height: 12px;
   color: var(--accent-rust);
+  flex-shrink: 0;
 }
 
 .tab-badge {
@@ -2835,7 +2922,8 @@ onMounted(() => {
 }
 
 .empty-icon {
-  font-size: 24px;
+  width: 24px;
+  height: 24px;
 }
 
 .diagnostics-list {
@@ -2908,7 +2996,9 @@ onMounted(() => {
 }
 
 .severity-icon {
-  font-size: 10px;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 .issue-card.error .severity-icon { color: #ef4444; }

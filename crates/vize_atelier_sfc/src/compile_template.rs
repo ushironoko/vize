@@ -31,10 +31,13 @@ pub(crate) fn compile_template_block(
     dom_opts.ssr = options.ssr;
     dom_opts.is_ts = is_ts;
 
-    // For script setup, use inline mode (render function inside setup return)
+    // For script setup, use function mode (NOT inline) to match Vue's @vitejs/plugin-vue behavior
+    // This generates $setup.xxx for setup bindings, which properly tracks reactivity through Vue's proxy
+    // Inline mode uses direct closure access (compiler.value) which can cause reactivity issues
     if bindings.is_some() {
-        dom_opts.inline = true;
+        dom_opts.inline = false; // Use function mode for proper reactivity tracking
         dom_opts.hoist_static = true;
+        dom_opts.cache_handlers = true;
     }
 
     // Pass binding metadata from script setup to template compiler
@@ -217,6 +220,7 @@ fn add_scope_id_to_template(template_line: &str, scope_id: &str) -> String {
 }
 
 /// Compact render body by removing unnecessary line breaks inside function calls and arrays
+#[allow(dead_code)]
 fn compact_render_body(render_body: &str) -> String {
     let mut result = String::new();
     let mut chars = render_body.chars().peekable();
@@ -326,6 +330,7 @@ pub(crate) fn extract_template_parts_full(template_code: &str) -> (String, Strin
 /// Extract imports, hoisted consts, preamble (component/directive resolution), and render body
 /// from compiled template code.
 /// Returns (imports, hoisted, preamble, render_body)
+#[allow(dead_code)]
 pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, String, String) {
     let mut imports = String::new();
     let mut hoisted = String::new();
@@ -334,9 +339,12 @@ pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, St
     let mut in_render = false;
     let mut in_return = false;
     let mut brace_depth = 0;
-    let mut return_brace_depth = 0;
+    let mut return_paren_depth = 0;
 
-    for line in template_code.lines() {
+    // Collect all lines for look-ahead
+    let lines: Vec<&str> = template_code.lines().collect();
+
+    for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
         if trimmed.starts_with("import ") {
@@ -363,29 +371,55 @@ pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, St
                 // Continue collecting return body
                 render_body.push('\n');
                 render_body.push_str(line);
-                return_brace_depth += line.matches('(').count() as i32;
-                return_brace_depth -= line.matches(')').count() as i32;
+                return_paren_depth += line.matches('(').count() as i32;
+                return_paren_depth -= line.matches(')').count() as i32;
 
-                // Check if return statement is complete
-                if return_brace_depth <= 0 {
-                    in_return = false;
-                    // Remove trailing semicolon if present
-                    let trimmed_body = render_body.trim_end();
-                    if let Some(stripped) = trimmed_body.strip_suffix(';') {
-                        render_body = stripped.to_string();
+                // Check if return statement is complete:
+                // - Parentheses must be balanced (return_paren_depth <= 0)
+                // - Next non-empty line must NOT be a ternary continuation (? or :)
+                if return_paren_depth <= 0 {
+                    // Look ahead to check for ternary continuation
+                    let next_continues_ternary = lines
+                        .iter()
+                        .skip(i + 1)
+                        .map(|l| l.trim())
+                        .find(|l| !l.is_empty())
+                        .map(|l| l.starts_with('?') || l.starts_with(':'))
+                        .unwrap_or(false);
+
+                    if !next_continues_ternary {
+                        in_return = false;
+                        // Remove trailing semicolon if present
+                        let trimmed_body = render_body.trim_end();
+                        if let Some(stripped) = trimmed_body.strip_suffix(';') {
+                            render_body = stripped.to_string();
+                        }
                     }
                 }
             } else if let Some(stripped) = trimmed.strip_prefix("return ") {
                 render_body = stripped.to_string();
                 // Count parentheses to handle multi-line return
-                return_brace_depth =
+                return_paren_depth =
                     stripped.matches('(').count() as i32 - stripped.matches(')').count() as i32;
-                if return_brace_depth > 0 {
+                if return_paren_depth > 0 {
                     in_return = true;
                 } else {
-                    // Single line return - remove trailing semicolon if present
-                    if render_body.ends_with(';') {
-                        render_body.pop();
+                    // Check if next non-empty line is a ternary continuation
+                    let next_continues_ternary = lines
+                        .iter()
+                        .skip(i + 1)
+                        .map(|l| l.trim())
+                        .find(|l| !l.is_empty())
+                        .map(|l| l.starts_with('?') || l.starts_with(':'))
+                        .unwrap_or(false);
+
+                    if next_continues_ternary {
+                        in_return = true;
+                    } else {
+                        // Single line return - remove trailing semicolon if present
+                        if render_body.ends_with(';') {
+                            render_body.pop();
+                        }
                     }
                 }
             } else if trimmed.starts_with("const _component_")

@@ -157,12 +157,19 @@ fn generate_function_signature(ctx: &mut CodegenContext) {
     } else {
         match ctx.options.mode {
             crate::options::CodegenMode::Module => {
-                // Module mode: export with simpler signature
-                ctx.push("export function render(_ctx, _cache) {");
+                // Module mode: include $props and $setup when binding_metadata is present
+                // This is needed when script setup is used with non-inline template
+                if ctx.options.binding_metadata.is_some() {
+                    ctx.push(
+                        "export function render(_ctx, _cache, $props, $setup, $data, $options) {",
+                    );
+                } else {
+                    ctx.push("export function render(_ctx, _cache) {");
+                }
             }
             crate::options::CodegenMode::Function => {
                 // Function mode: include $props and $setup
-                ctx.push("function render(_ctx, _cache, $props, $setup) {");
+                ctx.push("function render(_ctx, _cache, $props, $setup, $data, $options) {");
             }
         }
     }
@@ -214,10 +221,20 @@ fn generate_js_child_node_to_bytes(
                 if i > 0 {
                     out.extend_from_slice(b", ");
                 }
-                // Key
+                // Key - quote if contains special characters like hyphens
                 match &prop.key {
                     ExpressionNode::Simple(exp) => {
-                        out.extend_from_slice(exp.content.as_bytes());
+                        let key = &exp.content;
+                        // Check if key needs quoting (contains hyphen or other non-identifier chars)
+                        let needs_quote = key.contains('-')
+                            || key.chars().next().is_some_and(|c| c.is_ascii_digit());
+                        if needs_quote {
+                            out.push(b'"');
+                            out.extend_from_slice(key.as_bytes());
+                            out.push(b'"');
+                        } else {
+                            out.extend_from_slice(key.as_bytes());
+                        }
                         out.extend_from_slice(b": ");
                     }
                     ExpressionNode::Compound(_) => out.extend_from_slice(b"null: "),
@@ -320,10 +337,20 @@ fn generate_props_expression_to_bytes(
                 if i > 0 {
                     out.extend_from_slice(b", ");
                 }
-                // Key (no quotes for valid identifiers)
+                // Key - quote if contains special characters like hyphens
                 match &prop.key {
                     ExpressionNode::Simple(exp) => {
-                        out.extend_from_slice(exp.content.as_bytes());
+                        let key = &exp.content;
+                        // Check if key needs quoting (contains hyphen or other non-identifier chars)
+                        let needs_quote = key.contains('-')
+                            || key.chars().next().is_some_and(|c| c.is_ascii_digit());
+                        if needs_quote {
+                            out.push(b'"');
+                            out.extend_from_slice(key.as_bytes());
+                            out.push(b'"');
+                        } else {
+                            out.extend_from_slice(key.as_bytes());
+                        }
                         out.extend_from_slice(b": ");
                     }
                     ExpressionNode::Compound(_) => out.extend_from_slice(b"null: "),

@@ -1,5 +1,5 @@
 ---
-source: crates/vue_compiler_sfc/src/snapshot_tests.rs
+source: crates/vize_atelier_sfc/src/snapshot_tests.rs
 expression: ts_output
 ---
 import { defineComponent, PropType } from 'vue'
@@ -13,7 +13,6 @@ export default defineComponent({
   },
   setup(__props) {
 
-  | { type: "button"; onClick: () => void }
 
 return (_ctx, _cache) => {
   return (_openBlock(), _createElementBlock("div", null, _toDisplayString(__props.variant.type), 1 /* TEXT */))
