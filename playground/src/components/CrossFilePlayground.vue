@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import MonacoEditor from './MonacoEditor.vue';
 import type { Diagnostic } from './MonacoEditor.vue';
 import type { WasmModule, CroquisResult, CrossFileResult, CrossFileInput, CrossFileOptions as WasmCrossFileOptions } from '../wasm/index';
+import { getWasm } from '../wasm/index';
 import {
   mdiDiamond,
   mdiFlash,
@@ -934,6 +935,15 @@ const currentPreset = ref<string>('default');
 const currentPresetData = computed(() => PRESETS.find(p => p.id === currentPreset.value) || PRESETS[0]);
 const files = ref<Record<string, string>>({ ...currentPresetData.value.files });
 const activeFile = ref<string>(Object.keys(currentPresetData.value.files)[0]);
+
+// File names array for v-for (workaround for vite-plugin-vize object iteration issue)
+// Using ref + watch instead of computed to ensure reactivity works correctly
+const fileNames = ref<string[]>(Object.keys(files.value));
+watch(files, (newFiles) => {
+  const keys = Object.keys(newFiles);
+  console.log('[CF] files changed, keys:', keys, 'typeof keys[0]:', typeof keys[0]);
+  fileNames.value = keys;
+}, { deep: true });
 const croquisResults = ref<Record<string, CroquisResult | null>>({});
 const crossFileIssues = ref<CrossFileIssue[]>([]);
 const analysisTime = ref<number>(0);
@@ -1263,7 +1273,9 @@ function findLineAndColumnAtOffset(source: string, offset: number, length: numbe
 }
 
 async function analyzeAll() {
-  if (!props.compiler) return;
+  // Use getWasm() directly instead of props (workaround for vite-plugin-vize reactivity issue)
+  const compiler = getWasm();
+  if (!compiler) return;
 
   isAnalyzing.value = true;
   const startTime = performance.now();
@@ -1273,7 +1285,7 @@ async function analyzeAll() {
   const results: Record<string, CroquisResult | null> = {};
   for (const [filename, source] of Object.entries(files.value)) {
     try {
-      results[filename] = props.compiler.analyzeSfc(source, { filename });
+      results[filename] = compiler.analyzeSfc(source, { filename });
     } catch {
       results[filename] = null;
     }
@@ -1301,15 +1313,15 @@ async function analyzeAll() {
 
   // Try WASM cross-file analysis first
   try {
-    if (props.compiler.analyzeCrossFile) {
-      const crossFileResult: CrossFileResult = props.compiler.analyzeCrossFile(crossFileInputs, wasmOptions);
+    if (compiler.analyzeCrossFile) {
+      const crossFileResult: CrossFileResult = compiler.analyzeCrossFile(crossFileInputs, wasmOptions);
 
       // Convert WASM diagnostics to CrossFileIssue format
       for (const diag of crossFileResult.diagnostics) {
         const source = files.value[diag.file] || '';
         const loc = offsetToLineColumn(source, diag.offset);
         const endLoc = offsetToLineColumn(source, diag.endOffset);
-        console.log(`[DEBUG] ${diag.file}: offset=${diag.offset}-${diag.endOffset}, line=${loc.line}, col=${loc.column}, code=${diag.code}, msg=${diag.message.slice(0,50)}`);
+        console.log(`[DEBUG] ${diag.file}: offset=${diag.offset}-${diag.endOffset}, line=${loc.line}, col=${loc.column}, code=${diag.code}, msg=${diag.message.slice(0,50)}, suggestion=${diag.suggestion}`);
 
         issues.push({
           id: `issue-${++issueIdCounter}`,
@@ -2170,12 +2182,45 @@ watch([files, options], () => {
   debouncedAnalyze();
 }, { deep: true });
 
-watch(() => props.compiler, () => {
-  if (props.compiler) analyzeAll();
-});
+// Workaround for vite-plugin-vize prop reactivity issue
+// Use getWasm() directly with polling instead of props.compiler
+let hasCompilerInitialized = false;
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+function tryInitialize() {
+  const compiler = getWasm();
+  if (compiler && !hasCompilerInitialized) {
+    hasCompilerInitialized = true;
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    analyzeAll();
+  }
+}
 
 onMounted(() => {
-  if (props.compiler) analyzeAll();
+  // Try to initialize immediately if compiler is available
+  tryInitialize();
+
+  // If not, poll for it
+  if (!hasCompilerInitialized) {
+    pollInterval = setInterval(tryInitialize, 100);
+    // Stop polling after 10 seconds
+    setTimeout(() => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }, 10000);
+  }
+});
+
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
 });
 </script>
 
@@ -2212,7 +2257,7 @@ onMounted(() => {
         </div>
         <nav class="file-tree">
           <div
-            v-for="(_, name) in files"
+            v-for="name in fileNames"
             :key="name"
             :class="['file-item', { active: activeFile === name, 'has-errors': issuesByFile[name]?.some(i => i.severity === 'error'), 'has-warnings': issuesByFile[name]?.some(i => i.severity === 'warning') }]"
             @click="activeFile = name"
@@ -2222,7 +2267,7 @@ onMounted(() => {
             <span v-if="issuesByFile[name]?.length" class="file-badge" :class="issuesByFile[name].some(i => i.severity === 'error') ? 'error' : 'warning'">
               {{ issuesByFile[name].length }}
             </span>
-            <button v-if="Object.keys(files).length > 1" @click.stop="removeFile(name)" class="file-delete">×</button>
+            <button v-if="fileNames.length > 1" @click.stop="removeFile(name)" class="file-delete">×</button>
           </div>
         </nav>
       </div>
@@ -2286,13 +2331,13 @@ onMounted(() => {
       <div class="editor-header">
         <div class="editor-tabs">
           <button
-            v-for="(_, name) in files"
+            v-for="name in fileNames"
             :key="name"
             :class="['editor-tab', { active: activeFile === name }]"
             @click="activeFile = name"
           >
             <svg class="tab-icon" viewBox="0 0 24 24"><path :d="getFileIcon(name)" fill="currentColor" /></svg>
-            {{ name }}
+            <span class="tab-name">{{ name }}</span>
             <span v-if="issuesByFile[name]?.length" class="tab-badge" :class="issuesByFile[name].some(i => i.severity === 'error') ? 'error' : 'warning'">
               {{ issuesByFile[name].length }}
             </span>
@@ -2353,7 +2398,7 @@ onMounted(() => {
               <div class="issue-message">{{ issue.message }}</div>
               <div v-if="issue.suggestion" class="issue-suggestion">
                 <span class="suggestion-icon">→</span>
-                {{ issue.suggestion }}
+                <span class="suggestion-text">{{ issue.suggestion }}</span>
               </div>
               <div v-if="issue.relatedLocations?.length" class="issue-related">
                 <div v-for="(rel, i) in issue.relatedLocations" :key="i" class="related-item">

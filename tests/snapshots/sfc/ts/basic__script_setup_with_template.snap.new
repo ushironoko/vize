@@ -22,7 +22,7 @@ const __sfc__ = {
   }
 };
 
-export function render(_ctx, _cache) {
+export function render(_ctx, _cache, $props, $setup, $data, $options) {
   return (_openBlock(), _createElementBlock("div", null, _toDisplayString($setup.count), 1 /* TEXT */))
 }
 
