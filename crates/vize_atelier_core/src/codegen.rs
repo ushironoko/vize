@@ -157,12 +157,17 @@ fn generate_function_signature(ctx: &mut CodegenContext) {
     } else {
         match ctx.options.mode {
             crate::options::CodegenMode::Module => {
-                // Module mode: export with simpler signature
-                ctx.push("export function render(_ctx, _cache) {");
+                // Module mode: include $props and $setup when binding_metadata is present
+                // This is needed when script setup is used with non-inline template
+                if ctx.options.binding_metadata.is_some() {
+                    ctx.push("export function render(_ctx, _cache, $props, $setup, $data, $options) {");
+                } else {
+                    ctx.push("export function render(_ctx, _cache) {");
+                }
             }
             crate::options::CodegenMode::Function => {
                 // Function mode: include $props and $setup
-                ctx.push("function render(_ctx, _cache, $props, $setup) {");
+                ctx.push("function render(_ctx, _cache, $props, $setup, $data, $options) {");
             }
         }
     }

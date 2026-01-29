@@ -16,6 +16,109 @@ use super::props::{
 use super::typescript::transform_typescript_to_js;
 use super::{ScriptCompileResult, TemplateParts};
 
+/// Check if a TypeScript type is safe to use at runtime in PropType<T>.
+/// Returns true for built-in types that exist at runtime, false for user-defined types.
+fn is_runtime_safe_ts_type(ts_type: &str) -> bool {
+    let ts_type = ts_type.trim();
+
+    // Primitive types
+    if matches!(
+        ts_type,
+        "string" | "number" | "boolean" | "null" | "undefined" | "any" | "unknown" | "never"
+            | "void" | "bigint" | "symbol"
+    ) {
+        return true;
+    }
+
+    // Array types - check if element type is safe
+    if let Some(element_type) = ts_type.strip_suffix("[]") {
+        return is_runtime_safe_ts_type(element_type);
+    }
+
+    // Generic Array<T>
+    if ts_type.starts_with("Array<") && ts_type.ends_with('>') {
+        let inner = &ts_type[6..ts_type.len() - 1];
+        return is_runtime_safe_ts_type(inner);
+    }
+
+    // Built-in JavaScript types that exist at runtime
+    if matches!(
+        ts_type,
+        "String"
+            | "Number"
+            | "Boolean"
+            | "Object"
+            | "Array"
+            | "Function"
+            | "Date"
+            | "RegExp"
+            | "Error"
+            | "Map"
+            | "Set"
+            | "WeakMap"
+            | "WeakSet"
+            | "Promise"
+            | "ArrayBuffer"
+            | "DataView"
+            | "Int8Array"
+            | "Uint8Array"
+            | "Int16Array"
+            | "Uint16Array"
+            | "Int32Array"
+            | "Uint32Array"
+            | "Float32Array"
+            | "Float64Array"
+            | "BigInt64Array"
+            | "BigUint64Array"
+            | "URL"
+            | "URLSearchParams"
+            | "FormData"
+            | "Blob"
+            | "File"
+    ) {
+        return true;
+    }
+
+    // Union types - check all parts
+    if ts_type.contains('|') {
+        return ts_type.split('|').all(|part| is_runtime_safe_ts_type(part.trim()));
+    }
+
+    // Record<K, V> - generic but safe
+    if ts_type.starts_with("Record<") {
+        return true;
+    }
+
+    // Partial<T>, Required<T>, Readonly<T>, etc. - utility types referencing potentially user types
+    // These are NOT safe as they reference user-defined types
+    if ts_type.starts_with("Partial<")
+        || ts_type.starts_with("Required<")
+        || ts_type.starts_with("Readonly<")
+        || ts_type.starts_with("Pick<")
+        || ts_type.starts_with("Omit<")
+    {
+        return false;
+    }
+
+    // Object literal types like { foo: string }
+    if ts_type.starts_with('{') && ts_type.ends_with('}') {
+        return true;
+    }
+
+    // String/number literal types
+    if (ts_type.starts_with('"') && ts_type.ends_with('"'))
+        || (ts_type.starts_with('\'') && ts_type.ends_with('\''))
+    {
+        return true;
+    }
+    if ts_type.parse::<f64>().is_ok() {
+        return true;
+    }
+
+    // Everything else (user-defined interfaces/types) is NOT safe
+    false
+}
+
 /// Compile script setup with inline template (Vue's inline template mode)
 pub fn compile_script_setup_inline(
     content: &str,
@@ -514,12 +617,15 @@ pub fn compile_script_setup_inline(
                     output.extend_from_slice(name.as_bytes());
                     output.extend_from_slice(b": { type: ");
                     output.extend_from_slice(prop_type.js_type.as_bytes());
-                    // Add PropType for TypeScript output
+                    // Add PropType for TypeScript output, but only for built-in types
+                    // User-defined types (interfaces/types) don't exist at runtime
                     if is_ts {
                         if let Some(ref ts_type) = prop_type.ts_type {
-                            output.extend_from_slice(b" as PropType<");
-                            output.extend_from_slice(ts_type.as_bytes());
-                            output.push(b'>');
+                            if is_runtime_safe_ts_type(ts_type) {
+                                output.extend_from_slice(b" as PropType<");
+                                output.extend_from_slice(ts_type.as_bytes());
+                                output.push(b'>');
+                            }
                         }
                     }
                     output.extend_from_slice(b", required: ");

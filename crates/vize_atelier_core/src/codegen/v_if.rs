@@ -162,7 +162,7 @@ pub fn generate_if_branch_component(
         ctx.push(",");
         ctx.newline();
         ctx.push("\"");
-        ctx.push(&scope_id);
+        ctx.push(scope_id);
         ctx.push("\": \"\"");
     }
 
@@ -354,7 +354,7 @@ pub fn generate_if_branch_element(
         ctx.push(",");
         ctx.newline();
         ctx.push("\"");
-        ctx.push(&scope_id);
+        ctx.push(scope_id);
         ctx.push("\": \"\"");
     }
 

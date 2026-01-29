@@ -49,9 +49,11 @@ export function generateOutput(
   let output = compiled.code;
 
   // Rewrite "export default" to named variable for HMR
-  const hasExportDefault = output.includes('export default');
+  // Use regex to match only line-start "export default" (not inside strings)
+  const exportDefaultRegex = /^export default /m;
+  const hasExportDefault = exportDefaultRegex.test(output);
   if (hasExportDefault) {
-    output = output.replace('export default', 'const _sfc_main =');
+    output = output.replace(exportDefaultRegex, 'const _sfc_main = ');
     // Add __scopeId for scoped CSS support
     if (compiled.hasScoped && compiled.scopeId) {
       output += `\n_sfc_main.__scopeId = "data-v-${compiled.scopeId}";`;

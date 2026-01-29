@@ -31,10 +31,11 @@ pub(crate) fn compile_template_block(
     dom_opts.ssr = options.ssr;
     dom_opts.is_ts = is_ts;
 
-    // For script setup, use inline mode (render function inside setup return)
-    // Also enable cache_handlers to stabilize inline event handler references
+    // For script setup, use function mode (NOT inline) to match Vue's @vitejs/plugin-vue behavior
+    // This generates $setup.xxx for setup bindings, which properly tracks reactivity through Vue's proxy
+    // Inline mode uses direct closure access (compiler.value) which can cause reactivity issues
     if bindings.is_some() {
-        dom_opts.inline = true;
+        dom_opts.inline = false; // Use function mode for proper reactivity tracking
         dom_opts.hoist_static = true;
         dom_opts.cache_handlers = true;
     }
@@ -219,6 +220,7 @@ fn add_scope_id_to_template(template_line: &str, scope_id: &str) -> String {
 }
 
 /// Compact render body by removing unnecessary line breaks inside function calls and arrays
+#[allow(dead_code)]
 fn compact_render_body(render_body: &str) -> String {
     let mut result = String::new();
     let mut chars = render_body.chars().peekable();
@@ -328,6 +330,7 @@ pub(crate) fn extract_template_parts_full(template_code: &str) -> (String, Strin
 /// Extract imports, hoisted consts, preamble (component/directive resolution), and render body
 /// from compiled template code.
 /// Returns (imports, hoisted, preamble, render_body)
+#[allow(dead_code)]
 pub(crate) fn extract_template_parts(template_code: &str) -> (String, String, String, String) {
     let mut imports = String::new();
     let mut hoisted = String::new();

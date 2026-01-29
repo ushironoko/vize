@@ -370,15 +370,12 @@ fn generate_props_object(
                 }
                 ctx.push(": ");
                 if let Some(value) = &attr.value {
-                    // `ref` attribute value should be a variable reference, not a string
-                    // This allows template refs to bind to setup() refs
-                    if attr.name == "ref" {
-                        ctx.push(&value.content);
-                    } else {
-                        ctx.push("\"");
-                        ctx.push(&value.content);
-                        ctx.push("\"");
-                    }
+                    // `ref` attribute should be a string in function mode
+                    // Vue's runtime will look up the ref by name from $setup
+                    // In inline mode, refs would be accessed directly
+                    ctx.push("\"");
+                    ctx.push(&value.content);
+                    ctx.push("\"");
                 } else {
                     // Boolean attributes should be empty string, not true
                     ctx.push("\"\"");

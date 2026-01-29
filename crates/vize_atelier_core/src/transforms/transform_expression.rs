@@ -619,7 +619,8 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
 
 /// Check if identifier should be prefixed
 /// Determine what prefix (if any) an identifier needs
-/// Returns: None = no prefix, Some("_ctx.") = context prefix, Some("__props.") = props prefix
+/// Returns: None = no prefix, Some("_ctx.") = context prefix, Some("__props.") = props prefix,
+///          Some("$setup.") = setup context prefix (for function mode with binding metadata)
 fn get_identifier_prefix(name: &str, ctx: &TransformContext<'_>) -> Option<&'static str> {
     // Don't prefix globals
     if is_global_allowed(name) {
@@ -631,19 +632,30 @@ fn get_identifier_prefix(name: &str, ctx: &TransformContext<'_>) -> Option<&'sta
         return None;
     }
 
-    // In inline mode, check binding metadata
-    if ctx.options.inline {
-        if let Some(bindings) = &ctx.options.binding_metadata {
-            if let Some(binding_type) = bindings.bindings.get(name) {
-                // Props need __props. prefix
-                if matches!(
-                    binding_type,
-                    crate::options::BindingType::Props | crate::options::BindingType::PropsAliased
-                ) {
+    // Check binding metadata for setup bindings
+    if let Some(bindings) = &ctx.options.binding_metadata {
+        if let Some(binding_type) = bindings.bindings.get(name) {
+            // Props need prefix based on mode
+            if matches!(
+                binding_type,
+                crate::options::BindingType::Props | crate::options::BindingType::PropsAliased
+            ) {
+                // In inline mode: use __props. (local variable in setup)
+                // In function mode: use $props. (render function parameter)
+                if ctx.options.inline {
                     return Some("__props.");
+                } else {
+                    return Some("$props.");
                 }
-                // Other setup bindings are accessed directly
+            }
+
+            if ctx.options.inline {
+                // In inline mode, setup bindings are accessed directly via closure
                 return None;
+            } else {
+                // In function mode (inline = false), setup bindings use $setup. prefix
+                // This is the pattern Vue's @vitejs/plugin-vue uses for proper reactivity tracking
+                return Some("$setup.");
             }
         }
     }
@@ -652,10 +664,6 @@ fn get_identifier_prefix(name: &str, ctx: &TransformContext<'_>) -> Option<&'sta
     Some("_ctx.")
 }
 
-/// Check if identifier should get a prefix (legacy helper for compatibility)
-fn should_prefix_identifier(name: &str, ctx: &TransformContext<'_>) -> bool {
-    get_identifier_prefix(name, ctx).is_some()
-}
 
 /// Check if a simple identifier is a ref binding in inline mode
 fn is_ref_binding_simple(name: &str, ctx: &TransformContext<'_>) -> bool {
@@ -783,12 +791,16 @@ pub fn process_inline_handler<'a>(
             // Check if it's a simple identifier (method name)
             // Vue passes method references directly, no wrapping needed
             if is_simple_identifier(content) {
-                let new_content =
-                    if ctx.options.prefix_identifiers && should_prefix_identifier(content, ctx) {
-                        ["_ctx.", content].concat()
+                let new_content = if ctx.options.prefix_identifiers {
+                    // Use the same prefix logic as get_identifier_prefix for consistency
+                    if let Some(prefix) = get_identifier_prefix(content, ctx) {
+                        [prefix, content].concat()
                     } else {
                         content.to_string()
-                    };
+                    }
+                } else {
+                    content.to_string()
+                };
 
                 return ExpressionNode::Simple(Box::new_in(
                     SimpleExpressionNode {

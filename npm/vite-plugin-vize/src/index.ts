@@ -89,9 +89,12 @@ export function vize(options: VizeOptions = {}): Plugin {
 
   function resolveVuePath(id: string, importer?: string): string {
     let resolved: string;
-    // Check if it's a web-root relative path (starts with / but not a real absolute path)
-    // These are relative to the project root, not the filesystem root
-    if (id.startsWith('/') && !fs.existsSync(id)) {
+    // Handle Vite's /@fs/ prefix for absolute filesystem paths
+    if (id.startsWith('/@fs/')) {
+      resolved = id.slice(4); // Remove '/@fs' prefix, keep the absolute path
+    } else if (id.startsWith('/') && !fs.existsSync(id)) {
+      // Check if it's a web-root relative path (starts with / but not a real absolute path)
+      // These are relative to the project root, not the filesystem root
       // Remove leading slash and resolve relative to root
       resolved = path.resolve(root, id.slice(1));
     } else if (path.isAbsolute(id)) {
@@ -164,7 +167,7 @@ export function vize(options: VizeOptions = {}): Plugin {
       logger.log('Cache keys:', [...cache.keys()].slice(0, 3));
     },
 
-    resolveId(id: string, importer?: string) {
+    async resolveId(id: string, importer?: string) {
       // Handle virtual CSS module for production extraction
       if (id === VIRTUAL_CSS_MODULE) {
         return RESOLVED_CSS_MODULE;
@@ -174,21 +177,35 @@ export function vize(options: VizeOptions = {}): Plugin {
         return id;
       }
 
-      // If importer is a virtual module, resolve relative imports against the real path
+      // If importer is a virtual module, resolve imports against the real path
       if (importer?.startsWith(VIRTUAL_PREFIX)) {
         const realImporter =
           virtualToReal.get(importer) ?? importer.slice(VIRTUAL_PREFIX.length);
-        // For non-vue files, resolve relative to the real importer and let Vite handle the rest
-        if (
-          !id.endsWith('.vue') &&
-          (id.startsWith('./') || id.startsWith('../'))
-        ) {
-          const resolved = path.resolve(path.dirname(realImporter), id);
-          // Check if file exists with common extensions
-          for (const ext of ['', '.ts', '.tsx', '.js', '.jsx', '.json']) {
-            if (fs.existsSync(resolved + ext)) {
-              return resolved + ext;
+        // Remove .ts suffix if present
+        const cleanImporter = realImporter.endsWith('.ts')
+          ? realImporter.slice(0, -3)
+          : realImporter;
+
+        logger.log(`resolveId from virtual: id=${id}, cleanImporter=${cleanImporter}`);
+
+        // For non-vue files, resolve relative to the real importer
+        if (!id.endsWith('.vue')) {
+          if (id.startsWith('./') || id.startsWith('../')) {
+            // Relative imports - resolve and check if file exists
+            const resolved = path.resolve(path.dirname(cleanImporter), id);
+            for (const ext of ['', '.ts', '.tsx', '.js', '.jsx', '.json']) {
+              if (fs.existsSync(resolved + ext)) {
+                logger.log(`resolveId: resolved relative ${id} to ${resolved + ext}`);
+                return resolved + ext;
+              }
             }
+          } else {
+            // External package imports (e.g., '@mdi/js', 'vue')
+            // Re-resolve with the real importer path
+            logger.log(`resolveId: resolving external ${id} from ${cleanImporter}`);
+            const resolved = await this.resolve(id, cleanImporter, { skipSelf: true });
+            logger.log(`resolveId: resolved external ${id} to`, resolved?.id ?? 'null');
+            return resolved;
           }
         }
       }
@@ -240,12 +257,24 @@ export function vize(options: VizeOptions = {}): Plugin {
         const compiled = cache.get(realPath);
 
         if (compiled) {
+          const output = generateOutput(compiled, {
+            isProduction,
+            isDev: server !== null,
+            extractCss,
+          });
+          // Debug: log App compilation
+          if (realPath.includes('App.vue')) {
+            fs.writeFileSync('/tmp/app-compiled-before.ts', compiled.code);
+            fs.writeFileSync('/tmp/app-compiled-after.ts', output);
+            logger.log(`App.vue compiled code written to /tmp/app-compiled-*.ts`);
+          }
+          // Debug: log Monaco compilation
+          if (realPath.includes('MonacoEditor')) {
+            fs.writeFileSync('/tmp/monaco-compiled.ts', compiled.code);
+            logger.log(`MonacoEditor compiled code written to /tmp/monaco-compiled.ts`);
+          }
           return {
-            code: generateOutput(compiled, {
-              isProduction,
-              isDev: server !== null,
-              extractCss,
-            }),
+            code: output,
             map: null,
           };
         }

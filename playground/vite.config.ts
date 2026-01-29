@@ -16,7 +16,7 @@ async function getVuePlugin() {
     try {
       const { vize } = await import("../npm/vite-plugin-vize/dist/index.js");
       console.log("[vite.config] Using Vize for Vue SFC compilation");
-      return vize();
+      return vize({ debug: true });
     } catch (e) {
       console.warn(
         "[vite.config] Failed to load Vize, falling back to @vitejs/plugin-vue:",
