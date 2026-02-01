@@ -21,7 +21,7 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "start": "node dist/cli.js",
-    "lint": "oxlint --type-aware --tsconfig tsconfig.json",
+    "lint": "oxlint --deny-warnings --type-aware --tsconfig tsconfig.json",
     "lint:fix": "oxlint --type-aware --tsconfig tsconfig.json --fix",
     "fmt": "oxfmt --write src",
     "fmt:check": "oxfmt src"
