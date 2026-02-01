@@ -8,8 +8,8 @@
  * - Access design tokens
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -17,16 +17,16 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-import fs from 'node:fs';
-import path from 'node:path';
-import { createRequire } from 'node:module';
+} from "@modelcontextprotocol/sdk/types.js";
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
 
 // Native binding interface
 interface NativeBinding {
   parseArt: (
     source: string,
-    options?: { filename?: string }
+    options?: { filename?: string },
   ) => {
     filename: string;
     metadata: {
@@ -50,7 +50,7 @@ interface NativeBinding {
   };
   artToCsf: (
     source: string,
-    options?: { filename?: string }
+    options?: { filename?: string },
   ) => {
     code: string;
     filename: string;
@@ -65,12 +65,10 @@ function loadNative(): NativeBinding {
 
   const require = createRequire(import.meta.url);
   try {
-    native = require('@vizejs/native') as NativeBinding;
+    native = require("@vizejs/native") as NativeBinding;
     return native;
   } catch (e) {
-    throw new Error(
-      `Failed to load @vizejs/native. Make sure it's installed: ${e}`
-    );
+    throw new Error(`Failed to load @vizejs/native. Make sure it's installed: ${e}`);
   }
 }
 
@@ -94,20 +92,20 @@ export function createMuseaServer(config: {
 }): Server {
   const server = new Server(
     {
-      name: 'musea-mcp-server',
-      version: '0.0.1-alpha.11',
+      name: "musea-mcp-server",
+      version: "0.0.1-alpha.11",
     },
     {
       capabilities: {
         resources: {},
         tools: {},
       },
-    }
+    },
   );
 
   const projectRoot = config.projectRoot;
-  const include = config.include ?? ['**/*.art.vue'];
-  const exclude = config.exclude ?? ['node_modules/**', 'dist/**'];
+  const include = config.include ?? ["**/*.art.vue"];
+  const exclude = config.exclude ?? ["node_modules/**", "dist/**"];
 
   // Cache for art files
   let artCache: Map<string, ArtInfo> = new Map();
@@ -127,7 +125,7 @@ export function createMuseaServer(config: {
 
     for (const file of files) {
       try {
-        const source = await fs.promises.readFile(file, 'utf-8');
+        const source = await fs.promises.readFile(file, "utf-8");
         const parsed = binding.parseArt(source, { filename: file });
 
         artCache.set(file, {
@@ -157,8 +155,9 @@ export function createMuseaServer(config: {
       resources.push({
         uri: `musea://art/${encodeURIComponent(relativePath)}`,
         name: info.title,
-        description: info.description || `${info.category || 'Component'} with ${info.variantCount} variants`,
-        mimeType: 'application/json',
+        description:
+          info.description || `${info.category || "Component"} with ${info.variantCount} variants`,
+        mimeType: "application/json",
       });
     }
 
@@ -169,15 +168,15 @@ export function createMuseaServer(config: {
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
 
-    if (!uri.startsWith('musea://art/')) {
+    if (!uri.startsWith("musea://art/")) {
       throw new McpError(ErrorCode.InvalidRequest, `Unknown resource URI: ${uri}`);
     }
 
-    const relativePath = decodeURIComponent(uri.slice('musea://art/'.length));
+    const relativePath = decodeURIComponent(uri.slice("musea://art/".length));
     const absolutePath = path.resolve(projectRoot, relativePath);
 
     try {
-      const source = await fs.promises.readFile(absolutePath, 'utf-8');
+      const source = await fs.promises.readFile(absolutePath, "utf-8");
       const binding = loadNative();
       const parsed = binding.parseArt(source, { filename: absolutePath });
 
@@ -185,7 +184,7 @@ export function createMuseaServer(config: {
         contents: [
           {
             uri,
-            mimeType: 'application/json',
+            mimeType: "application/json",
             text: JSON.stringify(
               {
                 path: relativePath,
@@ -201,16 +200,13 @@ export function createMuseaServer(config: {
                 styleCount: parsed.style_count,
               },
               null,
-              2
+              2,
             ),
           },
         ],
       };
     } catch (e) {
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to read art file: ${e}`
-      );
+      throw new McpError(ErrorCode.InternalError, `Failed to read art file: ${e}`);
     }
   });
 
@@ -219,82 +215,80 @@ export function createMuseaServer(config: {
     return {
       tools: [
         {
-          name: 'list_components',
-          description:
-            'List all components (Art files) in the project with their metadata',
+          name: "list_components",
+          description: "List all components (Art files) in the project with their metadata",
           inputSchema: {
-            type: 'object',
+            type: "object",
             properties: {
               category: {
-                type: 'string',
-                description: 'Filter by category',
+                type: "string",
+                description: "Filter by category",
               },
               tag: {
-                type: 'string',
-                description: 'Filter by tag',
+                type: "string",
+                description: "Filter by tag",
               },
             },
           },
         },
         {
-          name: 'get_component',
-          description: 'Get detailed information about a specific component',
+          name: "get_component",
+          description: "Get detailed information about a specific component",
           inputSchema: {
-            type: 'object',
+            type: "object",
             properties: {
               path: {
-                type: 'string',
-                description: 'Path to the Art file (relative to project root)',
+                type: "string",
+                description: "Path to the Art file (relative to project root)",
               },
             },
-            required: ['path'],
+            required: ["path"],
           },
         },
         {
-          name: 'get_variant',
-          description: 'Get a specific variant from a component',
+          name: "get_variant",
+          description: "Get a specific variant from a component",
           inputSchema: {
-            type: 'object',
+            type: "object",
             properties: {
               path: {
-                type: 'string',
-                description: 'Path to the Art file',
+                type: "string",
+                description: "Path to the Art file",
               },
               variant: {
-                type: 'string',
-                description: 'Name of the variant',
+                type: "string",
+                description: "Name of the variant",
               },
             },
-            required: ['path', 'variant'],
+            required: ["path", "variant"],
           },
         },
         {
-          name: 'generate_csf',
-          description:
-            'Generate Storybook CSF 3.0 code from an Art file',
+          name: "generate_csf",
+          description: "Generate Storybook CSF 3.0 code from an Art file",
           inputSchema: {
-            type: 'object',
+            type: "object",
             properties: {
               path: {
-                type: 'string',
-                description: 'Path to the Art file',
+                type: "string",
+                description: "Path to the Art file",
               },
             },
-            required: ['path'],
+            required: ["path"],
           },
         },
         {
-          name: 'search_components',
-          description: 'Search components by title, description, or tags',
+          name: "search_components",
+          description: "Search components by title, description, or tags",
           inputSchema: {
-            type: 'object',
+            type: "object",
             properties: {
               query: {
-                type: 'string',
-                description: 'Search query',
+                type: "string",
+                description: "Search query",
               },
             },
-            required: ['query'],
+            required: ["query"],
           },
         },
       ],
@@ -307,26 +301,26 @@ export function createMuseaServer(config: {
     const binding = loadNative();
 
     switch (name) {
-      case 'list_components': {
+      case "list_components": {
         const arts = await scanArtFiles();
         let results = Array.from(arts.values());
 
         if (args?.category) {
           results = results.filter(
-            (a) => a.category?.toLowerCase() === (args.category as string).toLowerCase()
+            (a) => a.category?.toLowerCase() === (args.category as string).toLowerCase(),
           );
         }
 
         if (args?.tag) {
           results = results.filter((a) =>
-            a.tags.some((t) => t.toLowerCase() === (args.tag as string).toLowerCase())
+            a.tags.some((t) => t.toLowerCase() === (args.tag as string).toLowerCase()),
           );
         }
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 results.map((r) => ({
                   path: path.relative(projectRoot, r.path),
@@ -337,27 +331,27 @@ export function createMuseaServer(config: {
                   variantCount: r.variantCount,
                 })),
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
 
-      case 'get_component': {
+      case "get_component": {
         const artPath = args?.path as string;
         if (!artPath) {
-          throw new McpError(ErrorCode.InvalidParams, 'path is required');
+          throw new McpError(ErrorCode.InvalidParams, "path is required");
         }
 
         const absolutePath = path.resolve(projectRoot, artPath);
-        const source = await fs.promises.readFile(absolutePath, 'utf-8');
+        const source = await fs.promises.readFile(absolutePath, "utf-8");
         const parsed = binding.parseArt(source, { filename: absolutePath });
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
                   metadata: parsed.metadata,
@@ -372,43 +366,37 @@ export function createMuseaServer(config: {
                   styleCount: parsed.style_count,
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
 
-      case 'get_variant': {
+      case "get_variant": {
         const artPath = args?.path as string;
         const variantName = args?.variant as string;
 
         if (!artPath || !variantName) {
-          throw new McpError(
-            ErrorCode.InvalidParams,
-            'path and variant are required'
-          );
+          throw new McpError(ErrorCode.InvalidParams, "path and variant are required");
         }
 
         const absolutePath = path.resolve(projectRoot, artPath);
-        const source = await fs.promises.readFile(absolutePath, 'utf-8');
+        const source = await fs.promises.readFile(absolutePath, "utf-8");
         const parsed = binding.parseArt(source, { filename: absolutePath });
 
         const variant = parsed.variants.find(
-          (v) => v.name.toLowerCase() === variantName.toLowerCase()
+          (v) => v.name.toLowerCase() === variantName.toLowerCase(),
         );
 
         if (!variant) {
-          throw new McpError(
-            ErrorCode.InvalidParams,
-            `Variant "${variantName}" not found`
-          );
+          throw new McpError(ErrorCode.InvalidParams, `Variant "${variantName}" not found`);
         }
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
                   name: variant.name,
@@ -417,37 +405,37 @@ export function createMuseaServer(config: {
                   skipVrt: variant.skip_vrt,
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
 
-      case 'generate_csf': {
+      case "generate_csf": {
         const artPath = args?.path as string;
         if (!artPath) {
-          throw new McpError(ErrorCode.InvalidParams, 'path is required');
+          throw new McpError(ErrorCode.InvalidParams, "path is required");
         }
 
         const absolutePath = path.resolve(projectRoot, artPath);
-        const source = await fs.promises.readFile(absolutePath, 'utf-8');
+        const source = await fs.promises.readFile(absolutePath, "utf-8");
         const csf = binding.artToCsf(source, { filename: absolutePath });
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: csf.code,
             },
           ],
         };
       }
 
-      case 'search_components': {
+      case "search_components": {
         const query = (args?.query as string)?.toLowerCase();
         if (!query) {
-          throw new McpError(ErrorCode.InvalidParams, 'query is required');
+          throw new McpError(ErrorCode.InvalidParams, "query is required");
         }
 
         const arts = await scanArtFiles();
@@ -455,13 +443,13 @@ export function createMuseaServer(config: {
           (a) =>
             a.title.toLowerCase().includes(query) ||
             a.description?.toLowerCase().includes(query) ||
-            a.tags.some((t) => t.toLowerCase().includes(query))
+            a.tags.some((t) => t.toLowerCase().includes(query)),
         );
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 results.map((r) => ({
                   path: path.relative(projectRoot, r.path),
@@ -471,7 +459,7 @@ export function createMuseaServer(config: {
                   tags: r.tags,
                 })),
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -488,11 +476,7 @@ export function createMuseaServer(config: {
 
 // Utility functions
 
-async function findArtFiles(
-  root: string,
-  include: string[],
-  exclude: string[]
-): Promise<string[]> {
+async function findArtFiles(root: string, include: string[], exclude: string[]): Promise<string[]> {
   const files: string[] = [];
 
   async function scan(dir: string): Promise<void> {
@@ -515,7 +499,7 @@ async function findArtFiles(
 
       if (entry.isDirectory()) {
         await scan(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.art.vue')) {
+      } else if (entry.isFile() && entry.name.endsWith(".art.vue")) {
         for (const pattern of include) {
           if (matchGlob(relative, pattern)) {
             files.push(fullPath);
@@ -532,10 +516,10 @@ async function findArtFiles(
 
 function matchGlob(filepath: string, pattern: string): boolean {
   const regex = pattern
-    .replace(/\*\*/g, '{{DOUBLE_STAR}}')
-    .replace(/\*/g, '[^/]*')
-    .replace(/{{DOUBLE_STAR}}/g, '.*')
-    .replace(/\./g, '\\.');
+    .replace(/\*\*/g, "{{DOUBLE_STAR}}")
+    .replace(/\*/g, "[^/]*")
+    .replace(/{{DOUBLE_STAR}}/g, ".*")
+    .replace(/\./g, "\\.");
 
   return new RegExp(`^${regex}$`).test(filepath);
 }
@@ -548,7 +532,7 @@ export async function startServer(projectRoot: string): Promise<void> {
   const transport = new StdioServerTransport();
 
   await server.connect(transport);
-  console.error('[musea-mcp] Server started');
+  console.error("[musea-mcp] Server started");
 }
 
 export default createMuseaServer;

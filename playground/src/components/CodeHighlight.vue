@@ -1,34 +1,43 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue';
-import { createHighlighter, type Highlighter, type ThemeRegistration } from 'shiki';
+import { ref, watch, onMounted, computed } from "vue";
+import { createHighlighter, type Highlighter, type ThemeRegistration } from "shiki";
 
 const props = defineProps<{
   code: string;
-  language: 'javascript' | 'json' | 'css' | 'html' | 'typescript';
+  language: "javascript" | "json" | "css" | "html" | "typescript";
   showLineNumbers?: boolean;
 }>();
 
 // Custom theme matching project's Rust/Metal design
 const vizeTheme: ThemeRegistration = {
-  name: 'vize-dark',
-  type: 'dark',
+  name: "vize-dark",
+  type: "dark",
   colors: {
-    'editor.background': '#1a1b21',
-    'editor.foreground': '#f0f2f5',
+    "editor.background": "#1a1b21",
+    "editor.foreground": "#f0f2f5",
   },
   tokenColors: [
-    { scope: ['keyword', 'storage.type', 'storage.modifier'], settings: { foreground: '#e07048' } },
-    { scope: ['entity.name.function', 'support.function'], settings: { foreground: '#f08060' } },
-    { scope: ['entity.name.tag', 'punctuation.definition.tag'], settings: { foreground: '#e07048' } },
-    { scope: ['entity.other.attribute-name'], settings: { foreground: '#9ca3b0' } },
-    { scope: ['string', 'string.quoted'], settings: { foreground: '#d0d4dc' } },
-    { scope: ['constant.numeric', 'constant.language'], settings: { foreground: '#f08060' } },
-    { scope: ['variable', 'variable.other'], settings: { foreground: '#f0f2f5' } },
-    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: '#4b5563' } },
-    { scope: ['punctuation', 'meta.brace'], settings: { foreground: '#9ca3b0' } },
-    { scope: ['entity.name.type', 'support.type'], settings: { foreground: '#d0d4dc' } },
-    { scope: ['meta.property-name', 'support.type.property-name'], settings: { foreground: '#e07048' } },
-    { scope: ['meta.property-value', 'support.constant.property-value'], settings: { foreground: '#d0d4dc' } },
+    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#e07048" } },
+    { scope: ["entity.name.function", "support.function"], settings: { foreground: "#f08060" } },
+    {
+      scope: ["entity.name.tag", "punctuation.definition.tag"],
+      settings: { foreground: "#e07048" },
+    },
+    { scope: ["entity.other.attribute-name"], settings: { foreground: "#9ca3b0" } },
+    { scope: ["string", "string.quoted"], settings: { foreground: "#d0d4dc" } },
+    { scope: ["constant.numeric", "constant.language"], settings: { foreground: "#f08060" } },
+    { scope: ["variable", "variable.other"], settings: { foreground: "#f0f2f5" } },
+    { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: "#4b5563" } },
+    { scope: ["punctuation", "meta.brace"], settings: { foreground: "#9ca3b0" } },
+    { scope: ["entity.name.type", "support.type"], settings: { foreground: "#d0d4dc" } },
+    {
+      scope: ["meta.property-name", "support.type.property-name"],
+      settings: { foreground: "#e07048" },
+    },
+    {
+      scope: ["meta.property-value", "support.constant.property-value"],
+      settings: { foreground: "#d0d4dc" },
+    },
   ],
 };
 
@@ -39,7 +48,7 @@ async function initHighlighter() {
   if (!highlighter) {
     highlighter = await createHighlighter({
       themes: [vizeTheme],
-      langs: ['javascript', 'json', 'css', 'html', 'typescript'],
+      langs: ["javascript", "json", "css", "html", "typescript"],
     });
   }
   return highlighter;
@@ -49,7 +58,7 @@ async function highlight() {
   const hl = await initHighlighter();
   const tokens = hl.codeToTokens(props.code, {
     lang: props.language,
-    theme: 'vize-dark',
+    theme: "vize-dark",
   });
 
   let lines = tokens.tokens;
@@ -59,17 +68,19 @@ async function highlight() {
   }
 
   // Build HTML for each line
-  highlightedLines.value = lines.map(lineTokens => {
+  highlightedLines.value = lines.map((lineTokens) => {
     if (lineTokens.length === 0) {
-      return '&nbsp;';
+      return "&nbsp;";
     }
-    return lineTokens.map(token => {
-      const escaped = token.content
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      return `<span style="color:${token.color}">${escaped}</span>`;
-    }).join('');
+    return lineTokens
+      .map((token) => {
+        const escaped = token.content
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        return `<span style="color:${token.color}">${escaped}</span>`;
+      })
+      .join("");
   });
 }
 
@@ -98,7 +109,7 @@ watch(() => [props.code, props.language], highlight);
 <style scoped>
 .code-highlight {
   display: flex;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 13px;
   line-height: 20px;
   border-radius: 4px;

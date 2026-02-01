@@ -2,8 +2,8 @@
  * useInput - Input handling composable
  */
 
-import { ref, watch, isRef, unref, type Ref } from '@vue/runtime-core';
-import { lastKeyEvent, type KeyEvent } from '../app.js';
+import { ref, watch, isRef, unref, type Ref } from "@vue/runtime-core";
+import { lastKeyEvent, type KeyEvent } from "../app.js";
 
 export interface KeyHandler {
   (key: string, modifiers: { ctrl: boolean; alt: boolean; shift: boolean }): void;
@@ -23,11 +23,19 @@ export interface UseInputOptions {
   /** Called on Escape */
   onEscape?: () => void;
   /** Called on arrow keys */
-  onArrow?: (direction: 'up' | 'down' | 'left' | 'right') => void;
+  onArrow?: (direction: "up" | "down" | "left" | "right") => void;
 }
 
 export function useInput(options: UseInputOptions = {}) {
-  const { active = true, isActive: isActiveOption, onKey, onChar, onSubmit, onEscape, onArrow } = options;
+  const {
+    active = true,
+    isActive: isActiveOption,
+    onKey,
+    onChar,
+    onSubmit,
+    onEscape,
+    onArrow,
+  } = options;
 
   // Support both active and isActive, prefer isActive if both provided
   const activeSource = isActiveOption ?? active;
@@ -58,17 +66,17 @@ export function useInput(options: UseInputOptions = {}) {
       onKey?.(event.key, modifiers);
 
       switch (event.key) {
-        case 'enter':
+        case "enter":
           onSubmit?.();
           break;
-        case 'escape':
+        case "escape":
           onEscape?.();
           break;
-        case 'up':
-        case 'down':
-        case 'left':
-        case 'right':
-          onArrow?.(event.key as 'up' | 'down' | 'left' | 'right');
+        case "up":
+        case "down":
+        case "left":
+        case "right":
+          onArrow?.(event.key as "up" | "down" | "left" | "right");
           break;
       }
     }
@@ -96,7 +104,7 @@ export function useInput(options: UseInputOptions = {}) {
 export function useKeyPress(
   key: string,
   handler: () => void,
-  options: { ctrl?: boolean; alt?: boolean; shift?: boolean } = {}
+  options: { ctrl?: boolean; alt?: boolean; shift?: boolean } = {},
 ) {
   const { ctrl = false, alt = false, shift = false } = options;
 

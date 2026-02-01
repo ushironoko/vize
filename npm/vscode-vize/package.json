@@ -185,7 +185,10 @@
     "vscode:prepublish": "pnpm run build",
     "build": "tsdown",
     "watch": "tsdown --watch",
-    "lint": "eslint src --ext ts",
+    "lint": "oxlint --type-aware --tsconfig tsconfig.json",
+    "lint:fix": "oxlint --type-aware --tsconfig tsconfig.json --fix",
+    "fmt": "oxfmt --write src",
+    "fmt:check": "oxfmt src",
     "typecheck": "tsc --noEmit",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies"
@@ -194,7 +197,7 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.75.0",
     "@vscode/vsce": "^3.3.2",
-    "tsdown": "^0.4.0",
+    "tsdown": "^0.9.0",
     "typescript": "^5.7.0"
   },
   "dependencies": {

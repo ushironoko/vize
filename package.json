@@ -10,7 +10,11 @@
   "scripts": {
     "dev": "pnpm -C playground dev",
     "build:plugin": "pnpm -C npm/vite-plugin-vize build",
-    "install:plugin": "pnpm -C npm/vite-plugin-vize install"
+    "install:plugin": "pnpm -C npm/vite-plugin-vize install",
+    "lint": "pnpm -r --filter './npm/*' --filter './playground' run lint",
+    "lint:fix": "pnpm -r --filter './npm/*' --filter './playground' run lint:fix",
+    "fmt": "pnpm -r --filter './npm/*' --filter './playground' run fmt",
+    "fmt:check": "pnpm -r --filter './npm/*' --filter './playground' run fmt:check"
   },
   "devDependencies": {
     "@iarna/toml": "^2.2.5",
@@ -18,6 +22,9 @@
     "@vue/compiler-sfc": "3.6.0-beta.1",
     "@vue/compiler-vapor": "3.6.0-beta.1",
     "glob": "^13.0.0",
+    "oxfmt": "^0.27.0",
+    "oxlint": "^1.42.0",
+    "oxlint-tsgolint": "^0.11.4",
     "vue": "3.6.0-beta.1"
   }
 }

@@ -1,4 +1,4 @@
-import type { CompiledModule } from './types.js';
+import type { CompiledModule } from "./types.js";
 
 /**
  * HMR update types for granular hot module replacement.
@@ -7,7 +7,7 @@ import type { CompiledModule } from './types.js';
  * - 'style-only': Only styles changed, inject CSS without component remount
  * - 'full-reload': Script changed, full component reload required
  */
-export type HmrUpdateType = 'template-only' | 'style-only' | 'full-reload';
+export type HmrUpdateType = "template-only" | "style-only" | "full-reload";
 
 /**
  * Detect the type of HMR update needed based on content hash changes.
@@ -18,17 +18,17 @@ export type HmrUpdateType = 'template-only' | 'style-only' | 'full-reload';
  */
 export function detectHmrUpdateType(
   prev: CompiledModule | undefined,
-  next: CompiledModule
+  next: CompiledModule,
 ): HmrUpdateType {
   // First compile always requires full reload
   if (!prev) {
-    return 'full-reload';
+    return "full-reload";
   }
 
   // Check for script changes (requires full reload)
   const scriptChanged = prev.scriptHash !== next.scriptHash;
   if (scriptChanged) {
-    return 'full-reload';
+    return "full-reload";
   }
 
   // Check for template changes (can use rerender)
@@ -39,25 +39,22 @@ export function detectHmrUpdateType(
 
   // If only style changed, we can do style-only update
   if (styleChanged && !templateChanged) {
-    return 'style-only';
+    return "style-only";
   }
 
   // If only template changed (or template + style), use rerender
   if (templateChanged) {
-    return 'template-only';
+    return "template-only";
   }
 
   // No changes detected (shouldn't happen in practice)
-  return 'full-reload';
+  return "full-reload";
 }
 
 /**
  * Generate HMR-aware code output based on update type.
  */
-export function generateHmrCode(
-  scopeId: string,
-  updateType: HmrUpdateType
-): string {
+export function generateHmrCode(scopeId: string, updateType: HmrUpdateType): string {
   return `
 if (import.meta.hot) {
   _sfc_main.__hmrId = ${JSON.stringify(scopeId)};

@@ -114,11 +114,7 @@ const astHideSource = ref(true);
 const astCollapsed = ref(false);
 
 // Helper to remove loc/source properties from AST for cleaner display
-function filterAstProperties(
-  obj: unknown,
-  hideLoc: boolean,
-  hideSource: boolean,
-): unknown {
+function filterAstProperties(obj: unknown, hideLoc: boolean, hideSource: boolean): unknown {
   if (obj === null || typeof obj !== "object") return obj;
   if (Array.isArray(obj)) {
     return obj.map((item) => filterAstProperties(item, hideLoc, hideSource));
@@ -133,10 +129,7 @@ function filterAstProperties(
 }
 
 // Helper to format code with Prettier
-async function formatCode(
-  code: string,
-  parser: "babel" | "typescript",
-): Promise<string> {
+async function formatCode(code: string, parser: "babel" | "typescript"): Promise<string> {
   try {
     return await prettier.format(code, {
       parser,
@@ -180,17 +173,11 @@ function transpileToJs(code: string): string {
 }
 
 // Computed
-const editorLanguage = computed(() =>
-  inputMode.value === "sfc" ? "vue" : "html",
-);
+const editorLanguage = computed(() => (inputMode.value === "sfc" ? "vue" : "html"));
 const astJson = computed(() => {
   if (!output.value) return "{}";
   const ast = mapToObject(output.value.ast);
-  const filtered = filterAstProperties(
-    ast,
-    astHideLoc.value,
-    astHideSource.value,
-  );
+  const filtered = filterAstProperties(ast, astHideLoc.value, astHideSource.value);
   return JSON.stringify(filtered, null, astCollapsed.value ? 0 : 2);
 });
 
@@ -481,9 +468,7 @@ async function compile() {
 
         // Compile CSS from all style blocks
         if (result?.descriptor?.styles?.length > 0) {
-          const allCss = result.descriptor.styles
-            .map((s) => s.content)
-            .join("\n");
+          const allCss = result.descriptor.styles.map((s) => s.content).join("\n");
           const hasScoped = result.descriptor.styles.some((s) => s.scoped);
           const css = compiler.value.compileCss(allCss, {
             ...cssOptions.value,
@@ -505,9 +490,7 @@ async function compile() {
             helpers: result.template?.helpers || [],
           };
           // Detect TypeScript from script lang
-          const scriptLang =
-            result.descriptor.scriptSetup?.lang ||
-            result.descriptor.script?.lang;
+          const scriptLang = result.descriptor.scriptSetup?.lang || result.descriptor.script?.lang;
           const usesTs = scriptLang === "ts" || scriptLang === "tsx";
           // Format code with appropriate parser
           formattedCode.value = await formatCode(
@@ -610,7 +593,7 @@ onMounted(async () => {
     wasmStatus.value = isUsingMock() ? "mock" : "ready";
     compile();
   } catch (e) {
-    console.error('Failed to load WASM:', e);
+    console.error("Failed to load WASM:", e);
   }
 });
 </script>
@@ -620,24 +603,14 @@ onMounted(async () => {
     <header class="header">
       <div class="logo">
         <div class="logo-icon">
-          <svg
-            viewBox="0 0 100 100"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="20%">
                 <stop offset="0%" stop-color="#E6E9F0" />
                 <stop offset="50%" stop-color="#7B8494" />
                 <stop offset="100%" stop-color="#A34828" />
               </linearGradient>
-              <linearGradient
-                id="gradient-dark"
-                x1="0%"
-                y1="0%"
-                x2="100%"
-                y2="30%"
-              >
+              <linearGradient id="gradient-dark" x1="0%" y1="0%" x2="100%" y2="30%">
                 <stop offset="0%" stop-color="#B8BDC9" />
                 <stop offset="60%" stop-color="#525A6B" />
                 <stop offset="100%" stop-color="#7D341B" />
@@ -684,17 +657,11 @@ onMounted(async () => {
           <span class="tab-name">Atelier</span>
           <span class="tab-desc">compiler</span>
         </button>
-        <button
-          :class="['main-tab', { active: mainTab === 'patina' }]"
-          @click="mainTab = 'patina'"
-        >
+        <button :class="['main-tab', { active: mainTab === 'patina' }]" @click="mainTab = 'patina'">
           <span class="tab-name">Patina</span>
           <span class="tab-desc">linter</span>
         </button>
-        <button
-          :class="['main-tab', { active: mainTab === 'canon' }]"
-          @click="mainTab = 'canon'"
-        >
+        <button :class="['main-tab', { active: mainTab === 'canon' }]" @click="mainTab = 'canon'">
           <span class="tab-name">Canon</span>
           <span class="tab-desc">typecheck</span>
         </button>
@@ -712,10 +679,7 @@ onMounted(async () => {
           <span class="tab-name">Croquis</span>
           <span class="tab-desc">CF</span>
         </button>
-        <button
-          :class="['main-tab', { active: mainTab === 'musea' }]"
-          @click="mainTab = 'musea'"
-        >
+        <button :class="['main-tab', { active: mainTab === 'musea' }]" @click="mainTab = 'musea'">
           <span class="tab-name">Musea</span>
           <span class="tab-desc">story</span>
         </button>
@@ -736,11 +700,7 @@ onMounted(async () => {
             <span>Preset:</span>
             <select
               :value="selectedPreset"
-              @change="
-                handlePresetChange(
-                  ($event.target as HTMLSelectElement).value as PresetKey,
-                )
-              "
+              @change="handlePresetChange(($event.target as HTMLSelectElement).value as PresetKey)"
             >
               <option v-for="(preset, key) in PRESETS" :key="key" :value="key">
                 {{ preset.name }}
@@ -815,15 +775,8 @@ onMounted(async () => {
           <div class="panel-header">
             <h2>{{ inputMode === "sfc" ? "SFC (.vue)" : "Template" }}</h2>
             <div class="panel-actions">
-              <button
-                @click="handlePresetChange(selectedPreset)"
-                class="btn-ghost"
-              >
-                Reset
-              </button>
-              <button @click="copyToClipboard(source)" class="btn-ghost">
-                Copy
-              </button>
+              <button @click="handlePresetChange(selectedPreset)" class="btn-ghost">Reset</button>
+              <button @click="copyToClipboard(source)" class="btn-ghost">Copy</button>
             </div>
           </div>
           <div class="editor-container">
@@ -840,9 +793,7 @@ onMounted(async () => {
               >
             </h2>
             <div class="panel-actions">
-              <button @click="copyFullOutput" class="btn-ghost">
-                Copy All Output
-              </button>
+              <button @click="copyFullOutput" class="btn-ghost">Copy All Output</button>
             </div>
             <div class="tabs">
               <button
@@ -851,10 +802,7 @@ onMounted(async () => {
               >
                 Code
               </button>
-              <button
-                :class="['tab', { active: activeTab === 'ast' }]"
-                @click="activeTab = 'ast'"
-              >
+              <button :class="['tab', { active: activeTab === 'ast' }]" @click="activeTab = 'ast'">
                 AST
               </button>
               <button
@@ -969,32 +917,19 @@ onMounted(async () => {
                       <input type="checkbox" v-model="astCollapsed" />
                       <span>Compact</span>
                     </label>
-                    <button
-                      @click="copyToClipboard(astJson)"
-                      class="btn-ghost btn-small"
-                    >
+                    <button @click="copyToClipboard(astJson)" class="btn-ghost btn-small">
                       Copy
                     </button>
                   </div>
                 </div>
-                <CodeHighlight
-                  :code="astJson"
-                  language="json"
-                  show-line-numbers
-                />
+                <CodeHighlight :code="astJson" language="json" show-line-numbers />
               </div>
 
               <!-- Helpers Tab -->
               <div v-else-if="activeTab === 'helpers'" class="helpers-output">
-                <h4>
-                  Runtime Helpers Used ({{ output.helpers?.length ?? 0 }})
-                </h4>
+                <h4>Runtime Helpers Used ({{ output.helpers?.length ?? 0 }})</h4>
                 <ul v-if="output.helpers?.length > 0" class="helpers-list">
-                  <li
-                    v-for="(helper, i) in output.helpers"
-                    :key="i"
-                    class="helper-item"
-                  >
+                  <li v-for="(helper, i) in output.helpers" :key="i" class="helper-item">
                     <span class="helper-name">{{ helper }}</span>
                   </li>
                 </ul>
@@ -1002,10 +937,7 @@ onMounted(async () => {
               </div>
 
               <!-- SFC Tab -->
-              <div
-                v-else-if="activeTab === 'sfc' && sfcResult"
-                class="sfc-output"
-              >
+              <div v-else-if="activeTab === 'sfc' && sfcResult" class="sfc-output">
                 <h4>SFC Descriptor</h4>
 
                 <div v-if="sfcResult.descriptor.template" class="sfc-block">
@@ -1017,10 +949,7 @@ onMounted(async () => {
                         : ""
                     }}
                   </h5>
-                  <CodeHighlight
-                    :code="sfcResult.descriptor.template.content"
-                    language="html"
-                  />
+                  <CodeHighlight :code="sfcResult.descriptor.template.content" language="html" />
                 </div>
 
                 <div v-if="sfcResult.descriptor.scriptSetup" class="sfc-block">
@@ -1053,10 +982,7 @@ onMounted(async () => {
                   />
                 </div>
 
-                <div
-                  v-if="sfcResult.descriptor.styles?.length > 0"
-                  class="sfc-block"
-                >
+                <div v-if="sfcResult.descriptor.styles?.length > 0" class="sfc-block">
                   <h5>Styles ({{ sfcResult.descriptor.styles?.length }})</h5>
                   <div
                     v-for="(style, i) in sfcResult.descriptor.styles"
@@ -1065,9 +991,7 @@ onMounted(async () => {
                   >
                     <span class="style-meta">
                       <span v-if="style.scoped" class="badge">scoped</span>
-                      <span v-if="style.lang" class="badge">{{
-                        style.lang
-                      }}</span>
+                      <span v-if="style.lang" class="badge">{{ style.lang }}</span>
                     </span>
                     <CodeHighlight :code="style.content" language="css" />
                   </div>
@@ -1110,11 +1034,7 @@ onMounted(async () => {
                   <div v-if="cssResult.cssVars?.length > 0" class="css-vars">
                     <h5>CSS Variables (v-bind)</h5>
                     <ul class="helpers-list">
-                      <li
-                        v-for="(v, i) in cssResult.cssVars"
-                        :key="i"
-                        class="helper-item"
-                      >
+                      <li v-for="(v, i) in cssResult.cssVars" :key="i" class="helper-item">
                         <span class="helper-name">{{ v }}</span>
                       </li>
                     </ul>
@@ -1122,12 +1042,9 @@ onMounted(async () => {
 
                   <div v-if="cssResult.errors?.length > 0" class="css-errors">
                     <h5>Errors</h5>
-                    <pre
-                      v-for="(err, i) in cssResult.errors"
-                      :key="i"
-                      class="error-message"
-                      >{{ err }}</pre
-                    >
+                    <pre v-for="(err, i) in cssResult.errors" :key="i" class="error-message">{{
+                      err
+                    }}</pre>
                   </div>
                 </template>
                 <p v-else class="no-css">No styles in this SFC</p>
@@ -1135,48 +1052,31 @@ onMounted(async () => {
 
               <!-- Bindings Tab -->
               <div
-                v-else-if="
-                  activeTab === 'bindings' && sfcResult?.script?.bindings
-                "
+                v-else-if="activeTab === 'bindings' && sfcResult?.script?.bindings"
                 class="bindings-output"
               >
                 <h4>Script Setup Bindings</h4>
 
                 <!-- Summary Cards -->
                 <div class="bindings-summary">
-                  <div
-                    class="summary-card"
-                    v-for="(count, type) in bindingsSummary"
-                    :key="type"
-                  >
+                  <div class="summary-card" v-for="(count, type) in bindingsSummary" :key="type">
                     <span class="summary-count">{{ count }}</span>
-                    <span :class="['summary-type', `type-${type}`]">{{
-                      type
-                    }}</span>
+                    <span :class="['summary-type', `type-${type}`]">{{ type }}</span>
                   </div>
                 </div>
 
                 <!-- Grouped Bindings -->
                 <div class="bindings-groups">
-                  <div
-                    v-for="(vars, type) in groupedBindings"
-                    :key="type"
-                    class="binding-group"
-                  >
+                  <div v-for="(vars, type) in groupedBindings" :key="type" class="binding-group">
                     <div :class="['group-header', `type-${type}`]">
                       <span class="group-icon">{{ getBindingIcon(type) }}</span>
-                      <span class="group-title">{{
-                        getBindingLabel(type)
-                      }}</span>
+                      <span class="group-title">{{ getBindingLabel(type) }}</span>
                       <span class="group-count">{{ vars.length }}</span>
                     </div>
                     <div class="group-vars">
-                      <span
-                        v-for="v in vars"
-                        :key="v"
-                        :class="['var-chip', `type-${type}`]"
-                        >{{ v }}</span
-                      >
+                      <span v-for="v in vars" :key="v" :class="['var-chip', `type-${type}`]">{{
+                        v
+                      }}</span>
                     </div>
                   </div>
                 </div>
@@ -1202,9 +1102,7 @@ onMounted(async () => {
                     <span class="stat-label">Directives</span>
                   </div>
                   <div class="stat-card">
-                    <span class="stat-value">{{
-                      tokenStats.interpolations
-                    }}</span>
+                    <span class="stat-value">{{ tokenStats.interpolations }}</span>
                     <span class="stat-label">Interpolations</span>
                   </div>
                 </div>
@@ -1226,16 +1124,10 @@ onMounted(async () => {
                     </span>
                     <div class="token-content">
                       <div class="token-main">
-                        <span v-if="token.name" class="token-name">{{
-                          token.name
-                        }}</span>
-                        <span v-if="token.value" class="token-value-text">{{
-                          token.value
-                        }}</span>
+                        <span v-if="token.name" class="token-name">{{ token.name }}</span>
+                        <span v-if="token.value" class="token-value-text">{{ token.value }}</span>
                       </div>
-                      <span class="token-location"
-                        >{{ token.line }}:{{ token.column }}</span
-                      >
+                      <span class="token-location">{{ token.line }}:{{ token.column }}</span>
                     </div>
                   </div>
                 </div>
@@ -1259,9 +1151,7 @@ onMounted(async () => {
                         >
                           {{ getTokenTypeIcon(String(type)) }}
                         </span>
-                        <span class="group-title">{{
-                          getTokenTypeLabel(String(type))
-                        }}</span>
+                        <span class="group-title">{{ getTokenTypeLabel(String(type)) }}</span>
                         <span class="group-count">{{ tokens.length }}</span>
                       </div>
                       <div class="group-tokens">
@@ -1273,11 +1163,7 @@ onMounted(async () => {
                             '--chip-color': getTokenTypeColor(String(type)),
                           }"
                         >
-                          {{
-                            token.name ||
-                            token.value?.slice(0, 25) ||
-                            token.raw.slice(0, 25)
-                          }}
+                          {{ token.name || token.value?.slice(0, 25) || token.raw.slice(0, 25) }}
                         </span>
                         <span v-if="tokens.length > 12" class="more-indicator">
                           +{{ tokens.length - 12 }} more
@@ -1298,10 +1184,7 @@ onMounted(async () => {
       <span class="separator">|</span>
       <span
         >by
-        <a
-          href="https://github.com/ubugeeei"
-          target="_blank"
-          rel="noopener noreferrer"
+        <a href="https://github.com/ubugeeei" target="_blank" rel="noopener noreferrer"
           >@ubugeeei</a
         ></span
       >

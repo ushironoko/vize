@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from 'vue';
-import MonacoEditor from './MonacoEditor.vue';
+import { ref, watch, computed, onMounted } from "vue";
+import MonacoEditor from "./MonacoEditor.vue";
 
 interface Diagnostic {
   message: string;
@@ -8,10 +8,10 @@ interface Diagnostic {
   startColumn: number;
   endLine?: number;
   endColumn?: number;
-  severity: 'error' | 'warning' | 'info';
+  severity: "error" | "warning" | "info";
 }
-import CodeHighlight from './CodeHighlight.vue';
-import type { WasmModule, ArtDescriptor, CsfOutput } from '../wasm/index';
+import CodeHighlight from "./CodeHighlight.vue";
+import type { WasmModule, ArtDescriptor, CsfOutput } from "../wasm/index";
 
 const props = defineProps<{
   compiler: WasmModule | null;
@@ -81,22 +81,22 @@ const parsedArt = ref<ArtDescriptor | null>(null);
 const csfOutput = ref<CsfOutput | null>(null);
 const error = ref<string | null>(null);
 const diagnostics = ref<Diagnostic[]>([]);
-type TabType = 'parsed' | 'csf' | 'variants';
-const validTabs: TabType[] = ['parsed', 'csf', 'variants'];
+type TabType = "parsed" | "csf" | "variants";
+const validTabs: TabType[] = ["parsed", "csf", "variants"];
 
 function getTabFromUrl(): TabType {
   const params = new URLSearchParams(window.location.search);
-  const tab = params.get('tab');
+  const tab = params.get("tab");
   if (tab && validTabs.includes(tab as TabType)) {
     return tab as TabType;
   }
-  return 'parsed';
+  return "parsed";
 }
 
 function setTabToUrl(tab: TabType) {
   const url = new URL(window.location.href);
-  url.searchParams.set('tab', tab);
-  window.history.replaceState({}, '', url.toString());
+  url.searchParams.set("tab", tab);
+  window.history.replaceState({}, "", url.toString());
 }
 
 const activeTab = ref<TabType>(getTabFromUrl());
@@ -113,7 +113,7 @@ const variantCount = computed(() => parsedArt.value?.variants.length ?? 0);
 interface DesignToken {
   name: string;
   value: string;
-  type: 'color' | 'size' | 'other';
+  type: "color" | "size" | "other";
 }
 
 const designTokens = computed((): DesignToken[] => {
@@ -124,19 +124,19 @@ const designTokens = computed((): DesignToken[] => {
 
   // Try to extract from styles array first
   const styles = parsedArt.value.styles || [];
-  let styleContent = '';
+  let styleContent = "";
 
   if (styles.length > 0) {
     // Use styles from parsed result
     for (const style of styles) {
-      styleContent += (style.content || '') + '\n';
+      styleContent += (style.content || "") + "\n";
     }
   } else {
     // Fallback: extract style content directly from source
     const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/g;
     let styleMatch;
     while ((styleMatch = styleRegex.exec(source.value)) !== null) {
-      styleContent += styleMatch[1] + '\n';
+      styleContent += styleMatch[1] + "\n";
     }
   }
 
@@ -148,16 +148,16 @@ const designTokens = computed((): DesignToken[] => {
     tokens.push({
       name,
       value,
-      type: isColorValue(value) ? 'color' : isSizeValue(value) ? 'size' : 'other',
+      type: isColorValue(value) ? "color" : isSizeValue(value) ? "size" : "other",
     });
   }
 
   return tokens;
 });
 
-const colorTokens = computed(() => designTokens.value.filter(t => t.type === 'color'));
-const sizeTokens = computed(() => designTokens.value.filter(t => t.type === 'size'));
-const otherTokens = computed(() => designTokens.value.filter(t => t.type === 'other'));
+const colorTokens = computed(() => designTokens.value.filter((t) => t.type === "color"));
+const sizeTokens = computed(() => designTokens.value.filter((t) => t.type === "size"));
+const otherTokens = computed(() => designTokens.value.filter((t) => t.type === "other"));
 
 function isColorValue(value: string): boolean {
   return /^(#[0-9a-fA-F]{3,8}|rgb|rgba|hsl|hsla|transparent|currentColor|inherit)/i.test(value);
@@ -181,13 +181,13 @@ async function compile() {
   try {
     // Parse Art file
     const parsed = props.compiler.parseArt(source.value, {
-      filename: 'example.art.vue',
+      filename: "example.art.vue",
     });
     parsedArt.value = parsed;
 
     // Transform to CSF
     const csf = props.compiler.artToCsf(source.value, {
-      filename: 'example.art.vue',
+      filename: "example.art.vue",
     });
     csfOutput.value = csf;
 
@@ -204,12 +204,14 @@ async function compile() {
     const line = lineMatch ? parseInt(lineMatch[1], 10) : 1;
     const col = colMatch ? parseInt(colMatch[1], 10) : 1;
 
-    diagnostics.value = [{
-      message,
-      startLine: line,
-      startColumn: col,
-      severity: 'error',
-    }];
+    diagnostics.value = [
+      {
+        message,
+        startLine: line,
+        startColumn: col,
+        severity: "error",
+      },
+    ];
   }
 }
 
@@ -221,14 +223,14 @@ watch(
     if (compileTimer) clearTimeout(compileTimer);
     compileTimer = setTimeout(compile, 300);
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 watch(
   () => props.compiler,
   () => {
     if (props.compiler) compile();
-  }
+  },
 );
 </script>
 
@@ -262,17 +264,19 @@ watch(
           <button
             :class="['tab', { active: activeTab === 'parsed' }]"
             @click="activeTab = 'parsed'"
-          >Metadata</button>
+          >
+            Metadata
+          </button>
           <button
             :class="['tab', { active: activeTab === 'variants' }]"
             @click="activeTab = 'variants'"
-          >Variants
+          >
+            Variants
             <span v-if="variantCount > 0" class="tab-count">{{ variantCount }}</span>
           </button>
-          <button
-            :class="['tab', { active: activeTab === 'csf' }]"
-            @click="activeTab = 'csf'"
-          >CSF</button>
+          <button :class="['tab', { active: activeTab === 'csf' }]" @click="activeTab = 'csf'">
+            CSF
+          </button>
         </div>
       </div>
 
@@ -290,7 +294,9 @@ watch(
               <div class="file-badges">
                 <span v-if="parsedArt.hasScriptSetup" class="file-badge">setup</span>
                 <span v-if="parsedArt.hasScript" class="file-badge">script</span>
-                <span v-if="parsedArt.styleCount > 0" class="file-badge">{{ parsedArt.styleCount }} style</span>
+                <span v-if="parsedArt.styleCount > 0" class="file-badge"
+                  >{{ parsedArt.styleCount }} style</span
+                >
               </div>
             </div>
 
@@ -315,12 +321,16 @@ watch(
                 <div v-if="parsedArt.metadata.tags?.length" class="metadata-item">
                   <span class="meta-label">Tags</span>
                   <span class="tags-list">
-                    <span v-for="tag in parsedArt.metadata.tags" :key="tag" class="tag-item">{{ tag }}</span>
+                    <span v-for="tag in parsedArt.metadata.tags" :key="tag" class="tag-item">{{
+                      tag
+                    }}</span>
                   </span>
                 </div>
                 <div class="metadata-item">
                   <span class="meta-label">Status</span>
-                  <span :class="['status-badge', parsedArt.metadata.status]">{{ parsedArt.metadata.status }}</span>
+                  <span :class="['status-badge', parsedArt.metadata.status]">{{
+                    parsedArt.metadata.status
+                  }}</span>
                 </div>
               </div>
             </div>
@@ -393,15 +403,15 @@ watch(
           <div v-else-if="activeTab === 'variants'" class="variants-output">
             <div class="output-header-bar">
               <span class="output-title">Variants</span>
-              <span class="variant-count">{{ parsedArt.variants.length }} variant{{ parsedArt.variants.length !== 1 ? 's' : '' }}</span>
+              <span class="variant-count"
+                >{{ parsedArt.variants.length }} variant{{
+                  parsedArt.variants.length !== 1 ? "s" : ""
+                }}</span
+              >
             </div>
 
             <div class="variants-list">
-              <div
-                v-for="variant in parsedArt.variants"
-                :key="variant.name"
-                class="variant-item"
-              >
+              <div v-for="variant in parsedArt.variants" :key="variant.name" class="variant-item">
                 <div class="variant-header">
                   <div class="variant-name">
                     {{ variant.name }}
@@ -427,11 +437,7 @@ watch(
               </div>
             </div>
             <div class="code-container">
-              <CodeHighlight
-                :code="csfOutput.code"
-                language="typescript"
-                show-line-numbers
-              />
+              <CodeHighlight :code="csfOutput.code" language="typescript" show-line-numbers />
             </div>
           </div>
         </template>
@@ -499,7 +505,7 @@ watch(
   background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
   border-radius: 3px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .panel-actions {
@@ -556,7 +562,7 @@ watch(
 .tab-count {
   font-size: 0.625rem;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .editor-container {
@@ -669,7 +675,7 @@ watch(
 
 .meta-code {
   font-size: 0.75rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: #60a5fa;
   background: var(--bg-tertiary);
   padding: 0.125rem 0.375rem;
@@ -740,7 +746,7 @@ watch(
   background: var(--bg-tertiary);
   border-radius: 8px;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 /* Design Tokens */
@@ -795,7 +801,7 @@ watch(
 
 .token-name {
   font-size: 0.6875rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -804,7 +810,7 @@ watch(
 
 .token-value {
   font-size: 0.5625rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -867,7 +873,7 @@ watch(
 .variant-count {
   font-size: 0.625rem;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .variants-list {
@@ -956,7 +962,7 @@ watch(
 
 .filename-badge {
   font-size: 0.625rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.1);
   padding: 0.125rem 0.375rem;

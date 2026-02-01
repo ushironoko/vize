@@ -2,7 +2,7 @@
  * Stepper Component - Step indicator for wizards
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface Step {
   key: string;
@@ -10,7 +10,7 @@ export interface Step {
   description?: string;
 }
 
-export type StepStatus = 'pending' | 'current' | 'completed' | 'error';
+export type StepStatus = "pending" | "current" | "completed" | "error";
 
 export interface StepperProps {
   /** Steps */
@@ -22,7 +22,7 @@ export interface StepperProps {
   /** Error steps (indices) */
   errors?: number[];
   /** Direction */
-  direction?: 'horizontal' | 'vertical';
+  direction?: "horizontal" | "vertical";
   /** Show step numbers */
   showNumbers?: boolean;
   /** Completed icon */
@@ -36,7 +36,7 @@ export interface StepperProps {
 }
 
 export const Stepper = defineComponent({
-  name: 'Stepper',
+  name: "Stepper",
   props: {
     steps: {
       type: Array as PropType<Step[]>,
@@ -55,8 +55,8 @@ export const Stepper = defineComponent({
       default: () => [],
     },
     direction: {
-      type: String as PropType<'horizontal' | 'vertical'>,
-      default: 'horizontal',
+      type: String as PropType<"horizontal" | "vertical">,
+      default: "horizontal",
     },
     showNumbers: {
       type: Boolean,
@@ -64,39 +64,39 @@ export const Stepper = defineComponent({
     },
     completedIcon: {
       type: String,
-      default: '✓',
+      default: "✓",
     },
     errorIcon: {
       type: String,
-      default: '✗',
+      default: "✗",
     },
     currentIcon: {
       type: String,
-      default: '●',
+      default: "●",
     },
     pendingIcon: {
       type: String,
-      default: '○',
+      default: "○",
     },
   },
   setup(props) {
     const getStatus = (index: number): StepStatus => {
-      if (props.errors?.includes(index)) return 'error';
-      if (props.completed?.includes(index)) return 'completed';
-      if (index === props.current) return 'current';
-      return 'pending';
+      if (props.errors?.includes(index)) return "error";
+      if (props.completed?.includes(index)) return "completed";
+      if (index === props.current) return "current";
+      return "pending";
     };
 
     const getIcon = (index: number, status: StepStatus): string => {
-      if (props.showNumbers && status === 'pending') {
+      if (props.showNumbers && status === "pending") {
         return String(index + 1);
       }
       switch (status) {
-        case 'completed':
+        case "completed":
           return props.completedIcon;
-        case 'error':
+        case "error":
           return props.errorIcon;
-        case 'current':
+        case "current":
           return props.currentIcon;
         default:
           return props.pendingIcon;
@@ -105,20 +105,20 @@ export const Stepper = defineComponent({
 
     const getColor = (status: StepStatus): string => {
       switch (status) {
-        case 'completed':
-          return 'green';
-        case 'error':
-          return 'red';
-        case 'current':
-          return 'cyan';
+        case "completed":
+          return "green";
+        case "error":
+          return "red";
+        case "current":
+          return "cyan";
         default:
-          return 'gray';
+          return "gray";
       }
     };
 
     return () => {
-      const isHorizontal = props.direction === 'horizontal';
-      const connector = isHorizontal ? '───' : '│';
+      const isHorizontal = props.direction === "horizontal";
+      const connector = isHorizontal ? "───" : "│";
 
       const children = props.steps.flatMap((step, index) => {
         const status = getStatus(index);
@@ -128,42 +128,40 @@ export const Stepper = defineComponent({
 
         const stepContent = [
           h(
-            'box',
+            "box",
             {
               key: `step-${step.key}`,
               style: {
-                flex_direction: isHorizontal ? 'column' : 'row',
-                align_items: 'center',
+                flex_direction: isHorizontal ? "column" : "row",
+                align_items: "center",
               },
             },
             [
               h(
-                'text',
+                "text",
                 {
                   fg: color,
-                  bold: status === 'current',
+                  bold: status === "current",
                 },
-                `[${icon}]`
+                `[${icon}]`,
               ),
               h(
-                'text',
+                "text",
                 {
-                  fg: status === 'current' ? 'white' : 'gray',
-                  bold: status === 'current',
-                  style: isHorizontal
-                    ? { margin_top: 0.5 }
-                    : { margin_left: 1 },
+                  fg: status === "current" ? "white" : "gray",
+                  bold: status === "current",
+                  style: isHorizontal ? { margin_top: 0.5 } : { margin_left: 1 },
                 },
-                step.label
+                step.label,
               ),
-            ]
+            ],
           ),
         ];
 
         if (!isLast) {
           stepContent.push(
             h(
-              'text',
+              "text",
               {
                 key: `connector-${index}`,
                 dim: true,
@@ -171,8 +169,8 @@ export const Stepper = defineComponent({
                   ? { margin_left: 1, margin_right: 1 }
                   : { margin_top: 0.5, margin_bottom: 0.5, margin_left: 1 },
               },
-              connector
-            )
+              connector,
+            ),
           );
         }
 
@@ -180,14 +178,14 @@ export const Stepper = defineComponent({
       });
 
       return h(
-        'box',
+        "box",
         {
           style: {
-            flex_direction: isHorizontal ? 'row' : 'column',
-            align_items: isHorizontal ? 'flex-start' : 'stretch',
+            flex_direction: isHorizontal ? "row" : "column",
+            align_items: isHorizontal ? "flex-start" : "stretch",
           },
         },
-        children
+        children,
       );
     };
   },

@@ -2,7 +2,7 @@
  * TextArea Component - Multiline text input
  */
 
-import { defineComponent, h, type PropType, computed } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, computed } from "@vue/runtime-core";
 
 export interface TextAreaProps {
   /** Text value */
@@ -18,7 +18,7 @@ export interface TextAreaProps {
   /** Show line numbers */
   lineNumbers?: boolean;
   /** Border style */
-  border?: 'single' | 'double' | 'rounded' | 'none';
+  border?: "single" | "double" | "rounded" | "none";
   /** Foreground color */
   fg?: string;
   /** Placeholder foreground color */
@@ -32,11 +32,11 @@ export interface TextAreaProps {
 }
 
 export const TextArea = defineComponent({
-  name: 'TextArea',
+  name: "TextArea",
   props: {
     modelValue: {
       type: String,
-      default: '',
+      default: "",
     },
     placeholder: String,
     rows: {
@@ -56,17 +56,17 @@ export const TextArea = defineComponent({
       default: false,
     },
     border: {
-      type: String as PropType<TextAreaProps['border']>,
-      default: 'single',
+      type: String as PropType<TextAreaProps["border"]>,
+      default: "single",
     },
     fg: String,
     placeholderFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     lineNumberFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     cursorLine: {
       type: Number,
@@ -77,22 +77,22 @@ export const TextArea = defineComponent({
       default: 0,
     },
   },
-  emits: ['update:modelValue'],
+  emits: ["update:modelValue"],
   setup(props) {
     const lines = computed(() => {
-      const text = props.modelValue || '';
-      const textLines = text.split('\n');
+      const text = props.modelValue || "";
+      const textLines = text.split("\n");
 
       // Pad to minimum rows
       while (textLines.length < props.rows) {
-        textLines.push('');
+        textLines.push("");
       }
 
       return textLines.slice(0, props.rows);
     });
 
     const showPlaceholder = computed(
-      () => !props.modelValue && props.placeholder && !props.focused
+      () => !props.modelValue && props.placeholder && !props.focused,
     );
 
     return () => {
@@ -106,55 +106,55 @@ export const TextArea = defineComponent({
         if (props.lineNumbers) {
           parts.push(
             h(
-              'text',
+              "text",
               {
                 key: `ln-${index}`,
                 fg: props.lineNumberFg,
                 dim: !isCursorLine,
               },
-              `${String(index + 1).padStart(lineNumWidth)} │ `
-            )
+              `${String(index + 1).padStart(lineNumWidth)} │ `,
+            ),
           );
         }
 
         // Line content
-        let content = line || (showPlaceholder.value && index === 0 ? props.placeholder : ' ');
+        let content = line || (showPlaceholder.value && index === 0 ? props.placeholder : " ");
 
         parts.push(
           h(
-            'text',
+            "text",
             {
               key: `content-${index}`,
               fg: showPlaceholder.value && index === 0 ? props.placeholderFg : props.fg,
               dim: props.disabled,
               bold: isCursorLine,
             },
-            content
-          )
+            content,
+          ),
         );
 
         return h(
-          'box',
+          "box",
           {
             key: `line-${index}`,
-            style: { flex_direction: 'row' },
-            bg: isCursorLine ? 'gray' : undefined,
+            style: { flex_direction: "row" },
+            bg: isCursorLine ? "gray" : undefined,
           },
-          parts
+          parts,
         );
       });
 
       return h(
-        'box',
+        "box",
         {
-          border: props.border === 'none' ? undefined : props.border,
+          border: props.border === "none" ? undefined : props.border,
           style: {
-            flex_direction: 'column',
-            padding: props.border !== 'none' ? 1 : 0,
-            height: String(props.rows + (props.border !== 'none' ? 2 : 0)),
+            flex_direction: "column",
+            padding: props.border !== "none" ? 1 : 0,
+            height: String(props.rows + (props.border !== "none" ? 2 : 0)),
           },
         },
-        children
+        children,
       );
     };
   },

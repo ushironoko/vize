@@ -18,9 +18,13 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "start": "node dist/cli.js"
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "start": "node dist/cli.js",
+    "lint": "oxlint --type-aware --tsconfig tsconfig.json",
+    "lint:fix": "oxlint --type-aware --tsconfig tsconfig.json --fix",
+    "fmt": "oxfmt --write src",
+    "fmt:check": "oxfmt src"
   },
   "keywords": [
     "mcp",
@@ -43,6 +47,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "tsdown": "^0.9.0",
     "typescript": "^5.7.0"
   },
   "publishConfig": {

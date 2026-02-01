@@ -1,8 +1,8 @@
 <script setup lang="ts">
 defineProps<{
-  variant?: 'default' | 'primary' | 'secondary'
-  disabled?: boolean
-}>()
+  variant?: "default" | "primary" | "secondary";
+  disabled?: boolean;
+}>();
 </script>
 
 <template>

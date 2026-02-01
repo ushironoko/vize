@@ -1,21 +1,17 @@
-import { createHash } from 'node:crypto';
-import type { CompiledModule } from './types.js';
-import { type HmrUpdateType, generateHmrCode } from './hmr.js';
+import { createHash } from "node:crypto";
+import type { CompiledModule } from "./types.js";
+import { type HmrUpdateType, generateHmrCode } from "./hmr.js";
 
 export function generateScopeId(filename: string): string {
-  const hash = createHash('sha256').update(filename).digest('hex');
+  const hash = createHash("sha256").update(filename).digest("hex");
   return hash.slice(0, 8);
 }
 
 export function createFilter(
   include?: string | RegExp | (string | RegExp)[],
-  exclude?: string | RegExp | (string | RegExp)[]
+  exclude?: string | RegExp | (string | RegExp)[],
 ): (id: string) => boolean {
-  const includePatterns = include
-    ? Array.isArray(include)
-      ? include
-      : [include]
-    : [/\.vue$/];
+  const includePatterns = include ? (Array.isArray(include) ? include : [include]) : [/\.vue$/];
   const excludePatterns = exclude
     ? Array.isArray(exclude)
       ? exclude
@@ -24,10 +20,10 @@ export function createFilter(
 
   return (id: string) => {
     const matchInclude = includePatterns.some((pattern) =>
-      typeof pattern === 'string' ? id.includes(pattern) : pattern.test(id)
+      typeof pattern === "string" ? id.includes(pattern) : pattern.test(id),
     );
     const matchExclude = excludePatterns.some((pattern) =>
-      typeof pattern === 'string' ? id.includes(pattern) : pattern.test(id)
+      typeof pattern === "string" ? id.includes(pattern) : pattern.test(id),
     );
     return matchInclude && !matchExclude;
   };
@@ -40,10 +36,7 @@ export interface GenerateOutputOptions {
   extractCss?: boolean;
 }
 
-export function generateOutput(
-  compiled: CompiledModule,
-  options: GenerateOutputOptions
-): string {
+export function generateOutput(compiled: CompiledModule, options: GenerateOutputOptions): string {
   const { isProduction, isDev, hmrUpdateType, extractCss } = options;
 
   let output = compiled.code;
@@ -53,12 +46,12 @@ export function generateOutput(
   const exportDefaultRegex = /^export default /m;
   const hasExportDefault = exportDefaultRegex.test(output);
   if (hasExportDefault) {
-    output = output.replace(exportDefaultRegex, 'const _sfc_main = ');
+    output = output.replace(exportDefaultRegex, "const _sfc_main = ");
     // Add __scopeId for scoped CSS support
     if (compiled.hasScoped && compiled.scopeId) {
       output += `\n_sfc_main.__scopeId = "data-v-${compiled.scopeId}";`;
     }
-    output += '\nexport default _sfc_main;';
+    output += "\nexport default _sfc_main;";
   }
 
   // Inject CSS (skip in production if extracting)
@@ -86,7 +79,7 @@ ${output}`;
 
   // Add HMR support in development (skip in production)
   if (!isProduction && isDev && hasExportDefault) {
-    output += generateHmrCode(compiled.scopeId, hmrUpdateType ?? 'full-reload');
+    output += generateHmrCode(compiled.scopeId, hmrUpdateType ?? "full-reload");
   }
 
   return output;
@@ -98,7 +91,7 @@ ${output}`;
 export function generateOutputLegacy(
   compiled: CompiledModule,
   isProduction: boolean,
-  isDev: boolean
+  isDev: boolean,
 ): string {
   return generateOutput(compiled, { isProduction, isDev });
 }

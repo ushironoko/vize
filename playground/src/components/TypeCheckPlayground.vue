@@ -64,9 +64,7 @@ function generateHelp(code: number, message: string): string | undefined {
     // ========== Type Mismatch Errors ==========
     case 2322: {
       // Type 'X' is not assignable to type 'Y'
-      const typeMatch = message.match(
-        /Type '(.+?)' is not assignable to type '(.+?)'/,
-      );
+      const typeMatch = message.match(/Type '(.+?)' is not assignable to type '(.+?)'/);
       if (typeMatch) {
         const [, fromType, toType] = typeMatch;
         if (fromType === "string" && toType === "number") {
@@ -95,9 +93,7 @@ function generateHelp(code: number, message: string): string | undefined {
     // ========== Property Access Errors ==========
     case 2339: {
       // Property 'X' does not exist on type 'Y'
-      const propMatch = message.match(
-        /Property '(\w+)' does not exist on type '(.+?)'/,
-      );
+      const propMatch = message.match(/Property '(\w+)' does not exist on type '(.+?)'/);
       if (propMatch) {
         const [, prop, type] = propMatch;
         if (type.includes("Ref<")) {
@@ -143,9 +139,7 @@ function generateHelp(code: number, message: string): string | undefined {
     // ========== Function Errors ==========
     case 2554: {
       // Expected X arguments, but got Y
-      const argMatch = message.match(
-        /Expected (\d+) arguments?, but got (\d+)/,
-      );
+      const argMatch = message.match(/Expected (\d+) arguments?, but got (\d+)/);
       if (argMatch) {
         const [, expected, got] = argMatch;
         const expectedNum = parseInt(expected);
@@ -164,9 +158,7 @@ function generateHelp(code: number, message: string): string | undefined {
     }
     case 2555: {
       // Expected at least X arguments, but got Y
-      const argMatch = message.match(
-        /Expected at least (\d+) arguments?, but got (\d+)/,
-      );
+      const argMatch = message.match(/Expected at least (\d+) arguments?, but got (\d+)/);
       if (argMatch) {
         return `**Not enough arguments.**\n\n**Required:** at least ${argMatch[1]} argument(s)\n**Provided:** ${argMatch[2]} argument(s)\n\n**Fix:** Provide all required arguments:\n\`\`\`ts\n// Function with required and optional params\nfunction example(required1: string, required2: number, optional?: boolean) { }\n\n// Must provide at least required params\nexample('hello', 42) // OK\n\`\`\``;
       }
@@ -326,9 +318,7 @@ const source = ref(TYPECHECK_PRESET);
 const typeCheckResult = ref<TypeCheckResult | null>(null);
 const capabilities = ref<TypeCheckCapabilities | null>(null);
 const error = ref<string | null>(null);
-const activeTab = ref<"diagnostics" | "virtualTs" | "capabilities">(
-  "diagnostics",
-);
+const activeTab = ref<"diagnostics" | "virtualTs" | "capabilities">("diagnostics");
 const checkTime = ref<number | null>(null);
 
 // Options
@@ -363,10 +353,7 @@ async function configureTypeScript() {
   });
 
   // Add Vue type declarations (module + compiler macros + globals)
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(
-    VUE_GLOBALS_DECLARATIONS,
-    "vue.d.ts",
-  );
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(VUE_GLOBALS_DECLARATIONS, "vue.d.ts");
 }
 
 // Vue module and type declarations for Monaco TypeScript
@@ -482,28 +469,21 @@ async function getTypeScriptHover(genOffset: number): Promise<string | null> {
     const client = await worker(VIRTUAL_TS_URI);
 
     // Get quick info at position
-    const quickInfo = await client.getQuickInfoAtPosition(
-      VIRTUAL_TS_URI.toString(),
-      genOffset,
-    );
+    const quickInfo = await client.getQuickInfoAtPosition(VIRTUAL_TS_URI.toString(), genOffset);
     if (!quickInfo) return null;
 
     // Build hover content
     const parts: string[] = [];
 
     if (quickInfo.displayParts) {
-      const displayText = quickInfo.displayParts
-        .map((p: { text: string }) => p.text)
-        .join("");
+      const displayText = quickInfo.displayParts.map((p: { text: string }) => p.text).join("");
       if (displayText) {
         parts.push("```typescript\n" + displayText + "\n```");
       }
     }
 
     if (quickInfo.documentation) {
-      const docs = quickInfo.documentation
-        .map((d: { text: string }) => d.text)
-        .join("\n");
+      const docs = quickInfo.documentation.map((d: { text: string }) => d.text).join("\n");
       if (docs) {
         parts.push(docs);
       }
@@ -532,10 +512,7 @@ function mapSourceToGenerated(srcOffset: number): number | null {
 let hoverProviderDisposable: monaco.IDisposable | null = null;
 
 // Find diagnostic at a given position
-function findDiagnosticAtPosition(
-  line: number,
-  col: number,
-): Diagnostic | null {
+function findDiagnosticAtPosition(line: number, col: number): Diagnostic | null {
   for (const diag of diagnostics.value) {
     const startLine = diag.startLine;
     const startCol = diag.startColumn;
@@ -571,18 +548,11 @@ function registerHoverProvider() {
       const contents: monaco.IMarkdownString[] = [];
 
       // Check if hovering over a diagnostic
-      const diag = findDiagnosticAtPosition(
-        position.lineNumber,
-        position.column,
-      );
+      const diag = findDiagnosticAtPosition(position.lineNumber, position.column);
       if (diag) {
         // Add diagnostic message with severity indicator
         const severityLabel =
-          diag.severity === "error"
-            ? "Error"
-            : diag.severity === "warning"
-              ? "Warning"
-              : "Info";
+          diag.severity === "error" ? "Error" : diag.severity === "warning" ? "Warning" : "Info";
         contents.push({
           value: `**[${severityLabel}]** ${diag.message}`,
         });
@@ -619,20 +589,14 @@ function registerHoverProvider() {
 }
 
 // Get TypeScript diagnostics from Monaco Worker
-async function getTypeScriptDiagnostics(
-  virtualTs: string,
-): Promise<Diagnostic[]> {
+async function getTypeScriptDiagnostics(virtualTs: string): Promise<Diagnostic[]> {
   if (!virtualTs) return [];
 
   // Create or update the virtual TS model
   if (virtualTsModel) {
     virtualTsModel.setValue(virtualTs);
   } else {
-    virtualTsModel = monaco.editor.createModel(
-      virtualTs,
-      "typescript",
-      VIRTUAL_TS_URI,
-    );
+    virtualTsModel = monaco.editor.createModel(virtualTs, "typescript", VIRTUAL_TS_URI);
   }
 
   try {
@@ -671,8 +635,7 @@ async function getTypeScriptDiagnostics(
       }
 
       // TypeScript DiagnosticCategory: 0=Warning, 1=Error, 2=Suggestion, 3=Message
-      const severity =
-        d.category === 1 ? "error" : d.category === 0 ? "warning" : "info";
+      const severity = d.category === 1 ? "error" : d.category === 0 ? "warning" : "info";
 
       return {
         message,
@@ -732,10 +695,7 @@ function mapDiagnosticsToSource(
   }
 
   // Helper: convert offset to line/column in Vue source
-  function offsetToLineCol(
-    content: string,
-    offset: number,
-  ): { line: number; col: number } {
+  function offsetToLineCol(content: string, offset: number): { line: number; col: number } {
     const lines = content.split("\n");
     let currentOffset = 0;
     for (let i = 0; i < lines.length; i++) {
@@ -750,11 +710,7 @@ function mapDiagnosticsToSource(
 
   for (const diag of tsDiags) {
     // Calculate offset in virtual TS
-    const diagOffset = lineColToOffset(
-      virtualTs,
-      diag.startLine,
-      diag.startColumn,
-    );
+    const diagOffset = lineColToOffset(virtualTs, diag.startLine, diag.startColumn);
     const diagEndOffset = lineColToOffset(
       virtualTs,
       diag.endLine || diag.startLine,
@@ -768,18 +724,13 @@ function mapDiagnosticsToSource(
         // Calculate relative position within the generated range
         const relativeOffset = diagOffset - entry.genStart;
         const srcOffset = entry.srcStart + relativeOffset;
-        const srcEndOffset = Math.min(
-          entry.srcEnd,
-          srcOffset + (diagEndOffset - diagOffset),
-        );
+        const srcEndOffset = Math.min(entry.srcEnd, srcOffset + (diagEndOffset - diagOffset));
 
         const startPos = offsetToLineCol(vueSource, srcOffset);
         const endPos = offsetToLineCol(vueSource, srcEndOffset);
 
         // Generate help suggestion based on error code
-        const help = diag.code
-          ? generateHelp(diag.code, diag.message)
-          : undefined;
+        const help = diag.code ? generateHelp(diag.code, diag.message) : undefined;
 
         mapped.push({
           ...diag,
@@ -787,9 +738,7 @@ function mapDiagnosticsToSource(
           startColumn: startPos.col,
           endLine: endPos.line,
           endColumn: endPos.col,
-          message: diag.code
-            ? `[vize:TS${diag.code}] ${diag.message}`
-            : `[vize] ${diag.message}`,
+          message: diag.code ? `[vize:TS${diag.code}] ${diag.message}` : `[vize] ${diag.message}`,
           help,
         });
         foundMapping = true;
@@ -845,24 +794,17 @@ function saveOptions() {
 
 const errorCount = computed(() => {
   const wasmErrors = typeCheckResult.value?.errorCount ?? 0;
-  const tsErrors = tsDiagnostics.value.filter(
-    (d) => d.severity === "error",
-  ).length;
+  const tsErrors = tsDiagnostics.value.filter((d) => d.severity === "error").length;
   return wasmErrors + tsErrors;
 });
 const warningCount = computed(() => {
   const wasmWarnings = typeCheckResult.value?.warningCount ?? 0;
-  const tsWarnings = tsDiagnostics.value.filter(
-    (d) => d.severity === "warning",
-  ).length;
+  const tsWarnings = tsDiagnostics.value.filter((d) => d.severity === "warning").length;
   return wasmWarnings + tsWarnings;
 });
 
 // Calculate position from offset
-function getPositionFromOffset(
-  source: string,
-  offset: number,
-): { line: number; column: number } {
+function getPositionFromOffset(source: string, offset: number): { line: number; column: number } {
   const lines = source.substring(0, offset).split("\n");
   return {
     line: lines.length,
@@ -880,9 +822,7 @@ const diagnostics = computed((): Diagnostic[] => {
       const startPos = getPositionFromOffset(source.value, d.start);
       const endPos = getPositionFromOffset(source.value, d.end);
       // Format: [vize:CODE] message
-      const message = d.code
-        ? `[vize:${d.code}] ${d.message}`
-        : `[vize] ${d.message}`;
+      const message = d.code ? `[vize:${d.code}] ${d.message}` : `[vize] ${d.message}`;
       wasmDiags.push({
         message,
         help: d.help, // WASM diagnostics may include help from Rust side
@@ -890,12 +830,7 @@ const diagnostics = computed((): Diagnostic[] => {
         startColumn: startPos.column,
         endLine: endPos.line,
         endColumn: endPos.column,
-        severity:
-          d.severity === "error"
-            ? "error"
-            : d.severity === "warning"
-              ? "warning"
-              : "info",
+        severity: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "info",
       });
     }
   }
@@ -932,11 +867,7 @@ async function typeCheck() {
       cachedSourceMap = parseSourceMap(result.virtualTs);
 
       const tsDiags = await getTypeScriptDiagnostics(result.virtualTs);
-      tsDiagnostics.value = mapDiagnosticsToSource(
-        tsDiags,
-        result.virtualTs,
-        source.value,
-      );
+      tsDiagnostics.value = mapDiagnosticsToSource(tsDiags, result.virtualTs, source.value);
     } else {
       tsDiagnostics.value = [];
       cachedSourceMap = [];
@@ -986,15 +917,13 @@ function highlightCode(code: string, lang: string): string {
       (_, v) => `="${placeholder(`<span class="hl-string">${v}</span>`)}"`,
     );
     // Vue directives
-    result = result.replace(
-      /(v-[\w-]+|@[\w.-]+|:[\w.-]+(?==")|#[\w.-]+)/g,
-      (_, m) => placeholder(`<span class="hl-directive">${m}</span>`),
+    result = result.replace(/(v-[\w-]+|@[\w.-]+|:[\w.-]+(?==")|#[\w.-]+)/g, (_, m) =>
+      placeholder(`<span class="hl-directive">${m}</span>`),
     );
     // Tags (opening and closing)
     result = result.replace(
       /(&lt;\/?)([\w-]+)/g,
-      (_, prefix, tag) =>
-        `${prefix}${placeholder(`<span class="hl-tag">${tag}</span>`)}`,
+      (_, prefix, tag) => `${prefix}${placeholder(`<span class="hl-tag">${tag}</span>`)}`,
     );
     // Mustache interpolation
     result = result.replace(/(\{\{|\}\})/g, (_, m) =>
@@ -1003,12 +932,7 @@ function highlightCode(code: string, lang: string): string {
   }
 
   // TypeScript/JavaScript
-  if (
-    lang === "ts" ||
-    lang === "typescript" ||
-    lang === "js" ||
-    lang === "javascript"
-  ) {
+  if (lang === "ts" || lang === "typescript" || lang === "js" || lang === "javascript") {
     // Comments first (to avoid highlighting inside comments)
     result = result.replace(/(\/\/.*)/g, (_, m) =>
       placeholder(`<span class="hl-comment">${m}</span>`),
@@ -1028,9 +952,8 @@ function highlightCode(code: string, lang: string): string {
       (_, m) => placeholder(`<span class="hl-keyword">${m}</span>`),
     );
     // Types
-    result = result.replace(
-      /\b(string|number|boolean|null|undefined|void|any|never)\b/g,
-      (_, m) => placeholder(`<span class="hl-type">${m}</span>`),
+    result = result.replace(/\b(string|number|boolean|null|undefined|void|any|never)\b/g, (_, m) =>
+      placeholder(`<span class="hl-type">${m}</span>`),
     );
     // Numbers
     result = result.replace(/\b(\d+)\b/g, (_, m) =>
@@ -1047,8 +970,7 @@ function highlightCode(code: string, lang: string): string {
     // Properties
     result = result.replace(
       /([\w-]+)(\s*:)/g,
-      (_, prop, colon) =>
-        `${placeholder(`<span class="hl-property">${prop}</span>`)}${colon}`,
+      (_, prop, colon) => `${placeholder(`<span class="hl-property">${prop}</span>`)}${colon}`,
     );
   }
 
@@ -1059,9 +981,8 @@ function highlightCode(code: string, lang: string): string {
       placeholder(`<span class="hl-comment">${m}</span>`),
     );
     // Commands
-    result = result.replace(
-      /\b(npm|yarn|pnpm|git|cd|mkdir|rm|cp|mv|install)\b/g,
-      (_, m) => placeholder(`<span class="hl-keyword">${m}</span>`),
+    result = result.replace(/\b(npm|yarn|pnpm|git|cd|mkdir|rm|cp|mv|install)\b/g, (_, m) =>
+      placeholder(`<span class="hl-keyword">${m}</span>`),
     );
   }
 
@@ -1088,10 +1009,7 @@ function formatHelp(help: string): string {
   });
 
   // Inline code (`code`)
-  result = result.replace(
-    /`([^`]+)`/g,
-    '<code class="help-inline-code">$1</code>',
-  );
+  result = result.replace(/`([^`]+)`/g, '<code class="help-inline-code">$1</code>');
   // Bold (**text**)
   result = result.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   // Line breaks
@@ -1114,9 +1032,7 @@ function formatMessage(message: string): string {
   );
 }
 
-function getSeverityIcon(
-  severity: "error" | "warning" | "info" | "hint",
-): string {
+function getSeverityIcon(severity: "error" | "warning" | "info" | "hint"): string {
   switch (severity) {
     case "error":
       return "\u2717";
@@ -1145,14 +1061,7 @@ watch(
 );
 
 watch(
-  [
-    strictMode,
-    includeVirtualTs,
-    checkProps,
-    checkEmits,
-    checkTemplateBindings,
-    useMonacoTs,
-  ],
+  [strictMode, includeVirtualTs, checkProps, checkEmits, checkTemplateBindings, useMonacoTs],
   () => {
     saveOptions();
     typeCheck();
@@ -1201,18 +1110,12 @@ onUnmounted(() => {
           <h2>Source</h2>
         </div>
         <div class="panel-actions">
-          <button @click="setPreset('untyped')" class="btn-ghost">
-            Untyped
-          </button>
+          <button @click="setPreset('untyped')" class="btn-ghost">Untyped</button>
           <button @click="setPreset('typed')" class="btn-ghost">Typed</button>
         </div>
       </div>
       <div class="editor-container">
-        <MonacoEditor
-          v-model="source"
-          language="vue"
-          :diagnostics="diagnostics"
-        />
+        <MonacoEditor v-model="source" language="vue" :diagnostics="diagnostics" />
       </div>
     </div>
 
@@ -1221,16 +1124,10 @@ onUnmounted(() => {
         <div class="header-title">
           <span class="icon">&#x2714;</span>
           <h2>Type Analysis</h2>
-          <span v-if="checkTime !== null" class="perf-badge">
-            {{ checkTime.toFixed(2) }}ms
-          </span>
+          <span v-if="checkTime !== null" class="perf-badge"> {{ checkTime.toFixed(2) }}ms </span>
           <template v-if="typeCheckResult">
-            <span v-if="errorCount > 0" class="count-badge errors">{{
-              errorCount
-            }}</span>
-            <span v-if="warningCount > 0" class="count-badge warnings">{{
-              warningCount
-            }}</span>
+            <span v-if="errorCount > 0" class="count-badge errors">{{ errorCount }}</span>
+            <span v-if="warningCount > 0" class="count-badge warnings">{{ warningCount }}</span>
           </template>
         </div>
         <div class="tabs">
@@ -1239,9 +1136,7 @@ onUnmounted(() => {
             @click="activeTab = 'diagnostics'"
           >
             Diagnostics
-            <span v-if="diagnostics.length" class="tab-badge">{{
-              diagnostics.length
-            }}</span>
+            <span v-if="diagnostics.length" class="tab-badge">{{ diagnostics.length }}</span>
           </button>
           <button
             :class="['tab', { active: activeTab === 'virtualTs' }]"
@@ -1312,29 +1207,19 @@ onUnmounted(() => {
                 :class="['diagnostic-item', `severity-${diagnostic.severity}`]"
               >
                 <div class="diagnostic-header">
-                  <span class="severity-icon">{{
-                    getSeverityIcon(diagnostic.severity)
-                  }}</span>
-                  <code v-if="diagnostic.code" class="error-code"
-                    >TS{{ diagnostic.code }}</code
-                  >
+                  <span class="severity-icon">{{ getSeverityIcon(diagnostic.severity) }}</span>
+                  <code v-if="diagnostic.code" class="error-code">TS{{ diagnostic.code }}</code>
                   <span class="location-badge">
                     {{ diagnostic.startLine }}:{{ diagnostic.startColumn }}
                   </span>
                 </div>
-                <div
-                  class="diagnostic-message"
-                  v-html="formatMessage(diagnostic.message)"
-                ></div>
+                <div class="diagnostic-message" v-html="formatMessage(diagnostic.message)"></div>
                 <div v-if="diagnostic.help" class="diagnostic-help">
                   <div class="help-header">
                     <span class="help-icon">?</span>
                     <span class="help-label">Hint</span>
                   </div>
-                  <div
-                    class="help-content"
-                    v-html="formatHelp(diagnostic.help)"
-                  ></div>
+                  <div class="help-content" v-html="formatHelp(diagnostic.help)"></div>
                 </div>
               </div>
             </div>
@@ -1346,7 +1231,8 @@ onUnmounted(() => {
               <span class="output-title">Generated TypeScript</span>
             </div>
             <div class="virtual-ts-notice">
-              Virtual TS is generated internally for type checking. It is not portable and the format may change without notice.
+              Virtual TS is generated internally for type checking. It is not portable and the
+              format may change without notice.
             </div>
             <div v-if="typeCheckResult.virtualTs" class="editor-container">
               <MonacoEditor
@@ -1356,18 +1242,12 @@ onUnmounted(() => {
               />
             </div>
             <div v-else class="empty-state">
-              <span
-                >Enable "Generate Virtual TS" option to see generated
-                TypeScript</span
-              >
+              <span>Enable "Generate Virtual TS" option to see generated TypeScript</span>
             </div>
           </div>
 
           <!-- Capabilities Tab -->
-          <div
-            v-else-if="activeTab === 'capabilities'"
-            class="capabilities-output"
-          >
+          <div v-else-if="activeTab === 'capabilities'" class="capabilities-output">
             <div class="output-header-bar">
               <span class="output-title">Type Checker Capabilities</span>
             </div>
@@ -1382,15 +1262,9 @@ onUnmounted(() => {
               <div class="capability-section">
                 <h3>Available Checks</h3>
                 <div class="checks-list">
-                  <div
-                    v-for="check in capabilities.checks"
-                    :key="check.name"
-                    class="check-item"
-                  >
+                  <div v-for="check in capabilities.checks" :key="check.name" class="check-item">
                     <code class="check-name">{{ check.name }}</code>
-                    <span :class="['check-severity', check.severity]">{{
-                      check.severity
-                    }}</span>
+                    <span :class="['check-severity', check.severity]">{{ check.severity }}</span>
                     <p class="check-description">{{ check.description }}</p>
                   </div>
                 </div>
@@ -1596,11 +1470,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0.75rem;
-  background: linear-gradient(
-    135deg,
-    rgba(59, 130, 246, 0.15),
-    rgba(139, 92, 246, 0.15)
-  );
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15));
   border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 4px;
   margin-bottom: 0.75rem;
@@ -1748,11 +1618,7 @@ onUnmounted(() => {
 .diagnostic-help {
   margin-top: 0.75rem;
   padding: 0.75rem;
-  background: linear-gradient(
-    135deg,
-    rgba(96, 165, 250, 0.08) 0%,
-    rgba(147, 51, 234, 0.05) 100%
-  );
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.08) 0%, rgba(147, 51, 234, 0.05) 100%);
   border: 1px solid rgba(96, 165, 250, 0.2);
   border-radius: 6px;
   font-size: 0.85rem;

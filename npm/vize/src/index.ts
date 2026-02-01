@@ -6,9 +6,4 @@
  * - Configuration utilities for programmatic use
  */
 
-export {
-  defineConfig,
-  loadConfig,
-  type VizeConfig,
-  type LoadConfigOptions,
-} from './config.js';
+export { defineConfig, loadConfig, type VizeConfig, type LoadConfigOptions } from "./config.js";

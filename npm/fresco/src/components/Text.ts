@@ -2,7 +2,7 @@
  * Text Component - Text display
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface TextProps {
   /** Text content (alternative to slot) */
@@ -26,7 +26,7 @@ export interface TextProps {
 }
 
 export const Text = defineComponent({
-  name: 'Text',
+  name: "Text",
   props: {
     content: String,
     wrap: Boolean,
@@ -41,14 +41,20 @@ export const Text = defineComponent({
   setup(props, { slots }) {
     return () => {
       // Get text from content prop or slot
-      const text = props.content ?? slots.default?.()?.map((vnode) => {
-        if (typeof vnode.children === 'string') {
-          return vnode.children;
-        }
-        return '';
-      }).join('') ?? '';
+      const text =
+        props.content ??
+        slots
+          .default?.()
+          ?.map((vnode) => {
+            if (typeof vnode.children === "string") {
+              return vnode.children;
+            }
+            return "";
+          })
+          .join("") ??
+        "";
 
-      return h('text', {
+      return h("text", {
         text,
         wrap: props.wrap,
         fg: props.fg,
@@ -68,47 +74,47 @@ export const Text = defineComponent({
  */
 
 export const ErrorText = defineComponent({
-  name: 'ErrorText',
+  name: "ErrorText",
   props: {
     content: String,
   },
   setup(props, { slots }) {
-    return () => h(Text, { fg: 'red', ...props }, slots);
+    return () => h(Text, { fg: "red", ...props }, slots);
   },
 });
 
 export const WarningText = defineComponent({
-  name: 'WarningText',
+  name: "WarningText",
   props: {
     content: String,
   },
   setup(props, { slots }) {
-    return () => h(Text, { fg: 'yellow', ...props }, slots);
+    return () => h(Text, { fg: "yellow", ...props }, slots);
   },
 });
 
 export const SuccessText = defineComponent({
-  name: 'SuccessText',
+  name: "SuccessText",
   props: {
     content: String,
   },
   setup(props, { slots }) {
-    return () => h(Text, { fg: 'green', ...props }, slots);
+    return () => h(Text, { fg: "green", ...props }, slots);
   },
 });
 
 export const InfoText = defineComponent({
-  name: 'InfoText',
+  name: "InfoText",
   props: {
     content: String,
   },
   setup(props, { slots }) {
-    return () => h(Text, { fg: 'blue', ...props }, slots);
+    return () => h(Text, { fg: "blue", ...props }, slots);
   },
 });
 
 export const MutedText = defineComponent({
-  name: 'MutedText',
+  name: "MutedText",
   props: {
     content: String,
   },

@@ -2,7 +2,7 @@
  * Link Component - Clickable/styled link
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface LinkProps {
   /** Link text */
@@ -18,7 +18,7 @@ export interface LinkProps {
 }
 
 export const Link = defineComponent({
-  name: 'Link',
+  name: "Link",
   props: {
     text: {
       type: String,
@@ -27,7 +27,7 @@ export const Link = defineComponent({
     url: String,
     fg: {
       type: String,
-      default: 'blue',
+      default: "blue",
     },
     underline: {
       type: Boolean,
@@ -38,27 +38,25 @@ export const Link = defineComponent({
       default: false,
     },
   },
-  emits: ['click'],
+  emits: ["click"],
   setup(props, { emit }) {
     return () => {
       const parts = [
         h(
-          'text',
+          "text",
           {
             fg: props.fg,
             underline: props.underline,
           },
-          props.text
+          props.text,
         ),
       ];
 
       if (props.showUrl && props.url) {
-        parts.push(
-          h('text', { dim: true }, ` (${props.url})`)
-        );
+        parts.push(h("text", { dim: true }, ` (${props.url})`));
       }
 
-      return h('box', { style: { flex_direction: 'row' } }, parts);
+      return h("box", { style: { flex_direction: "row" } }, parts);
     };
   },
 });

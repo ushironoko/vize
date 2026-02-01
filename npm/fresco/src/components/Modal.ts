@@ -2,7 +2,7 @@
  * Modal Component - Overlay dialog
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface ModalProps {
   /** Whether the modal is visible */
@@ -14,7 +14,7 @@ export interface ModalProps {
   /** Modal height */
   height?: number | string;
   /** Border style */
-  border?: 'single' | 'double' | 'rounded' | 'heavy';
+  border?: "single" | "double" | "rounded" | "heavy";
   /** Title foreground color */
   titleFg?: string;
   /** Border foreground color */
@@ -24,7 +24,7 @@ export interface ModalProps {
 }
 
 export const Modal = defineComponent({
-  name: 'Modal',
+  name: "Modal",
   props: {
     visible: {
       type: Boolean,
@@ -33,24 +33,24 @@ export const Modal = defineComponent({
     title: String,
     width: {
       type: [Number, String] as PropType<number | string>,
-      default: '50%',
+      default: "50%",
     },
     height: {
       type: [Number, String] as PropType<number | string>,
-      default: 'auto',
+      default: "auto",
     },
     border: {
-      type: String as PropType<ModalProps['border']>,
-      default: 'rounded',
+      type: String as PropType<ModalProps["border"]>,
+      default: "rounded",
     },
     titleFg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     borderFg: String,
     bg: String,
   },
-  emits: ['close'],
+  emits: ["close"],
   setup(props, { slots, emit }) {
     return () => {
       if (!props.visible) {
@@ -63,58 +63,58 @@ export const Modal = defineComponent({
       if (props.title) {
         children.push(
           h(
-            'box',
+            "box",
             {
-              key: 'title',
+              key: "title",
               style: {
-                flex_direction: 'row',
-                justify_content: 'center',
+                flex_direction: "row",
+                justify_content: "center",
                 padding_bottom: 1,
               },
             },
             [
               h(
-                'text',
+                "text",
                 {
                   bold: true,
                   fg: props.titleFg,
                 },
-                props.title
+                props.title,
               ),
-            ]
-          )
+            ],
+          ),
         );
       }
 
       // Content
       children.push(
         h(
-          'box',
+          "box",
           {
-            key: 'content',
+            key: "content",
             style: { flex_grow: 1 },
           },
-          slots.default?.()
-        )
+          slots.default?.(),
+        ),
       );
 
       // Modal container with centering
       return h(
-        'box',
+        "box",
         {
           style: {
-            justify_content: 'center',
-            align_items: 'center',
-            width: '100%',
-            height: '100%',
+            justify_content: "center",
+            align_items: "center",
+            width: "100%",
+            height: "100%",
           },
         },
         [
           h(
-            'box',
+            "box",
             {
               style: {
-                flex_direction: 'column',
+                flex_direction: "column",
                 width: String(props.width),
                 height: String(props.height),
                 padding: 1,
@@ -123,9 +123,9 @@ export const Modal = defineComponent({
               fg: props.borderFg,
               bg: props.bg,
             },
-            children
+            children,
           ),
-        ]
+        ],
       );
     };
   },

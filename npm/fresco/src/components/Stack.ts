@@ -2,55 +2,55 @@
  * Stack Component - Horizontal/Vertical stack layout helper
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface StackProps {
   /** Stack direction */
-  direction?: 'horizontal' | 'vertical';
+  direction?: "horizontal" | "vertical";
   /** Gap between children */
   gap?: number;
   /** Align items */
-  align?: 'start' | 'center' | 'end' | 'stretch';
+  align?: "start" | "center" | "end" | "stretch";
   /** Justify content */
-  justify?: 'start' | 'center' | 'end' | 'between' | 'around' | 'evenly';
+  justify?: "start" | "center" | "end" | "between" | "around" | "evenly";
   /** Wrap children */
   wrap?: boolean;
 }
 
 const ALIGN_MAP: Record<string, string> = {
-  start: 'flex-start',
-  center: 'center',
-  end: 'flex-end',
-  stretch: 'stretch',
+  start: "flex-start",
+  center: "center",
+  end: "flex-end",
+  stretch: "stretch",
 };
 
 const JUSTIFY_MAP: Record<string, string> = {
-  start: 'flex-start',
-  center: 'center',
-  end: 'flex-end',
-  between: 'space-between',
-  around: 'space-around',
-  evenly: 'space-evenly',
+  start: "flex-start",
+  center: "center",
+  end: "flex-end",
+  between: "space-between",
+  around: "space-around",
+  evenly: "space-evenly",
 };
 
 export const Stack = defineComponent({
-  name: 'Stack',
+  name: "Stack",
   props: {
     direction: {
-      type: String as PropType<'horizontal' | 'vertical'>,
-      default: 'vertical',
+      type: String as PropType<"horizontal" | "vertical">,
+      default: "vertical",
     },
     gap: {
       type: Number,
       default: 0,
     },
     align: {
-      type: String as PropType<StackProps['align']>,
-      default: 'stretch',
+      type: String as PropType<StackProps["align"]>,
+      default: "stretch",
     },
     justify: {
-      type: String as PropType<StackProps['justify']>,
-      default: 'start',
+      type: String as PropType<StackProps["justify"]>,
+      default: "start",
     },
     wrap: {
       type: Boolean,
@@ -60,17 +60,17 @@ export const Stack = defineComponent({
   setup(props, { slots }) {
     return () => {
       return h(
-        'box',
+        "box",
         {
           style: {
-            flex_direction: props.direction === 'horizontal' ? 'row' : 'column',
+            flex_direction: props.direction === "horizontal" ? "row" : "column",
             gap: props.gap,
-            align_items: ALIGN_MAP[props.align ?? 'stretch'],
-            justify_content: JUSTIFY_MAP[props.justify ?? 'start'],
-            flex_wrap: props.wrap ? 'wrap' : 'nowrap',
+            align_items: ALIGN_MAP[props.align ?? "stretch"],
+            justify_content: JUSTIFY_MAP[props.justify ?? "start"],
+            flex_wrap: props.wrap ? "wrap" : "nowrap",
           },
         },
-        slots.default?.()
+        slots.default?.(),
       );
     };
   },
@@ -78,35 +78,25 @@ export const Stack = defineComponent({
 
 // Convenience components
 export const HStack = defineComponent({
-  name: 'HStack',
+  name: "HStack",
   props: {
     gap: { type: Number, default: 1 },
-    align: String as PropType<StackProps['align']>,
-    justify: String as PropType<StackProps['justify']>,
+    align: String as PropType<StackProps["align"]>,
+    justify: String as PropType<StackProps["justify"]>,
   },
   setup(props, { slots }) {
-    return () =>
-      h(
-        Stack,
-        { direction: 'horizontal', ...props },
-        slots.default
-      );
+    return () => h(Stack, { direction: "horizontal", ...props }, slots.default);
   },
 });
 
 export const VStack = defineComponent({
-  name: 'VStack',
+  name: "VStack",
   props: {
     gap: { type: Number, default: 0 },
-    align: String as PropType<StackProps['align']>,
-    justify: String as PropType<StackProps['justify']>,
+    align: String as PropType<StackProps["align"]>,
+    justify: String as PropType<StackProps["justify"]>,
   },
   setup(props, { slots }) {
-    return () =>
-      h(
-        Stack,
-        { direction: 'vertical', ...props },
-        slots.default
-      );
+    return () => h(Stack, { direction: "vertical", ...props }, slots.default);
   },
 });

@@ -84,7 +84,7 @@ export interface ArtMetadata {
   component?: string;
   category?: string;
   tags: string[];
-  status: 'draft' | 'ready' | 'deprecated';
+  status: "draft" | "ready" | "deprecated";
   order?: number;
 }
 

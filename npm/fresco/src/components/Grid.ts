@@ -2,7 +2,7 @@
  * Grid Component - Grid layout helper
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface GridProps {
   /** Number of columns */
@@ -16,7 +16,7 @@ export interface GridProps {
 }
 
 export const Grid = defineComponent({
-  name: 'Grid',
+  name: "Grid",
   props: {
     columns: {
       type: Number,
@@ -49,35 +49,35 @@ export const Grid = defineComponent({
       const columnGap = props.columnGap ?? props.gap;
 
       return h(
-        'box',
+        "box",
         {
           style: {
-            flex_direction: 'column',
+            flex_direction: "column",
             gap: rowGap,
           },
         },
         rows.map((row, rowIndex) =>
           h(
-            'box',
+            "box",
             {
               key: `row-${rowIndex}`,
               style: {
-                flex_direction: 'row',
+                flex_direction: "row",
                 gap: columnGap,
               },
             },
             row.map((cell, cellIndex) =>
               h(
-                'box',
+                "box",
                 {
                   key: `cell-${rowIndex}-${cellIndex}`,
                   style: { flex_grow: 1 },
                 },
-                [cell]
-              )
-            )
-          )
-        )
+                [cell],
+              ),
+            ),
+          ),
+        ),
       );
     };
   },

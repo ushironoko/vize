@@ -2,7 +2,7 @@
  * StatusBar Component - Status bar (typically at bottom of screen)
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface StatusBarItem {
   key: string;
@@ -10,7 +10,7 @@ export interface StatusBarItem {
   fg?: string;
   bg?: string;
   bold?: boolean;
-  align?: 'left' | 'right';
+  align?: "left" | "right";
 }
 
 export interface StatusBarProps {
@@ -25,7 +25,7 @@ export interface StatusBarProps {
 }
 
 export const StatusBar = defineComponent({
-  name: 'StatusBar',
+  name: "StatusBar",
   props: {
     items: {
       type: Array as PropType<StatusBarItem[]>,
@@ -33,70 +33,66 @@ export const StatusBar = defineComponent({
     },
     bg: {
       type: String,
-      default: 'blue',
+      default: "blue",
     },
     fg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     separator: {
       type: String,
-      default: ' │ ',
+      default: " │ ",
     },
   },
   setup(props) {
     return () => {
-      const leftItems = props.items.filter((item) => item.align !== 'right');
-      const rightItems = props.items.filter((item) => item.align === 'right');
+      const leftItems = props.items.filter((item) => item.align !== "right");
+      const rightItems = props.items.filter((item) => item.align === "right");
 
       const renderItems = (items: StatusBarItem[]): VNode[] => {
         const result: VNode[] = [];
         items.forEach((item, index) => {
           if (index > 0) {
             result.push(
-              h('text', { key: `sep-${item.key}`, fg: props.fg, bg: props.bg, dim: true }, props.separator)
+              h(
+                "text",
+                { key: `sep-${item.key}`, fg: props.fg, bg: props.bg, dim: true },
+                props.separator,
+              ),
             );
           }
           result.push(
             h(
-              'text',
+              "text",
               {
                 key: item.key,
                 fg: item.fg ?? props.fg,
                 bg: item.bg ?? props.bg,
                 bold: item.bold,
               },
-              item.content
-            )
+              item.content,
+            ),
           );
         });
         return result;
       };
 
       return h(
-        'box',
+        "box",
         {
           bg: props.bg,
           style: {
-            flex_direction: 'row',
-            justify_content: 'space-between',
-            width: '100%',
+            flex_direction: "row",
+            justify_content: "space-between",
+            width: "100%",
             padding_left: 1,
             padding_right: 1,
           },
         },
         [
-          h(
-            'box',
-            { key: 'left', style: { flex_direction: 'row' } },
-            renderItems(leftItems)
-          ),
-          h(
-            'box',
-            { key: 'right', style: { flex_direction: 'row' } },
-            renderItems(rightItems)
-          ),
-        ]
+          h("box", { key: "left", style: { flex_direction: "row" } }, renderItems(leftItems)),
+          h("box", { key: "right", style: { flex_direction: "row" } }, renderItems(rightItems)),
+        ],
       );
     };
   },

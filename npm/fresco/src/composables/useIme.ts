@@ -2,7 +2,7 @@
  * useIme - IME (Input Method Editor) composable
  */
 
-import { ref, computed, type Ref } from '@vue/runtime-core';
+import { ref, computed, type Ref } from "@vue/runtime-core";
 
 export interface UseImeOptions {
   /** Initial IME mode */
@@ -16,13 +16,13 @@ export interface UseImeOptions {
 }
 
 export type ImeMode =
-  | 'direct'
-  | 'hiragana'
-  | 'katakana'
-  | 'half-katakana'
-  | 'full-alpha'
-  | 'pinyin'
-  | 'hangul';
+  | "direct"
+  | "hiragana"
+  | "katakana"
+  | "half-katakana"
+  | "full-alpha"
+  | "pinyin"
+  | "hangul";
 
 export interface ImeManager {
   /** Whether IME is active */
@@ -62,27 +62,27 @@ export interface ImeManager {
 }
 
 const MODE_DISPLAY: Record<ImeMode, string> = {
-  direct: 'A',
-  hiragana: 'あ',
-  katakana: 'ア',
-  'half-katakana': 'ｱ',
-  'full-alpha': 'Ａ',
-  pinyin: '拼',
-  hangul: '한',
+  direct: "A",
+  hiragana: "あ",
+  katakana: "ア",
+  "half-katakana": "ｱ",
+  "full-alpha": "Ａ",
+  pinyin: "拼",
+  hangul: "한",
 };
 
 export function useIme(options: UseImeOptions = {}): ImeManager {
-  const { mode: initialMode = 'direct', onModeChange, onCompositionUpdate, onCommit } = options;
+  const { mode: initialMode = "direct", onModeChange, onCompositionUpdate, onCommit } = options;
 
   const isActive = ref(false);
   const mode = ref<ImeMode>(initialMode);
   const isComposing = ref(false);
-  const preedit = ref('');
+  const preedit = ref("");
   const preeditCursor = ref(0);
   const candidates = ref<string[]>([]);
   const selectedCandidate = ref(0);
 
-  const modeDisplay = computed(() => MODE_DISPLAY[mode.value] ?? 'A');
+  const modeDisplay = computed(() => MODE_DISPLAY[mode.value] ?? "A");
 
   const enable = () => {
     isActive.value = true;
@@ -102,27 +102,27 @@ export function useIme(options: UseImeOptions = {}): ImeManager {
   };
 
   const handleKey = (key: string, modifiers: { ctrl: boolean; alt: boolean }): boolean => {
-    if (!isActive.value || mode.value === 'direct') {
+    if (!isActive.value || mode.value === "direct") {
       return false;
     }
 
     // IME mode toggle (usually Ctrl+Space or similar)
     // If we're here, mode is not 'direct' (filtered above), so toggle to 'direct'
-    if (modifiers.ctrl && key === ' ') {
-      setMode('direct');
+    if (modifiers.ctrl && key === " ") {
+      setMode("direct");
       return true;
     }
 
     // Handle composition
     if (isComposing.value) {
       switch (key) {
-        case 'enter':
+        case "enter":
           commit();
           return true;
-        case 'escape':
+        case "escape":
           cancel();
           return true;
-        case 'backspace':
+        case "backspace":
           if (preedit.value.length > 0) {
             preedit.value = preedit.value.slice(0, -1);
             preeditCursor.value = Math.min(preeditCursor.value, preedit.value.length);
@@ -130,7 +130,7 @@ export function useIme(options: UseImeOptions = {}): ImeManager {
             return true;
           }
           break;
-        case 'space':
+        case "space":
           // Convert / select candidate
           if (candidates.value.length > 0) {
             nextCandidate();
@@ -165,7 +165,7 @@ export function useIme(options: UseImeOptions = {}): ImeManager {
       const text = candidates.value[selectedCandidate.value] ?? preedit.value;
       onCommit?.(text);
     }
-    preedit.value = '';
+    preedit.value = "";
     preeditCursor.value = 0;
     candidates.value = [];
     selectedCandidate.value = 0;
@@ -173,7 +173,7 @@ export function useIme(options: UseImeOptions = {}): ImeManager {
   };
 
   const cancel = () => {
-    preedit.value = '';
+    preedit.value = "";
     preeditCursor.value = 0;
     candidates.value = [];
     selectedCandidate.value = 0;

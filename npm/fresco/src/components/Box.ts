@@ -2,25 +2,25 @@
  * Box Component - Container with flexbox layout
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface BoxProps {
   /** Flex direction */
-  flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse';
+  flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
   /** Flex wrap */
-  flexWrap?: 'nowrap' | 'wrap' | 'wrap-reverse';
+  flexWrap?: "nowrap" | "wrap" | "wrap-reverse";
   /** Justify content */
   justifyContent?:
-    | 'flex-start'
-    | 'flex-end'
-    | 'center'
-    | 'space-between'
-    | 'space-around'
-    | 'space-evenly';
+    | "flex-start"
+    | "flex-end"
+    | "center"
+    | "space-between"
+    | "space-around"
+    | "space-evenly";
   /** Align items */
-  alignItems?: 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
+  alignItems?: "flex-start" | "flex-end" | "center" | "stretch" | "baseline";
   /** Align self */
-  alignSelf?: 'auto' | 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
+  alignSelf?: "auto" | "flex-start" | "flex-end" | "center" | "stretch" | "baseline";
   /** Flex grow */
   flexGrow?: number;
   /** Flex shrink */
@@ -68,7 +68,7 @@ export interface BoxProps {
   /** Gap between children */
   gap?: number;
   /** Border style */
-  border?: 'none' | 'single' | 'double' | 'rounded' | 'heavy' | 'dashed';
+  border?: "none" | "single" | "double" | "rounded" | "heavy" | "dashed";
   /** Foreground color */
   fg?: string;
   /** Background color */
@@ -76,13 +76,13 @@ export interface BoxProps {
 }
 
 export const Box = defineComponent({
-  name: 'Box',
+  name: "Box",
   props: {
-    flexDirection: String as PropType<BoxProps['flexDirection']>,
-    flexWrap: String as PropType<BoxProps['flexWrap']>,
-    justifyContent: String as PropType<BoxProps['justifyContent']>,
-    alignItems: String as PropType<BoxProps['alignItems']>,
-    alignSelf: String as PropType<BoxProps['alignSelf']>,
+    flexDirection: String as PropType<BoxProps["flexDirection"]>,
+    flexWrap: String as PropType<BoxProps["flexWrap"]>,
+    justifyContent: String as PropType<BoxProps["justifyContent"]>,
+    alignItems: String as PropType<BoxProps["alignItems"]>,
+    alignSelf: String as PropType<BoxProps["alignSelf"]>,
     flexGrow: Number,
     flexShrink: Number,
     width: [Number, String] as PropType<number | string>,
@@ -106,7 +106,7 @@ export const Box = defineComponent({
     marginBottom: Number,
     marginLeft: Number,
     gap: Number,
-    border: String as PropType<BoxProps['border']>,
+    border: String as PropType<BoxProps["border"]>,
     fg: String,
     bg: String,
   },
@@ -164,14 +164,14 @@ export const Box = defineComponent({
       if (props.gap !== undefined) style.gap = props.gap;
 
       return h(
-        'box',
+        "box",
         {
           style,
           border: props.border,
           fg: props.fg,
           bg: props.bg,
         },
-        slots.default?.()
+        slots.default?.(),
       );
     };
   },

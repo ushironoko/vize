@@ -2,9 +2,9 @@
  * Tooltip Component - Tooltip overlay
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
-export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
+export type TooltipPosition = "top" | "bottom" | "left" | "right";
 
 export interface TooltipProps {
   /** Tooltip text */
@@ -14,7 +14,7 @@ export interface TooltipProps {
   /** Tooltip position */
   position?: TooltipPosition;
   /** Border style */
-  border?: 'single' | 'rounded' | 'none';
+  border?: "single" | "rounded" | "none";
   /** Background color */
   bg?: string;
   /** Foreground color */
@@ -22,7 +22,7 @@ export interface TooltipProps {
 }
 
 export const Tooltip = defineComponent({
-  name: 'Tooltip',
+  name: "Tooltip",
   props: {
     text: {
       type: String,
@@ -34,19 +34,19 @@ export const Tooltip = defineComponent({
     },
     position: {
       type: String as PropType<TooltipPosition>,
-      default: 'top',
+      default: "top",
     },
     border: {
-      type: String as PropType<TooltipProps['border']>,
-      default: 'rounded',
+      type: String as PropType<TooltipProps["border"]>,
+      default: "rounded",
     },
     bg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     fg: {
       type: String,
-      default: 'black',
+      default: "black",
     },
   },
   setup(props, { slots }) {
@@ -54,14 +54,14 @@ export const Tooltip = defineComponent({
       const content = slots.default?.();
 
       if (!props.visible) {
-        return h('box', {}, content);
+        return h("box", {}, content);
       }
 
       const tooltip = h(
-        'box',
+        "box",
         {
-          key: 'tooltip',
-          border: props.border === 'none' ? undefined : props.border,
+          key: "tooltip",
+          border: props.border === "none" ? undefined : props.border,
           bg: props.bg,
           fg: props.fg,
           style: {
@@ -69,39 +69,33 @@ export const Tooltip = defineComponent({
             padding_right: 1,
           },
         },
-        [h('text', { fg: props.fg, bg: props.bg }, props.text)]
+        [h("text", { fg: props.fg, bg: props.bg }, props.text)],
       );
 
       const children: VNode[] = [];
 
       switch (props.position) {
-        case 'top':
+        case "top":
           children.push(tooltip);
-          children.push(h('box', { key: 'content' }, content));
+          children.push(h("box", { key: "content" }, content));
           break;
-        case 'bottom':
-          children.push(h('box', { key: 'content' }, content));
+        case "bottom":
+          children.push(h("box", { key: "content" }, content));
           children.push(tooltip);
           break;
-        case 'left':
-          return h(
-            'box',
-            { style: { flex_direction: 'row' } },
-            [tooltip, h('box', { key: 'content' }, content)]
-          );
-        case 'right':
-          return h(
-            'box',
-            { style: { flex_direction: 'row' } },
-            [h('box', { key: 'content' }, content), tooltip]
-          );
+        case "left":
+          return h("box", { style: { flex_direction: "row" } }, [
+            tooltip,
+            h("box", { key: "content" }, content),
+          ]);
+        case "right":
+          return h("box", { style: { flex_direction: "row" } }, [
+            h("box", { key: "content" }, content),
+            tooltip,
+          ]);
       }
 
-      return h(
-        'box',
-        { style: { flex_direction: 'column' } },
-        children
-      );
+      return h("box", { style: { flex_direction: "column" } }, children);
     };
   },
 });

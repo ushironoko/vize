@@ -2,8 +2,8 @@
  * TextInput Component - Text input with builtin cursor management and IME support
  */
 
-import { defineComponent, h, ref, watch, computed, type PropType } from '@vue/runtime-core';
-import { useInput } from '../composables/useInput.js';
+import { defineComponent, h, ref, watch, computed, type PropType } from "@vue/runtime-core";
+import { useInput } from "../composables/useInput.js";
 
 export interface TextInputProps {
   /** Input value (v-model) */
@@ -23,7 +23,7 @@ export interface TextInputProps {
   /** Background color */
   bg?: string;
   /** Called when value changes */
-  'onUpdate:modelValue'?: (value: string) => void;
+  "onUpdate:modelValue"?: (value: string) => void;
   /** Called when submitted (Enter) */
   onSubmit?: (value: string) => void;
   /** Called when escape is pressed */
@@ -31,15 +31,15 @@ export interface TextInputProps {
 }
 
 export const TextInput = defineComponent({
-  name: 'TextInput',
+  name: "TextInput",
   props: {
     modelValue: {
       type: String,
-      default: '',
+      default: "",
     },
     placeholder: {
       type: String,
-      default: '',
+      default: "",
     },
     focus: {
       type: Boolean,
@@ -51,13 +51,13 @@ export const TextInput = defineComponent({
     },
     maskChar: {
       type: String,
-      default: '*',
+      default: "*",
     },
     width: [Number, String] as PropType<number | string>,
     fg: String,
     bg: String,
   },
-  emits: ['update:modelValue', 'submit', 'cancel'],
+  emits: ["update:modelValue", "submit", "cancel"],
   setup(props, { emit }) {
     const internalValue = ref(props.modelValue);
     const cursorPos = ref(props.modelValue.length);
@@ -71,13 +71,13 @@ export const TextInput = defineComponent({
         if (cursorPos.value > newValue.length) {
           cursorPos.value = newValue.length;
         }
-      }
+      },
     );
 
     // Update value and emit
     const updateValue = (value: string) => {
       internalValue.value = value;
-      emit('update:modelValue', value);
+      emit("update:modelValue", value);
     };
 
     // Insert text at cursor position
@@ -141,28 +141,28 @@ export const TextInput = defineComponent({
         insertText(char);
       },
       onArrow: (direction) => {
-        if (direction === 'left') moveLeft();
-        if (direction === 'right') moveRight();
+        if (direction === "left") moveLeft();
+        if (direction === "right") moveRight();
       },
       onKey: (key, modifiers) => {
-        if (key === 'backspace') {
+        if (key === "backspace") {
           deleteBack();
-        } else if (key === 'delete') {
+        } else if (key === "delete") {
           deleteForward();
-        } else if (key === 'home') {
+        } else if (key === "home") {
           moveToStart();
-        } else if (key === 'end') {
+        } else if (key === "end") {
           moveToEnd();
-        } else if (key === 'a' && modifiers.ctrl) {
+        } else if (key === "a" && modifiers.ctrl) {
           // Ctrl+A - select all (move to end for now)
           moveToEnd();
         }
       },
       onSubmit: () => {
-        emit('submit', internalValue.value);
+        emit("submit", internalValue.value);
       },
       onEscape: () => {
-        emit('cancel');
+        emit("cancel");
       },
     });
 
@@ -172,13 +172,13 @@ export const TextInput = defineComponent({
         style.width = String(props.width);
       }
 
-      return h('input', {
+      return h("input", {
         value: internalValue.value,
         placeholder: props.placeholder,
         focused: props.focus,
         cursor: cursorPos.value,
         mask: props.mask,
-        'mask-char': props.maskChar,
+        "mask-char": props.maskChar,
         style,
         fg: props.fg,
         bg: props.bg,
@@ -191,30 +191,30 @@ export const TextInput = defineComponent({
  * Password input variant
  */
 export const PasswordInput = defineComponent({
-  name: 'PasswordInput',
+  name: "PasswordInput",
   props: {
     modelValue: {
       type: String,
-      default: '',
+      default: "",
     },
     placeholder: {
       type: String,
-      default: 'Enter password...',
+      default: "Enter password...",
     },
     focus: Boolean,
     width: [Number, String] as PropType<number | string>,
     fg: String,
     bg: String,
   },
-  emits: ['update:modelValue', 'submit', 'cancel'],
+  emits: ["update:modelValue", "submit", "cancel"],
   setup(props, { emit }) {
     return () =>
       h(TextInput, {
         ...props,
         mask: true,
-        'onUpdate:modelValue': (v: string) => emit('update:modelValue', v),
-        onSubmit: (v: string) => emit('submit', v),
-        onCancel: () => emit('cancel'),
+        "onUpdate:modelValue": (v: string) => emit("update:modelValue", v),
+        onSubmit: (v: string) => emit("submit", v),
+        onCancel: () => emit("cancel"),
       });
   },
 });

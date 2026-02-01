@@ -14,7 +14,7 @@ export interface SfcCompileResultNapi {
 
 export type CompileSfcFn = (
   source: string,
-  options?: SfcCompileOptionsNapi
+  options?: SfcCompileOptionsNapi,
 ) => SfcCompileResultNapi;
 
 export interface VizeOptions {
@@ -79,7 +79,7 @@ export interface VizeOptions {
    * - false: Disable config file loading
    * @default 'root'
    */
-  configMode?: 'root' | 'auto' | false;
+  configMode?: "root" | "auto" | false;
 
   /**
    * Custom config file path (overrides automatic search)
@@ -135,5 +135,5 @@ export interface BatchCompileResultWithFiles {
 
 export type CompileSfcBatchWithResultsFn = (
   files: BatchFileInput[],
-  options?: BatchCompileOptionsNapi
+  options?: BatchCompileOptionsNapi,
 ) => BatchCompileResultWithFiles;

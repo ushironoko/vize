@@ -1,42 +1,24 @@
 import { defineConfig } from "vitest/config";
-import vue from "@vitejs/plugin-vue";
+import { vize } from "@vizejs/vite-plugin";
 import { playwright } from "@vitest/browser-playwright";
 
-async function getVuePlugin() {
-  try {
-    const { vize } = await import("@vizejs/vite-plugin");
-    console.log("[vitest.config] Using Vize for Vue SFC compilation");
-    return vize();
-  } catch (e) {
-    console.warn(
-      "[vitest.config] Failed to load Vize, falling back to @vitejs/plugin-vue:",
-      e,
-    );
-    return vue();
-  }
-}
-
-export default defineConfig(async () => {
-  const vuePlugin = await getVuePlugin();
-
-  return {
-    plugins: [vuePlugin],
-    resolve: {
-      dedupe: ["vue"],
+export default defineConfig({
+  plugins: [vize()],
+  resolve: {
+    dedupe: ["vue"],
+  },
+  test: {
+    browser: {
+      enabled: true,
+      provider: playwright(),
+      instances: [{ browser: "chromium" }],
     },
-    test: {
-      browser: {
-        enabled: true,
-        provider: playwright(),
-        instances: [{ browser: "chromium" }],
-      },
-      include: ["src/**/*.test.ts", "e2e/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "e2e/**/*.test.ts"],
+  },
+  server: {
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
     },
-    server: {
-      headers: {
-        "Cross-Origin-Opener-Policy": "same-origin",
-        "Cross-Origin-Embedder-Policy": "require-corp",
-      },
-    },
-  };
+  },
 });

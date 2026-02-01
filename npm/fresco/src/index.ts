@@ -5,14 +5,14 @@
  */
 
 // Core
-export { createApp, type App, type AppOptions, lastKeyEvent, type KeyEvent } from './app.js';
-export { createRenderer } from './renderer.js';
+export { createApp, type App, type AppOptions, lastKeyEvent, type KeyEvent } from "./app.js";
+export { createRenderer } from "./renderer.js";
 
 // Components
-export * from './components/index.js';
+export * from "./components/index.js";
 
 // Composables
-export * from './composables/index.js';
+export * from "./composables/index.js";
 
 // Re-export native bindings types
 export type {
@@ -22,4 +22,4 @@ export type {
   InputEventNapi,
   ImeStateNapi,
   TerminalInfoNapi,
-} from '@vizejs/fresco-native';
+} from "@vizejs/fresco-native";

@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from 'vue';
-import MonacoEditor from './MonacoEditor.vue';
-import type { Diagnostic } from './MonacoEditor.vue';
-import type { WasmModule, AnalysisResult, BindingDisplay, BindingSource, ScopeDisplay } from '../wasm/index';
+import { ref, watch, computed, onMounted } from "vue";
+import MonacoEditor from "./MonacoEditor.vue";
+import type { Diagnostic } from "./MonacoEditor.vue";
+import type {
+  WasmModule,
+  AnalysisResult,
+  BindingDisplay,
+  BindingSource,
+  ScopeDisplay,
+} from "../wasm/index";
 
 const props = defineProps<{
   compiler: WasmModule | null;
@@ -163,21 +169,21 @@ button {
 const source = ref(ANALYSIS_PRESET);
 const analysisResult = ref<AnalysisResult | null>(null);
 const error = ref<string | null>(null);
-const activeTab = ref<'vir' | 'stats' | 'bindings' | 'scopes' | 'diagnostics'>('vir');
+const activeTab = ref<"vir" | "stats" | "bindings" | "scopes" | "diagnostics">("vir");
 const showScopeVisualization = ref(true);
 
 // Convert scopes to Monaco editor decorations (exclude module scope and global scopes with no position)
 const scopeDecorations = computed(() => {
   if (!scopes.value) return [];
   return scopes.value
-    .filter(scope => {
+    .filter((scope) => {
       // Don't visualize module scope (covers entire file)
-      if (scope.kind === 'mod') return false;
+      if (scope.kind === "mod") return false;
       // Don't visualize global scopes (start/end = 0)
       if (scope.start === 0 && scope.end === 0) return false;
       return true;
     })
-    .map(scope => ({
+    .map((scope) => ({
       start: scope.start,
       end: scope.end,
       kind: scope.kind,
@@ -189,7 +195,7 @@ const analysisTime = ref<number | null>(null);
 // Perform analysis
 async function analyze() {
   if (!props.compiler) {
-    error.value = 'Compiler not loaded';
+    error.value = "Compiler not loaded";
     return;
   }
 
@@ -198,7 +204,7 @@ async function analyze() {
 
   try {
     const result = props.compiler.analyzeSfc(source.value, {
-      filename: 'Component.vue',
+      filename: "Component.vue",
     });
     analysisResult.value = result;
     analysisTime.value = performance.now() - startTime;
@@ -210,17 +216,24 @@ async function analyze() {
 
 // Watch for source changes and re-analyze
 let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
-watch(source, () => {
-  if (analyzeTimer) clearTimeout(analyzeTimer);
-  analyzeTimer = setTimeout(analyze, 300);
-}, { immediate: false });
+watch(
+  source,
+  () => {
+    if (analyzeTimer) clearTimeout(analyzeTimer);
+    analyzeTimer = setTimeout(analyze, 300);
+  },
+  { immediate: false },
+);
 
 // Watch for compiler changes
-watch(() => props.compiler, () => {
-  if (props.compiler) {
-    analyze();
-  }
-});
+watch(
+  () => props.compiler,
+  () => {
+    if (props.compiler) {
+      analyze();
+    }
+  },
+);
 
 // Analyze on mount
 onMounted(() => {
@@ -243,7 +256,7 @@ const stats = computed(() => summary.value?.stats);
 // Convert character offset to line/column (1-based for Monaco)
 function offsetToLineColumn(content: string, offset: number): { line: number; column: number } {
   const beforeOffset = content.substring(0, offset);
-  const lines = beforeOffset.split('\n');
+  const lines = beforeOffset.split("\n");
   return {
     line: lines.length,
     column: lines[lines.length - 1].length + 1,
@@ -252,7 +265,7 @@ function offsetToLineColumn(content: string, offset: number): { line: number; co
 
 // Monaco-compatible diagnostics (converted from offset-based to line/column)
 const monacoDiagnostics = computed<Diagnostic[]>(() => {
-  return diagnostics.value.map(d => {
+  return diagnostics.value.map((d) => {
     const start = offsetToLineColumn(source.value, d.start);
     const end = offsetToLineColumn(source.value, d.end);
     return {
@@ -261,7 +274,7 @@ const monacoDiagnostics = computed<Diagnostic[]>(() => {
       startColumn: start.column,
       endLine: end.line,
       endColumn: end.column,
-      severity: d.severity === 'hint' ? 'info' : d.severity as 'error' | 'warning' | 'info',
+      severity: d.severity === "hint" ? "info" : (d.severity as "error" | "warning" | "info"),
     };
   });
 });
@@ -270,7 +283,7 @@ const monacoDiagnostics = computed<Diagnostic[]>(() => {
 const bindingsBySource = computed(() => {
   const groups: Record<string, BindingDisplay[]> = {};
   for (const binding of bindings.value) {
-    const source = binding.source || 'unknown';
+    const source = binding.source || "unknown";
     if (!groups[source]) groups[source] = [];
     groups[source].push(binding);
   }
@@ -278,10 +291,26 @@ const bindingsBySource = computed(() => {
 });
 
 // VIR (Vize Intermediate Representation) text
-const virText = computed(() => analysisResult.value?.vir || '');
+const virText = computed(() => analysisResult.value?.vir || "");
 
 // Token types for VIR syntax highlighting
-type VirTokenType = 'border' | 'section' | 'section-name' | 'macro' | 'type' | 'binding' | 'identifier' | 'tag' | 'source' | 'arrow' | 'number' | 'diagnostic' | 'keyword' | 'colon' | 'bracket' | 'plain';
+type VirTokenType =
+  | "border"
+  | "section"
+  | "section-name"
+  | "macro"
+  | "type"
+  | "binding"
+  | "identifier"
+  | "tag"
+  | "source"
+  | "arrow"
+  | "number"
+  | "diagnostic"
+  | "keyword"
+  | "colon"
+  | "bracket"
+  | "plain";
 
 interface VirToken {
   type: VirTokenType;
@@ -305,24 +334,26 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Border characters: ╭╰│├└─┌┐╮╯┤┬┴┼
     const borderMatch = remaining.match(/^[╭╰│├└─┌┐╮╯┤┬┴┼]+/);
     if (borderMatch) {
-      tokens.push({ type: 'border', text: borderMatch[0] });
+      tokens.push({ type: "border", text: borderMatch[0] });
       remaining = remaining.slice(borderMatch[0].length);
       matched = true;
       continue;
     }
 
     // Section marker ■
-    if (remaining.startsWith('■')) {
-      tokens.push({ type: 'section', text: '■' });
+    if (remaining.startsWith("■")) {
+      tokens.push({ type: "section", text: "■" });
       remaining = remaining.slice(1);
       matched = true;
       continue;
     }
 
     // Section names (all caps words)
-    const sectionNameMatch = remaining.match(/^(MACROS|BINDINGS|SCOPES|PROPS|EMITS|CSS|DIAGNOSTICS|STATS|SUMMARY)/);
+    const sectionNameMatch = remaining.match(
+      /^(MACROS|BINDINGS|SCOPES|PROPS|EMITS|CSS|DIAGNOSTICS|STATS|SUMMARY)/,
+    );
     if (sectionNameMatch) {
-      tokens.push({ type: 'section-name', text: sectionNameMatch[0] });
+      tokens.push({ type: "section-name", text: sectionNameMatch[0] });
       remaining = remaining.slice(sectionNameMatch[0].length);
       matched = true;
       continue;
@@ -331,7 +362,7 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Macro names @defineProps, @defineEmits, etc.
     const macroMatch = remaining.match(/^@\w+/);
     if (macroMatch) {
-      tokens.push({ type: 'macro', text: macroMatch[0] });
+      tokens.push({ type: "macro", text: macroMatch[0] });
       remaining = remaining.slice(macroMatch[0].length);
       matched = true;
       continue;
@@ -340,23 +371,23 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Type annotations <...>
     const typeMatch = remaining.match(/^<[^>]+>/);
     if (typeMatch) {
-      tokens.push({ type: 'type', text: typeMatch[0] });
+      tokens.push({ type: "type", text: typeMatch[0] });
       remaining = remaining.slice(typeMatch[0].length);
       matched = true;
       continue;
     }
 
     // Binding marker ▸
-    if (remaining.startsWith('▸')) {
-      tokens.push({ type: 'binding', text: '▸' });
+    if (remaining.startsWith("▸")) {
+      tokens.push({ type: "binding", text: "▸" });
       remaining = remaining.slice(1);
       matched = true;
       continue;
     }
 
     // Arrow →
-    if (remaining.startsWith('→')) {
-      tokens.push({ type: 'arrow', text: '→' });
+    if (remaining.startsWith("→")) {
+      tokens.push({ type: "arrow", text: "→" });
       remaining = remaining.slice(1);
       matched = true;
       continue;
@@ -365,7 +396,7 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Diagnostic icons
     const diagMatch = remaining.match(/^[✗⚠ℹ✓]/);
     if (diagMatch) {
-      tokens.push({ type: 'diagnostic', text: diagMatch[0] });
+      tokens.push({ type: "diagnostic", text: diagMatch[0] });
       remaining = remaining.slice(diagMatch[0].length);
       matched = true;
       continue;
@@ -374,26 +405,30 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Tags in brackets [SetupRef], [Module], etc.
     const tagMatch = remaining.match(/^\[[A-Za-z][A-Za-z0-9_]*\]/);
     if (tagMatch) {
-      tokens.push({ type: 'tag', text: tagMatch[0] });
+      tokens.push({ type: "tag", text: tagMatch[0] });
       remaining = remaining.slice(tagMatch[0].length);
       matched = true;
       continue;
     }
 
     // Keywords like type:, args:, scoped:, etc.
-    const keywordMatch = remaining.match(/^(type|args|scoped|selectors|v-bind|start|end|depth|parent|bindings|children):/);
+    const keywordMatch = remaining.match(
+      /^(type|args|scoped|selectors|v-bind|start|end|depth|parent|bindings|children):/,
+    );
     if (keywordMatch) {
-      tokens.push({ type: 'keyword', text: keywordMatch[1] });
-      tokens.push({ type: 'colon', text: ':' });
+      tokens.push({ type: "keyword", text: keywordMatch[1] });
+      tokens.push({ type: "colon", text: ":" });
       remaining = remaining.slice(keywordMatch[0].length);
       matched = true;
       continue;
     }
 
     // Source types (ref, computed, props, etc.) - after keywords
-    const sourceMatch = remaining.match(/^\b(ref|computed|reactive|props|emits|local|import|function|class|unknown)\b/);
+    const sourceMatch = remaining.match(
+      /^\b(ref|computed|reactive|props|emits|local|import|function|class|unknown)\b/,
+    );
     if (sourceMatch) {
-      tokens.push({ type: 'source', text: sourceMatch[0] });
+      tokens.push({ type: "source", text: sourceMatch[0] });
       remaining = remaining.slice(sourceMatch[0].length);
       matched = true;
       continue;
@@ -402,7 +437,7 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Numbers including ranges like [0:100]
     const numberMatch = remaining.match(/^\d+/);
     if (numberMatch) {
-      tokens.push({ type: 'number', text: numberMatch[0] });
+      tokens.push({ type: "number", text: numberMatch[0] });
       remaining = remaining.slice(numberMatch[0].length);
       matched = true;
       continue;
@@ -411,15 +446,15 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Brackets and braces
     const bracketMatch = remaining.match(/^[\[\]{}()]/);
     if (bracketMatch) {
-      tokens.push({ type: 'bracket', text: bracketMatch[0] });
+      tokens.push({ type: "bracket", text: bracketMatch[0] });
       remaining = remaining.slice(bracketMatch[0].length);
       matched = true;
       continue;
     }
 
     // Colons (standalone)
-    if (remaining.startsWith(':')) {
-      tokens.push({ type: 'colon', text: ':' });
+    if (remaining.startsWith(":")) {
+      tokens.push({ type: "colon", text: ":" });
       remaining = remaining.slice(1);
       matched = true;
       continue;
@@ -428,7 +463,7 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Identifiers (variable names, etc.)
     const identMatch = remaining.match(/^[a-zA-Z_][a-zA-Z0-9_]*/);
     if (identMatch) {
-      tokens.push({ type: 'identifier', text: identMatch[0] });
+      tokens.push({ type: "identifier", text: identMatch[0] });
       remaining = remaining.slice(identMatch[0].length);
       matched = true;
       continue;
@@ -437,7 +472,7 @@ function tokenizeVirLine(line: string): VirToken[] {
     // Whitespace
     const wsMatch = remaining.match(/^\s+/);
     if (wsMatch) {
-      tokens.push({ type: 'plain', text: wsMatch[0] });
+      tokens.push({ type: "plain", text: wsMatch[0] });
       remaining = remaining.slice(wsMatch[0].length);
       matched = true;
       continue;
@@ -445,7 +480,7 @@ function tokenizeVirLine(line: string): VirToken[] {
 
     // Any other character
     if (!matched) {
-      tokens.push({ type: 'plain', text: remaining[0] });
+      tokens.push({ type: "plain", text: remaining[0] });
       remaining = remaining.slice(1);
     }
   }
@@ -455,21 +490,21 @@ function tokenizeVirLine(line: string): VirToken[] {
 
 // Determine line type for overall styling
 function getVirLineType(line: string): string {
-  if (line.startsWith('╭') || line.startsWith('│') || line.startsWith('╰')) return 'header';
-  if (line.includes('■')) return 'section';
-  if (line.includes('@define') || line.includes('┌─ @')) return 'macro';
-  if (line.includes('▸')) return 'binding';
-  if (line.includes('├─') || line.includes('└─')) return 'tree';
-  if (line.includes('✗') || line.includes('⚠')) return 'diagnostic';
-  return 'plain';
+  if (line.startsWith("╭") || line.startsWith("│") || line.startsWith("╰")) return "header";
+  if (line.includes("■")) return "section";
+  if (line.includes("@define") || line.includes("┌─ @")) return "macro";
+  if (line.includes("▸")) return "binding";
+  if (line.includes("├─") || line.includes("└─")) return "tree";
+  if (line.includes("✗") || line.includes("⚠")) return "diagnostic";
+  return "plain";
 }
 
 // Parse VIR text into tokenized lines
 const virLines = computed((): VirLine[] => {
   if (!virText.value) return [];
-  const lines = virText.value.split('\n');
+  const lines = virText.value.split("\n");
   // Remove trailing empty line if present
-  if (lines.length > 0 && lines[lines.length - 1] === '') {
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
     lines.pop();
   }
   return lines.map((line, index) => ({
@@ -482,19 +517,19 @@ const virLines = computed((): VirLine[] => {
 // Source labels
 function getSourceLabel(source: BindingSource | string): string {
   const labels: Record<string, string> = {
-    props: 'Props',
-    emits: 'Emits',
-    model: 'Models',
-    slots: 'Slots',
-    ref: 'Refs',
-    reactive: 'Reactive',
-    computed: 'Computed',
-    import: 'Imports',
-    local: 'Local',
-    function: 'Functions',
-    class: 'Classes',
-    templateRef: 'Template Refs',
-    unknown: 'Other',
+    props: "Props",
+    emits: "Emits",
+    model: "Models",
+    slots: "Slots",
+    ref: "Refs",
+    reactive: "Reactive",
+    computed: "Computed",
+    import: "Imports",
+    local: "Local",
+    function: "Functions",
+    class: "Classes",
+    templateRef: "Template Refs",
+    unknown: "Other",
   };
   return labels[source] || source;
 }
@@ -502,19 +537,19 @@ function getSourceLabel(source: BindingSource | string): string {
 // Source colors
 function getSourceClass(source: BindingSource | string): string {
   const classes: Record<string, string> = {
-    props: 'src-props',
-    emits: 'src-emits',
-    model: 'src-model',
-    slots: 'src-slots',
-    ref: 'src-ref',
-    reactive: 'src-reactive',
-    computed: 'src-computed',
-    import: 'src-import',
-    local: 'src-local',
-    function: 'src-function',
-    class: 'src-class',
+    props: "src-props",
+    emits: "src-emits",
+    model: "src-model",
+    slots: "src-slots",
+    ref: "src-ref",
+    reactive: "src-reactive",
+    computed: "src-computed",
+    import: "src-import",
+    local: "src-local",
+    function: "src-function",
+    class: "src-class",
   };
-  return classes[source] || 'src-default';
+  return classes[source] || "src-default";
 }
 
 // Scope kind colors
@@ -522,64 +557,64 @@ function getScopeColorClass(kind: string): string {
   // Direct mapping for exact matches
   const classes: Record<string, string> = {
     // Module scope
-    mod: 'scope-module',
-    Mod: 'scope-module',
-    module: 'scope-module',
-    Module: 'scope-module',
+    mod: "scope-module",
+    Mod: "scope-module",
+    module: "scope-module",
+    Module: "scope-module",
     // Plain (non-script-setup)
-    plain: 'scope-non-script-setup',
-    Plain: 'scope-non-script-setup',
-    nonScriptSetup: 'scope-non-script-setup',
-    NonScriptSetup: 'scope-non-script-setup',
+    plain: "scope-non-script-setup",
+    Plain: "scope-non-script-setup",
+    nonScriptSetup: "scope-non-script-setup",
+    NonScriptSetup: "scope-non-script-setup",
     // Script setup
-    setup: 'scope-script-setup',
-    Setup: 'scope-script-setup',
-    scriptSetup: 'scope-script-setup',
-    ScriptSetup: 'scope-script-setup',
+    setup: "scope-script-setup",
+    Setup: "scope-script-setup",
+    scriptSetup: "scope-script-setup",
+    ScriptSetup: "scope-script-setup",
     // Function scopes
-    function: 'scope-function',
-    Function: 'scope-function',
-    arrowFunction: 'scope-function',
-    ArrowFunction: 'scope-function',
-    block: 'scope-block',
-    Block: 'scope-block',
-    Callback: 'scope-callback',
+    function: "scope-function",
+    Function: "scope-function",
+    arrowFunction: "scope-function",
+    ArrowFunction: "scope-function",
+    block: "scope-block",
+    Block: "scope-block",
+    Callback: "scope-callback",
     // Template scopes
-    vFor: 'scope-vfor',
-    VFor: 'scope-vfor',
-    vSlot: 'scope-vslot',
-    VSlot: 'scope-vslot',
-    EventHandler: 'scope-event-handler',
+    vFor: "scope-vfor",
+    VFor: "scope-vfor",
+    vSlot: "scope-vslot",
+    VSlot: "scope-vslot",
+    EventHandler: "scope-event-handler",
     // External modules
-    extern: 'scope-external-module',
-    extmod: 'scope-external-module',
-    ExternalModule: 'scope-external-module',
+    extern: "scope-external-module",
+    extmod: "scope-external-module",
+    ExternalModule: "scope-external-module",
     // SSR scopes
-    universal: 'scope-universal',
-    Universal: 'scope-universal',
-    JsGlobal: 'scope-js-global-universal',
-    client: 'scope-client-only',
-    Client: 'scope-client-only',
-    clientOnly: 'scope-client-only',
-    ClientOnly: 'scope-client-only',
-    server: 'scope-js-global-node',
-    Server: 'scope-js-global-node',
+    universal: "scope-universal",
+    Universal: "scope-universal",
+    JsGlobal: "scope-js-global-universal",
+    client: "scope-client-only",
+    Client: "scope-client-only",
+    clientOnly: "scope-client-only",
+    ClientOnly: "scope-client-only",
+    server: "scope-js-global-node",
+    Server: "scope-js-global-node",
     // JS Global scopes (runtime-specific)
-    jsGlobalUniversal: 'scope-js-global-universal',
-    JsGlobalUniversal: 'scope-js-global-universal',
-    jsGlobalBrowser: 'scope-js-global-browser',
-    JsGlobalBrowser: 'scope-js-global-browser',
-    jsGlobalNode: 'scope-js-global-node',
-    JsGlobalNode: 'scope-js-global-node',
-    jsGlobalDeno: 'scope-js-global-deno',
-    JsGlobalDeno: 'scope-js-global-deno',
-    jsGlobalBun: 'scope-js-global-bun',
-    JsGlobalBun: 'scope-js-global-bun',
+    jsGlobalUniversal: "scope-js-global-universal",
+    JsGlobalUniversal: "scope-js-global-universal",
+    jsGlobalBrowser: "scope-js-global-browser",
+    JsGlobalBrowser: "scope-js-global-browser",
+    jsGlobalNode: "scope-js-global-node",
+    JsGlobalNode: "scope-js-global-node",
+    jsGlobalDeno: "scope-js-global-deno",
+    JsGlobalDeno: "scope-js-global-deno",
+    jsGlobalBun: "scope-js-global-bun",
+    JsGlobalBun: "scope-js-global-bun",
     // Vue global
-    vue: 'scope-vue-global',
-    Vue: 'scope-vue-global',
-    vueGlobal: 'scope-vue-global',
-    VueGlobal: 'scope-vue-global',
+    vue: "scope-vue-global",
+    Vue: "scope-vue-global",
+    vueGlobal: "scope-vue-global",
+    VueGlobal: "scope-vue-global",
   };
 
   // Check for exact match
@@ -588,19 +623,19 @@ function getScopeColorClass(kind: string): string {
   }
 
   // Check for partial matches (e.g., "ClientOnly (onMounted)" should match 'scope-client-only')
-  if (kind.startsWith('ClientOnly')) return 'scope-client-only';
-  if (kind.startsWith('Universal')) return 'scope-universal';
-  if (kind.startsWith('ServerOnly')) return 'scope-js-global-node';
-  if (kind.startsWith('Function')) return 'scope-function';
-  if (kind.startsWith('Arrow')) return 'scope-function';
-  if (kind.startsWith('ExtMod')) return 'scope-external-module';
-  if (kind.startsWith('v-for')) return 'scope-vfor';
-  if (kind.startsWith('v-slot')) return 'scope-vslot';
-  if (kind.startsWith('@')) return 'scope-event-handler';  // Event handlers like @click
-  if (kind.includes('computed')) return 'scope-function';
-  if (kind.includes('watch')) return 'scope-function';
+  if (kind.startsWith("ClientOnly")) return "scope-client-only";
+  if (kind.startsWith("Universal")) return "scope-universal";
+  if (kind.startsWith("ServerOnly")) return "scope-js-global-node";
+  if (kind.startsWith("Function")) return "scope-function";
+  if (kind.startsWith("Arrow")) return "scope-function";
+  if (kind.startsWith("ExtMod")) return "scope-external-module";
+  if (kind.startsWith("v-for")) return "scope-vfor";
+  if (kind.startsWith("v-slot")) return "scope-vslot";
+  if (kind.startsWith("@")) return "scope-event-handler"; // Event handlers like @click
+  if (kind.includes("computed")) return "scope-function";
+  if (kind.includes("watch")) return "scope-function";
 
-  return 'scope-default';
+  return "scope-default";
 }
 </script>
 
@@ -640,22 +675,24 @@ function getScopeColorClass(kind: string): string {
           </span>
         </div>
         <div class="tabs">
-          <button
-            :class="['tab', { active: activeTab === 'vir' }]"
-            @click="activeTab = 'vir'"
-          >VIR</button>
-          <button
-            :class="['tab', { active: activeTab === 'stats' }]"
-            @click="activeTab = 'stats'"
-          >Stats</button>
+          <button :class="['tab', { active: activeTab === 'vir' }]" @click="activeTab = 'vir'">
+            VIR
+          </button>
+          <button :class="['tab', { active: activeTab === 'stats' }]" @click="activeTab = 'stats'">
+            Stats
+          </button>
           <button
             :class="['tab', { active: activeTab === 'bindings' }]"
             @click="activeTab = 'bindings'"
-          >Bindings</button>
+          >
+            Bindings
+          </button>
           <button
             :class="['tab', { active: activeTab === 'scopes' }]"
             @click="activeTab = 'scopes'"
-          >Scopes</button>
+          >
+            Scopes
+          </button>
           <button
             :class="['tab', { active: activeTab === 'diagnostics' }]"
             @click="activeTab = 'diagnostics'"
@@ -680,7 +717,8 @@ function getScopeColorClass(kind: string): string {
               <span class="vir-line-count">{{ virLines.length }} lines</span>
             </div>
             <div class="vir-notice">
-              VIR is a human-readable display format for debugging purposes only. It is not portable and should not be parsed or used as a stable interface.
+              VIR is a human-readable display format for debugging purposes only. It is not portable
+              and should not be parsed or used as a stable interface.
             </div>
             <div class="vir-content">
               <div class="vir-line-numbers">
@@ -691,11 +729,16 @@ function getScopeColorClass(kind: string): string {
                   v-for="line in virLines"
                   :key="line.index"
                   :class="['vir-line', `vir-line-${line.lineType}`]"
-                ><template v-if="line.tokens.length > 0"><span
-                    v-for="(token, ti) in line.tokens"
-                    :key="ti"
-                    :class="['vir-token', `vir-${token.type}`]"
-                  >{{ token.text }}</span></template><template v-else>&#160;</template></div>
+                >
+                  <template v-if="line.tokens.length > 0"
+                    ><span
+                      v-for="(token, ti) in line.tokens"
+                      :key="ti"
+                      :class="['vir-token', `vir-${token.type}`]"
+                      >{{ token.text }}</span
+                    ></template
+                  ><template v-else>&#160;</template>
+                </div>
               </div>
             </div>
           </div>
@@ -725,7 +768,11 @@ function getScopeColorClass(kind: string): string {
               <h3 class="section-title">Compiler Macros</h3>
               <div v-if="macros.length === 0" class="empty-state">No macros detected</div>
               <div v-else class="macro-list">
-                <div v-for="macro in macros" :key="`${macro.name}-${macro.start}`" class="macro-item">
+                <div
+                  v-for="macro in macros"
+                  :key="`${macro.name}-${macro.start}`"
+                  class="macro-item"
+                >
                   <span class="macro-name">{{ macro.name }}</span>
                   <code v-if="macro.type_args" class="macro-type">{{ macro.type_args }}</code>
                   <span v-if="macro.binding" class="macro-binding">→ {{ macro.binding }}</span>
@@ -738,14 +785,20 @@ function getScopeColorClass(kind: string): string {
               <div class="css-info">
                 <span class="css-stat">{{ css.selector_count }} selectors</span>
                 <span v-if="css.is_scoped" class="css-badge scoped">scoped</span>
-                <span v-if="css.v_bind_count > 0" class="css-badge vbind">{{ css.v_bind_count }} v-bind</span>
+                <span v-if="css.v_bind_count > 0" class="css-badge vbind"
+                  >{{ css.v_bind_count }} v-bind</span
+                >
               </div>
             </div>
 
             <div class="section" v-if="typeExports.length > 0">
               <h3 class="section-title">Type Exports <span class="badge hoisted">hoisted</span></h3>
               <div class="export-list">
-                <div v-for="te in typeExports" :key="`${te.name}-${te.start}`" class="export-item valid">
+                <div
+                  v-for="te in typeExports"
+                  :key="`${te.name}-${te.start}`"
+                  class="export-item valid"
+                >
                   <span class="export-kind">{{ te.kind }}</span>
                   <code class="export-name">{{ te.name }}</code>
                   <span class="export-badge hoisted">hoisted to module</span>
@@ -756,7 +809,11 @@ function getScopeColorClass(kind: string): string {
             <div class="section" v-if="invalidExports.length > 0">
               <h3 class="section-title">Invalid Exports <span class="badge error">error</span></h3>
               <div class="export-list">
-                <div v-for="ie in invalidExports" :key="`${ie.name}-${ie.start}`" class="export-item invalid">
+                <div
+                  v-for="ie in invalidExports"
+                  :key="`${ie.name}-${ie.start}`"
+                  class="export-item invalid"
+                >
                   <span class="export-kind">{{ ie.kind }}</span>
                   <code class="export-name">{{ ie.name }}</code>
                   <span class="export-badge error">not allowed in script setup</span>
@@ -780,17 +837,39 @@ function getScopeColorClass(kind: string): string {
                   <div v-for="binding in group" :key="binding.name" class="binding-item">
                     <div class="binding-main">
                       <code class="binding-name">{{ binding.name }}</code>
-                      <span v-if="binding.metadata?.needsValue" class="needs-value" title="Needs .value">.value</span>
+                      <span
+                        v-if="binding.metadata?.needsValue"
+                        class="needs-value"
+                        title="Needs .value"
+                        >.value</span
+                      >
                     </div>
                     <div class="binding-meta">
                       <span class="binding-kind">{{ binding.kind }}</span>
-                      <span v-if="binding.typeAnnotation" class="binding-type">: {{ binding.typeAnnotation }}</span>
+                      <span v-if="binding.typeAnnotation" class="binding-type"
+                        >: {{ binding.typeAnnotation }}</span
+                      >
                     </div>
                     <div class="binding-flags">
-                      <span :class="['flag', binding.bindable ? 'active' : 'inactive']" title="Can be referenced from template">bindable</span>
-                      <span :class="['flag', binding.usedInTemplate ? 'active' : 'inactive']" title="Actually used in template">in-template</span>
-                      <span :class="['flag', binding.isMutated ? 'active' : 'inactive']">mutated</span>
-                      <span v-if="binding.fromScriptSetup" class="flag setup" title="From script setup">setup</span>
+                      <span
+                        :class="['flag', binding.bindable ? 'active' : 'inactive']"
+                        title="Can be referenced from template"
+                        >bindable</span
+                      >
+                      <span
+                        :class="['flag', binding.usedInTemplate ? 'active' : 'inactive']"
+                        title="Actually used in template"
+                        >in-template</span
+                      >
+                      <span :class="['flag', binding.isMutated ? 'active' : 'inactive']"
+                        >mutated</span
+                      >
+                      <span
+                        v-if="binding.fromScriptSetup"
+                        class="flag setup"
+                        title="From script setup"
+                        >setup</span
+                      >
                       <span class="refs">{{ binding.referenceCount }} refs</span>
                     </div>
                   </div>
@@ -804,14 +883,23 @@ function getScopeColorClass(kind: string): string {
             <div v-if="scopes.length === 0" class="empty-state">No scopes detected</div>
 
             <div v-else class="scope-tree">
-              <div v-for="scope in scopes" :key="scope.id" :class="['scope-node', getScopeColorClass(scope.kindStr || scope.kind)]" :style="{ marginLeft: `${(scope.depth || 0) * 20}px` }">
+              <div
+                v-for="scope in scopes"
+                :key="scope.id"
+                :class="['scope-node', getScopeColorClass(scope.kindStr || scope.kind)]"
+                :style="{ marginLeft: `${(scope.depth || 0) * 20}px` }"
+              >
                 <div class="scope-header">
-                  <span :class="['scope-indicator', getScopeColorClass(scope.kindStr || scope.kind)]"></span>
+                  <span
+                    :class="['scope-indicator', getScopeColorClass(scope.kindStr || scope.kind)]"
+                  ></span>
                   <span class="scope-kind">{{ scope.kindStr || scope.kind }}</span>
                   <span class="scope-range">[{{ scope.start }}:{{ scope.end }}]</span>
                 </div>
                 <div v-if="scope.bindings.length > 0" class="scope-bindings">
-                  <span v-for="name in scope.bindings" :key="name" class="scope-binding">{{ name }}</span>
+                  <span v-for="name in scope.bindings" :key="name" class="scope-binding">{{
+                    name
+                  }}</span>
                 </div>
               </div>
             </div>
@@ -825,9 +913,15 @@ function getScopeColorClass(kind: string): string {
             </div>
 
             <div v-else class="diagnostic-list">
-              <div v-for="(diag, i) in diagnostics" :key="i" :class="['diagnostic-item', `severity-${diag.severity}`]">
+              <div
+                v-for="(diag, i) in diagnostics"
+                :key="i"
+                :class="['diagnostic-item', `severity-${diag.severity}`]"
+              >
                 <div class="diagnostic-header">
-                  <span class="severity-icon">{{ diag.severity === 'error' ? '&#x2717;' : '&#x26A0;' }}</span>
+                  <span class="severity-icon">{{
+                    diag.severity === "error" ? "&#x2717;" : "&#x26A0;"
+                  }}</span>
                   <span class="diagnostic-message">{{ diag.message }}</span>
                 </div>
                 <div class="diagnostic-location">
@@ -902,7 +996,7 @@ function getScopeColorClass(kind: string): string {
   background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
   border-radius: 3px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .panel-actions {
@@ -1034,7 +1128,8 @@ function getScopeColorClass(kind: string): string {
 }
 
 /* Empty/Loading/Success States */
-.empty-state, .loading-state {
+.empty-state,
+.loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1088,7 +1183,7 @@ function getScopeColorClass(kind: string): string {
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--accent-rust);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .stat-label {
@@ -1130,7 +1225,7 @@ function getScopeColorClass(kind: string): string {
 
 .macro-name {
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--accent-rust);
 }
 
@@ -1272,18 +1367,42 @@ function getScopeColorClass(kind: string): string {
   border-radius: 2px;
 }
 
-.src-props { background: #a78bfa; }
-.src-emits { background: #f472b6; }
-.src-model { background: #fb923c; }
-.src-slots { background: #34d399; }
-.src-ref { background: #4ade80; }
-.src-reactive { background: #f87171; }
-.src-computed { background: #2dd4bf; }
-.src-import { background: #60a5fa; }
-.src-local { background: #94a3b8; }
-.src-function { background: #fbbf24; }
-.src-class { background: #818cf8; }
-.src-default { background: #6b7280; }
+.src-props {
+  background: #a78bfa;
+}
+.src-emits {
+  background: #f472b6;
+}
+.src-model {
+  background: #fb923c;
+}
+.src-slots {
+  background: #34d399;
+}
+.src-ref {
+  background: #4ade80;
+}
+.src-reactive {
+  background: #f87171;
+}
+.src-computed {
+  background: #2dd4bf;
+}
+.src-import {
+  background: #60a5fa;
+}
+.src-local {
+  background: #94a3b8;
+}
+.src-function {
+  background: #fbbf24;
+}
+.src-class {
+  background: #818cf8;
+}
+.src-default {
+  background: #6b7280;
+}
 
 .source-name {
   font-size: 0.75rem;
@@ -1325,7 +1444,7 @@ function getScopeColorClass(kind: string): string {
 
 .binding-name {
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-primary);
 }
 
@@ -1343,7 +1462,7 @@ function getScopeColorClass(kind: string): string {
 }
 
 .binding-kind {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .binding-type {
@@ -1382,7 +1501,7 @@ function getScopeColorClass(kind: string): string {
 .refs {
   font-size: 0.625rem;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 /* Scopes Tab */
@@ -1421,7 +1540,7 @@ function getScopeColorClass(kind: string): string {
 
 .scope-range {
   font-size: 0.625rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-muted);
 }
 
@@ -1438,72 +1557,167 @@ function getScopeColorClass(kind: string): string {
   padding: 0.0625rem 0.375rem;
   background: var(--bg-tertiary);
   border-radius: 3px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-secondary);
 }
 
 /* Scope kind colors */
 /* Template scopes */
-.scope-module { background: rgba(167, 139, 250, 0.08); border-left-color: #a78bfa; }
-.scope-module.scope-indicator { background: #a78bfa; }
+.scope-module {
+  background: rgba(167, 139, 250, 0.08);
+  border-left-color: #a78bfa;
+}
+.scope-module.scope-indicator {
+  background: #a78bfa;
+}
 
-.scope-function { background: rgba(251, 191, 36, 0.08); border-left-color: #fbbf24; }
-.scope-function.scope-indicator { background: #fbbf24; }
+.scope-function {
+  background: rgba(251, 191, 36, 0.08);
+  border-left-color: #fbbf24;
+}
+.scope-function.scope-indicator {
+  background: #fbbf24;
+}
 
-.scope-block { background: rgba(148, 163, 184, 0.08); border-left-color: #94a3b8; }
-.scope-block.scope-indicator { background: #94a3b8; }
+.scope-block {
+  background: rgba(148, 163, 184, 0.08);
+  border-left-color: #94a3b8;
+}
+.scope-block.scope-indicator {
+  background: #94a3b8;
+}
 
-.scope-vfor { background: rgba(74, 222, 128, 0.08); border-left-color: #4ade80; }
-.scope-vfor.scope-indicator { background: #4ade80; }
+.scope-vfor {
+  background: rgba(74, 222, 128, 0.08);
+  border-left-color: #4ade80;
+}
+.scope-vfor.scope-indicator {
+  background: #4ade80;
+}
 
-.scope-vslot { background: rgba(45, 212, 191, 0.08); border-left-color: #2dd4bf; }
-.scope-vslot.scope-indicator { background: #2dd4bf; }
+.scope-vslot {
+  background: rgba(45, 212, 191, 0.08);
+  border-left-color: #2dd4bf;
+}
+.scope-vslot.scope-indicator {
+  background: #2dd4bf;
+}
 
-.scope-event-handler { background: rgba(244, 114, 182, 0.08); border-left-color: #f472b6; }
-.scope-event-handler.scope-indicator { background: #f472b6; }
+.scope-event-handler {
+  background: rgba(244, 114, 182, 0.08);
+  border-left-color: #f472b6;
+}
+.scope-event-handler.scope-indicator {
+  background: #f472b6;
+}
 
-.scope-callback { background: rgba(251, 146, 60, 0.08); border-left-color: #fb923c; }
-.scope-callback.scope-indicator { background: #fb923c; }
+.scope-callback {
+  background: rgba(251, 146, 60, 0.08);
+  border-left-color: #fb923c;
+}
+.scope-callback.scope-indicator {
+  background: #fb923c;
+}
 
 /* Script scopes */
-.scope-script-setup { background: rgba(96, 165, 250, 0.08); border-left-color: #60a5fa; }
-.scope-script-setup.scope-indicator { background: #60a5fa; }
+.scope-script-setup {
+  background: rgba(96, 165, 250, 0.08);
+  border-left-color: #60a5fa;
+}
+.scope-script-setup.scope-indicator {
+  background: #60a5fa;
+}
 
-.scope-non-script-setup { background: rgba(129, 140, 248, 0.08); border-left-color: #818cf8; }
-.scope-non-script-setup.scope-indicator { background: #818cf8; }
+.scope-non-script-setup {
+  background: rgba(129, 140, 248, 0.08);
+  border-left-color: #818cf8;
+}
+.scope-non-script-setup.scope-indicator {
+  background: #818cf8;
+}
 
 /* SSR scopes */
-.scope-universal { background: rgba(34, 211, 238, 0.08); border-left-color: #22d3ee; }
-.scope-universal.scope-indicator { background: #22d3ee; }
+.scope-universal {
+  background: rgba(34, 211, 238, 0.08);
+  border-left-color: #22d3ee;
+}
+.scope-universal.scope-indicator {
+  background: #22d3ee;
+}
 
-.scope-client-only { background: rgba(248, 113, 113, 0.08); border-left-color: #f87171; }
-.scope-client-only.scope-indicator { background: #f87171; }
+.scope-client-only {
+  background: rgba(248, 113, 113, 0.08);
+  border-left-color: #f87171;
+}
+.scope-client-only.scope-indicator {
+  background: #f87171;
+}
 
 /* JS Global scopes (runtime-specific) */
-.scope-js-global-universal { background: rgba(253, 224, 71, 0.08); border-left-color: #fde047; }
-.scope-js-global-universal.scope-indicator { background: #fde047; }
+.scope-js-global-universal {
+  background: rgba(253, 224, 71, 0.08);
+  border-left-color: #fde047;
+}
+.scope-js-global-universal.scope-indicator {
+  background: #fde047;
+}
 
-.scope-js-global-browser { background: rgba(251, 146, 60, 0.08); border-left-color: #fb923c; }
-.scope-js-global-browser.scope-indicator { background: #fb923c; }
+.scope-js-global-browser {
+  background: rgba(251, 146, 60, 0.08);
+  border-left-color: #fb923c;
+}
+.scope-js-global-browser.scope-indicator {
+  background: #fb923c;
+}
 
-.scope-js-global-node { background: rgba(74, 222, 128, 0.08); border-left-color: #4ade80; }
-.scope-js-global-node.scope-indicator { background: #4ade80; }
+.scope-js-global-node {
+  background: rgba(74, 222, 128, 0.08);
+  border-left-color: #4ade80;
+}
+.scope-js-global-node.scope-indicator {
+  background: #4ade80;
+}
 
-.scope-js-global-deno { background: rgba(96, 165, 250, 0.08); border-left-color: #60a5fa; }
-.scope-js-global-deno.scope-indicator { background: #60a5fa; }
+.scope-js-global-deno {
+  background: rgba(96, 165, 250, 0.08);
+  border-left-color: #60a5fa;
+}
+.scope-js-global-deno.scope-indicator {
+  background: #60a5fa;
+}
 
-.scope-js-global-bun { background: rgba(244, 114, 182, 0.08); border-left-color: #f472b6; }
-.scope-js-global-bun.scope-indicator { background: #f472b6; }
+.scope-js-global-bun {
+  background: rgba(244, 114, 182, 0.08);
+  border-left-color: #f472b6;
+}
+.scope-js-global-bun.scope-indicator {
+  background: #f472b6;
+}
 
 /* Vue global */
-.scope-vue-global { background: rgba(52, 211, 153, 0.08); border-left-color: #34d399; }
-.scope-vue-global.scope-indicator { background: #34d399; }
+.scope-vue-global {
+  background: rgba(52, 211, 153, 0.08);
+  border-left-color: #34d399;
+}
+.scope-vue-global.scope-indicator {
+  background: #34d399;
+}
 
-.scope-external-module { background: rgba(192, 132, 252, 0.08); border-left-color: #c084fc; }
-.scope-external-module.scope-indicator { background: #c084fc; }
+.scope-external-module {
+  background: rgba(192, 132, 252, 0.08);
+  border-left-color: #c084fc;
+}
+.scope-external-module.scope-indicator {
+  background: #c084fc;
+}
 
-.scope-default { background: var(--bg-secondary); border-left-color: var(--border-primary); }
-.scope-default.scope-indicator { background: var(--text-muted); }
+.scope-default {
+  background: var(--bg-secondary);
+  border-left-color: var(--border-primary);
+}
+.scope-default.scope-indicator {
+  background: var(--text-muted);
+}
 
 /* VIR Tab */
 .vir-output {
@@ -1535,7 +1749,7 @@ function getScopeColorClass(kind: string): string {
 .vir-line-count {
   font-size: 0.625rem;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .vir-notice {
@@ -1558,7 +1772,7 @@ function getScopeColorClass(kind: string): string {
   border: 1px solid var(--border-primary);
   border-radius: 0 0 4px 4px;
   font-size: 0.8125rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   overflow: auto;
   line-height: 1.6;
 }
@@ -1723,8 +1937,12 @@ function getScopeColorClass(kind: string): string {
   font-size: 0.875rem;
 }
 
-.severity-error .severity-icon { color: #ef4444; }
-.severity-warning .severity-icon { color: #f59e0b; }
+.severity-error .severity-icon {
+  color: #ef4444;
+}
+.severity-warning .severity-icon {
+  color: #f59e0b;
+}
 
 .diagnostic-message {
   flex: 1;
@@ -1742,7 +1960,7 @@ function getScopeColorClass(kind: string): string {
 
 .location-range {
   font-size: 0.75rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   color: var(--text-muted);
 }
 

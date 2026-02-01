@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
-import MonacoEditor from './MonacoEditor.vue';
-import CodeHighlight from './CodeHighlight.vue';
-import type { WasmModule, FormatOptions, FormatResult } from '../wasm/index';
+import { ref, watch, computed } from "vue";
+import MonacoEditor from "./MonacoEditor.vue";
+import CodeHighlight from "./CodeHighlight.vue";
+import type { WasmModule, FormatOptions, FormatResult } from "../wasm/index";
 
 const props = defineProps<{
   compiler: WasmModule | null;
@@ -45,7 +45,7 @@ const source = ref(GLYPH_PRESET);
 const formatResult = ref<FormatResult | null>(null);
 const error = ref<string | null>(null);
 const formatTime = ref<number | null>(null);
-const activeTab = ref<'formatted' | 'diff' | 'options'>('formatted');
+const activeTab = ref<"formatted" | "diff" | "options">("formatted");
 
 // Format options
 const options = ref<FormatOptions>({
@@ -62,9 +62,9 @@ const options = ref<FormatOptions>({
 const diffLines = computed(() => {
   if (!formatResult.value) return [];
 
-  const original = source.value.split('\n');
-  const formatted = formatResult.value.code.split('\n');
-  const diff: Array<{ type: 'same' | 'removed' | 'added'; content: string; lineNum: number }> = [];
+  const original = source.value.split("\n");
+  const formatted = formatResult.value.code.split("\n");
+  const diff: Array<{ type: "same" | "removed" | "added"; content: string; lineNum: number }> = [];
 
   // Simple diff - just show removed and added lines
   const maxLen = Math.max(original.length, formatted.length);
@@ -76,19 +76,19 @@ const diffLines = computed(() => {
     const fmtLine = formatted[fmtIdx];
 
     if (origLine === fmtLine) {
-      diff.push({ type: 'same', content: origLine || '', lineNum: origIdx + 1 });
+      diff.push({ type: "same", content: origLine || "", lineNum: origIdx + 1 });
       origIdx++;
       fmtIdx++;
     } else if (origLine !== undefined && fmtLine !== undefined) {
-      diff.push({ type: 'removed', content: origLine, lineNum: origIdx + 1 });
-      diff.push({ type: 'added', content: fmtLine, lineNum: fmtIdx + 1 });
+      diff.push({ type: "removed", content: origLine, lineNum: origIdx + 1 });
+      diff.push({ type: "added", content: fmtLine, lineNum: fmtIdx + 1 });
       origIdx++;
       fmtIdx++;
     } else if (origLine !== undefined) {
-      diff.push({ type: 'removed', content: origLine, lineNum: origIdx + 1 });
+      diff.push({ type: "removed", content: origLine, lineNum: origIdx + 1 });
       origIdx++;
     } else if (fmtLine !== undefined) {
-      diff.push({ type: 'added', content: fmtLine, lineNum: fmtIdx + 1 });
+      diff.push({ type: "added", content: fmtLine, lineNum: fmtIdx + 1 });
       fmtIdx++;
     }
   }
@@ -130,7 +130,7 @@ watch(
     if (formatTimer) clearTimeout(formatTimer);
     formatTimer = setTimeout(format, 300);
   },
-  { immediate: true, deep: true }
+  { immediate: true, deep: true },
 );
 
 watch(
@@ -139,7 +139,7 @@ watch(
     if (props.compiler) {
       format();
     }
-  }
+  },
 );
 </script>
 
@@ -166,26 +166,30 @@ watch(
         <div class="header-title">
           <span class="icon">&#x2728;</span>
           <h2>Code Formatting</h2>
-          <span v-if="formatTime !== null" class="perf-badge">
-            {{ formatTime.toFixed(2) }}ms
-          </span>
-          <span v-if="formatResult" :class="['status-badge', formatResult.changed ? 'changed' : 'unchanged']">
-            {{ formatResult.changed ? 'Changed' : 'Unchanged' }}
+          <span v-if="formatTime !== null" class="perf-badge"> {{ formatTime.toFixed(2) }}ms </span>
+          <span
+            v-if="formatResult"
+            :class="['status-badge', formatResult.changed ? 'changed' : 'unchanged']"
+          >
+            {{ formatResult.changed ? "Changed" : "Unchanged" }}
           </span>
         </div>
         <div class="tabs">
           <button
             :class="['tab', { active: activeTab === 'formatted' }]"
             @click="activeTab = 'formatted'"
-          >Formatted</button>
-          <button
-            :class="['tab', { active: activeTab === 'diff' }]"
-            @click="activeTab = 'diff'"
-          >Diff</button>
+          >
+            Formatted
+          </button>
+          <button :class="['tab', { active: activeTab === 'diff' }]" @click="activeTab = 'diff'">
+            Diff
+          </button>
           <button
             :class="['tab', { active: activeTab === 'options' }]"
             @click="activeTab = 'options'"
-          >Options</button>
+          >
+            Options
+          </button>
         </div>
       </div>
 
@@ -201,8 +205,12 @@ watch(
             <div class="output-header-bar">
               <span class="output-title">Formatted Code</span>
               <div class="output-actions">
-                <button v-if="formatResult?.changed" @click="applyFormatted" class="btn-apply">Apply Changes</button>
-                <button @click="copyToClipboard(formatResult?.code || '')" class="btn-ghost">Copy</button>
+                <button v-if="formatResult?.changed" @click="applyFormatted" class="btn-apply">
+                  Apply Changes
+                </button>
+                <button @click="copyToClipboard(formatResult?.code || '')" class="btn-ghost">
+                  Copy
+                </button>
               </div>
             </div>
             <div class="code-container">
@@ -215,8 +223,12 @@ watch(
             <div class="output-header-bar">
               <span class="output-title">Changes</span>
               <span class="diff-stats">
-                <span class="stat additions">+{{ diffLines.filter(l => l.type === 'added').length }}</span>
-                <span class="stat deletions">-{{ diffLines.filter(l => l.type === 'removed').length }}</span>
+                <span class="stat additions"
+                  >+{{ diffLines.filter((l) => l.type === "added").length }}</span
+                >
+                <span class="stat deletions"
+                  >-{{ diffLines.filter((l) => l.type === "removed").length }}</span
+                >
               </span>
             </div>
             <div v-if="!formatResult.changed" class="success-state">
@@ -233,8 +245,10 @@ watch(
                   :key="i"
                   :class="['diff-line', `diff-${line.type}`]"
                 >
-                  <span class="line-prefix">{{ line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' ' }}</span>
-                  <span class="line-content">{{ line.content || ' ' }}</span>
+                  <span class="line-prefix">{{
+                    line.type === "removed" ? "-" : line.type === "added" ? "+" : " "
+                  }}</span>
+                  <span class="line-content">{{ line.content || " " }}</span>
                 </div>
               </div>
             </div>
@@ -252,14 +266,26 @@ watch(
                   <label class="option-card">
                     <div class="option-header">
                       <span class="option-name">Print Width</span>
-                      <input type="number" v-model.number="options.printWidth" min="40" max="200" class="option-input" />
+                      <input
+                        type="number"
+                        v-model.number="options.printWidth"
+                        min="40"
+                        max="200"
+                        class="option-input"
+                      />
                     </div>
                     <span class="option-desc">Maximum line length before wrapping</span>
                   </label>
                   <label class="option-card">
                     <div class="option-header">
                       <span class="option-name">Tab Width</span>
-                      <input type="number" v-model.number="options.tabWidth" min="1" max="8" class="option-input" />
+                      <input
+                        type="number"
+                        v-model.number="options.tabWidth"
+                        min="1"
+                        max="8"
+                        class="option-input"
+                      />
                     </div>
                     <span class="option-desc">Number of spaces per indentation level</span>
                   </label>
@@ -285,28 +311,46 @@ watch(
                   </label>
                   <label class="toggle-card">
                     <div class="toggle-main">
-                      <input type="checkbox" v-model="options.singleQuote" class="toggle-checkbox" />
+                      <input
+                        type="checkbox"
+                        v-model="options.singleQuote"
+                        class="toggle-checkbox"
+                      />
                       <span class="toggle-name">Single Quotes</span>
                     </div>
                     <span class="toggle-desc">Use single quotes instead of double quotes</span>
                   </label>
                   <label class="toggle-card">
                     <div class="toggle-main">
-                      <input type="checkbox" v-model="options.bracketSpacing" class="toggle-checkbox" />
+                      <input
+                        type="checkbox"
+                        v-model="options.bracketSpacing"
+                        class="toggle-checkbox"
+                      />
                       <span class="toggle-name">Bracket Spacing</span>
                     </div>
-                    <span class="toggle-desc">Print spaces between brackets in object literals</span>
+                    <span class="toggle-desc"
+                      >Print spaces between brackets in object literals</span
+                    >
                   </label>
                   <label class="toggle-card">
                     <div class="toggle-main">
-                      <input type="checkbox" v-model="options.bracketSameLine" class="toggle-checkbox" />
+                      <input
+                        type="checkbox"
+                        v-model="options.bracketSameLine"
+                        class="toggle-checkbox"
+                      />
                       <span class="toggle-name">Bracket Same Line</span>
                     </div>
                     <span class="toggle-desc">Put closing bracket on the same line</span>
                   </label>
                   <label class="toggle-card">
                     <div class="toggle-main">
-                      <input type="checkbox" v-model="options.singleAttributePerLine" class="toggle-checkbox" />
+                      <input
+                        type="checkbox"
+                        v-model="options.singleAttributePerLine"
+                        class="toggle-checkbox"
+                      />
                       <span class="toggle-name">Single Attribute Per Line</span>
                     </div>
                     <span class="toggle-desc">Enforce single attribute per line in templates</span>
@@ -380,7 +424,7 @@ watch(
   background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
   border-radius: 3px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .status-badge {
@@ -554,7 +598,7 @@ watch(
 
 .diff-stats .stat {
   font-size: 0.625rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   padding: 0.125rem 0.375rem;
   border-radius: 3px;
 }
@@ -590,7 +634,7 @@ watch(
   border: 1px solid var(--border-primary);
   border-radius: 0 0 4px 4px;
   font-size: 0.8125rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   overflow: auto;
   line-height: 1.6;
 }
@@ -735,7 +779,7 @@ watch(
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   color: var(--text-primary);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .option-input:focus {

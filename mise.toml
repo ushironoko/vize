@@ -212,13 +212,38 @@ run = "cargo check --workspace"
 
 [tasks.clippy]
 alias = "cl"
-description = "Run clippy lints"
+description = "Run Rust clippy lints"
 run = "cargo clippy --workspace -- -D warnings"
+
+[tasks."fmt:rust"]
+alias = "fr"
+description = "Format Rust code"
+run = "cargo fmt --all"
+
+[tasks."fmt:js"]
+alias = "fj"
+description = "Format JS/TS code with oxfmt"
+run = "pnpm fmt"
 
 [tasks.fmt]
 alias = "f"
-description = "Format Rust code"
-run = "cargo fmt --all"
+description = "Format all code (Rust + JS/TS)"
+depends = ["fmt:rust", "fmt:js"]
+
+[tasks."lint:rust"]
+alias = "lr"
+description = "Lint Rust code with clippy"
+run = "cargo clippy --workspace -- -D warnings"
+
+[tasks."lint:js"]
+alias = "lj"
+description = "Lint JS/TS code with oxlint"
+run = "pnpm lint"
+
+[tasks.lint]
+alias = "l"
+description = "Lint all code (Rust + JS/TS)"
+depends = ["lint:rust", "lint:js"]
 
 # =============================================================================
 # CI / All checks

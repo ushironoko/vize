@@ -2,7 +2,7 @@
  * Breadcrumb Component - Navigation breadcrumb
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface BreadcrumbItem {
   key: string;
@@ -24,7 +24,7 @@ export interface BreadcrumbProps {
 }
 
 export const Breadcrumb = defineComponent({
-  name: 'Breadcrumb',
+  name: "Breadcrumb",
   props: {
     items: {
       type: Array as PropType<BreadcrumbItem[]>,
@@ -32,22 +32,22 @@ export const Breadcrumb = defineComponent({
     },
     separator: {
       type: String,
-      default: ' > ',
+      default: " > ",
     },
     fg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     activeFg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     separatorFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
   },
-  emits: ['select'],
+  emits: ["select"],
   setup(props, { emit }) {
     return () => {
       const children = props.items.flatMap((item, index) => {
@@ -58,52 +58,48 @@ export const Breadcrumb = defineComponent({
         if (item.icon) {
           result.push(
             h(
-              'text',
+              "text",
               {
                 key: `icon-${item.key}`,
                 fg: isLast ? props.activeFg : props.fg,
               },
-              `${item.icon} `
-            )
+              `${item.icon} `,
+            ),
           );
         }
 
         // Label
         result.push(
           h(
-            'text',
+            "text",
             {
               key: item.key,
               fg: isLast ? props.activeFg : props.fg,
               bold: isLast,
               underline: !isLast,
             },
-            item.label
-          )
+            item.label,
+          ),
         );
 
         // Separator
         if (!isLast) {
           result.push(
             h(
-              'text',
+              "text",
               {
                 key: `sep-${item.key}`,
                 fg: props.separatorFg,
               },
-              props.separator
-            )
+              props.separator,
+            ),
           );
         }
 
         return result;
       });
 
-      return h(
-        'box',
-        { style: { flex_direction: 'row' } },
-        children
-      );
+      return h("box", { style: { flex_direction: "row" } }, children);
     };
   },
 });

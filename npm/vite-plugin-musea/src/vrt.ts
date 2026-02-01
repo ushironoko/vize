@@ -3,11 +3,11 @@
  * Uses Playwright for browser automation and pixel comparison.
  */
 
-import type { Browser, BrowserContext, Page } from 'playwright';
-import type { ArtFileInfo, VrtOptions, ViewportConfig } from './types.js';
-import fs from 'node:fs';
-import path from 'node:path';
-import { PNG } from 'pngjs';
+import type { Browser, BrowserContext, Page } from "playwright";
+import type { ArtFileInfo, VrtOptions, ViewportConfig } from "./types.js";
+import fs from "node:fs";
+import path from "node:path";
+import { PNG } from "pngjs";
 
 /**
  * VRT test result for a single variant.
@@ -63,11 +63,11 @@ export class MuseaVrtRunner {
 
   constructor(options: VrtOptions = {}) {
     this.options = {
-      snapshotDir: options.snapshotDir ?? '.vize/snapshots',
+      snapshotDir: options.snapshotDir ?? ".vize/snapshots",
       threshold: options.threshold ?? 0.1,
       viewports: options.viewports ?? [
-        { width: 1280, height: 720, name: 'desktop' },
-        { width: 375, height: 667, name: 'mobile' },
+        { width: 1280, height: 720, name: "desktop" },
+        { width: 375, height: 667, name: "mobile" },
       ],
     };
   }
@@ -76,7 +76,7 @@ export class MuseaVrtRunner {
    * Initialize Playwright browser.
    */
   async init(): Promise<void> {
-    const { chromium } = await import('playwright');
+    const { chromium } = await import("playwright");
     this.browser = await chromium.launch({ headless: true });
     this.startTime = Date.now();
   }
@@ -94,12 +94,9 @@ export class MuseaVrtRunner {
   /**
    * Run VRT tests for all Art files.
    */
-  async runAllTests(
-    artFiles: ArtFileInfo[],
-    baseUrl: string
-  ): Promise<VrtResult[]> {
+  async runAllTests(artFiles: ArtFileInfo[], baseUrl: string): Promise<VrtResult[]> {
     if (!this.browser) {
-      throw new Error('VRT runner not initialized. Call init() first.');
+      throw new Error("VRT runner not initialized. Call init() first.");
     }
 
     const results: VrtResult[] = [];
@@ -111,12 +108,7 @@ export class MuseaVrtRunner {
         }
 
         for (const viewport of this.options.viewports) {
-          const result = await this.captureAndCompare(
-            art,
-            variant.name,
-            viewport,
-            baseUrl
-          );
+          const result = await this.captureAndCompare(art, variant.name, viewport, baseUrl);
           results.push(result);
         }
       }
@@ -132,24 +124,24 @@ export class MuseaVrtRunner {
     art: ArtFileInfo,
     variantName: string,
     viewport: ViewportConfig,
-    baseUrl: string
+    baseUrl: string,
   ): Promise<VrtResult> {
     if (!this.browser) {
-      throw new Error('VRT runner not initialized. Call init() first.');
+      throw new Error("VRT runner not initialized. Call init() first.");
     }
 
     const snapshotDir = this.options.snapshotDir;
-    const artBaseName = path.basename(art.path, '.art.vue');
+    const artBaseName = path.basename(art.path, ".art.vue");
     const viewportName = viewport.name || `${viewport.width}x${viewport.height}`;
     const snapshotName = `${artBaseName}--${variantName}--${viewportName}.png`;
     const snapshotPath = path.join(snapshotDir, snapshotName);
-    const currentPath = path.join(snapshotDir, 'current', snapshotName);
-    const diffPath = path.join(snapshotDir, 'diff', snapshotName);
+    const currentPath = path.join(snapshotDir, "current", snapshotName);
+    const diffPath = path.join(snapshotDir, "diff", snapshotName);
 
     // Ensure directories exist
     await fs.promises.mkdir(path.dirname(snapshotPath), { recursive: true });
-    await fs.promises.mkdir(path.join(snapshotDir, 'current'), { recursive: true });
-    await fs.promises.mkdir(path.join(snapshotDir, 'diff'), { recursive: true });
+    await fs.promises.mkdir(path.join(snapshotDir, "current"), { recursive: true });
+    await fs.promises.mkdir(path.join(snapshotDir, "diff"), { recursive: true });
 
     let context: BrowserContext | null = null;
     let page: Page | null = null;
@@ -166,10 +158,10 @@ export class MuseaVrtRunner {
 
       // Navigate to variant preview URL
       const variantUrl = this.buildVariantUrl(baseUrl, art.path, variantName);
-      await page.goto(variantUrl, { waitUntil: 'networkidle' });
+      await page.goto(variantUrl, { waitUntil: "networkidle" });
 
       // Wait for content to render
-      await page.waitForSelector('.musea-variant', { timeout: 10000 });
+      await page.waitForSelector(".musea-variant", { timeout: 10000 });
 
       // Additional wait for animations to settle
       await page.waitForTimeout(100);
@@ -235,13 +227,10 @@ export class MuseaVrtRunner {
   async updateBaselines(results: VrtResult[]): Promise<number> {
     let updated = 0;
     const snapshotDir = this.options.snapshotDir;
-    const currentDir = path.join(snapshotDir, 'current');
+    const currentDir = path.join(snapshotDir, "current");
 
     for (const result of results) {
-      const currentPath = path.join(
-        currentDir,
-        path.basename(result.snapshotPath)
-      );
+      const currentPath = path.join(currentDir, path.basename(result.snapshotPath));
 
       if (await fileExists(currentPath)) {
         await fs.promises.copyFile(currentPath, result.snapshotPath);
@@ -270,11 +259,7 @@ export class MuseaVrtRunner {
   /**
    * Build URL for variant preview.
    */
-  private buildVariantUrl(
-    baseUrl: string,
-    artPath: string,
-    variantName: string
-  ): string {
+  private buildVariantUrl(baseUrl: string, artPath: string, variantName: string): string {
     const encodedPath = encodeURIComponent(artPath);
     const encodedVariant = encodeURIComponent(variantName);
     return `${baseUrl}/__musea__/preview?art=${encodedPath}&variant=${encodedVariant}`;
@@ -287,7 +272,7 @@ export class MuseaVrtRunner {
   private async compareImages(
     baselinePath: string,
     currentPath: string,
-    diffPath: string
+    diffPath: string,
   ): Promise<{ diffPixels: number; totalPixels: number; diffPercentage: number }> {
     const baseline = await readPng(baselinePath);
     const current = await readPng(currentPath);
@@ -301,9 +286,9 @@ export class MuseaVrtRunner {
 
       // Fill with red to indicate size mismatch
       for (let i = 0; i < diff.data.length; i += 4) {
-        diff.data[i] = 255;     // R
-        diff.data[i + 1] = 0;   // G
-        diff.data[i + 2] = 0;   // B
+        diff.data[i] = 255; // R
+        diff.data[i + 1] = 0; // G
+        diff.data[i + 2] = 0; // B
         diff.data[i + 3] = 255; // A
       }
 
@@ -380,10 +365,7 @@ export class MuseaVrtRunner {
  * Generate VRT report in HTML format.
  * Uses Musea design language for consistency.
  */
-export function generateVrtReport(
-  results: VrtResult[],
-  summary: VrtSummary
-): string {
+export function generateVrtReport(results: VrtResult[], summary: VrtSummary): string {
   const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
     const seconds = Math.floor(ms / 1000);
@@ -392,12 +374,12 @@ export function generateVrtReport(
     return `${minutes}m ${seconds % 60}s`;
   };
 
-  const timestamp = new Date().toLocaleString('ja-JP', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+  const timestamp = new Date().toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 
   const html = `<!DOCTYPE html>
@@ -744,7 +726,7 @@ export function generateVrtReport(
             <div class="all-passed-icon">✓</div>
             <div class="all-passed-text">All ${summary.total} visual tests passed</div>
           </div>`
-        : ''
+        : ""
     }
 
     <div class="filters">
@@ -763,35 +745,22 @@ export function generateVrtReport(
             </div>`
           : results
               .map((r) => {
-                const status = r.error
-                  ? 'error'
-                  : r.isNew
-                    ? 'new'
-                    : r.passed
-                      ? 'passed'
-                      : 'failed';
-                const badge = r.error
-                  ? 'Error'
-                  : r.isNew
-                    ? 'New'
-                    : r.passed
-                      ? 'Passed'
-                      : 'Failed';
-                const artName = path.basename(r.artPath, '.art.vue');
-                const viewportName =
-                  r.viewport.name || `${r.viewport.width}×${r.viewport.height}`;
+                const status = r.error ? "error" : r.isNew ? "new" : r.passed ? "passed" : "failed";
+                const badge = r.error ? "Error" : r.isNew ? "New" : r.passed ? "Passed" : "Failed";
+                const artName = path.basename(r.artPath, ".art.vue");
+                const viewportName = r.viewport.name || `${r.viewport.width}×${r.viewport.height}`;
 
-                let details = '';
+                let details = "";
                 if (r.error) {
                   details = `<div class="result-details error">${escapeHtml(r.error)}</div>`;
                 } else if (r.diffPercentage !== undefined) {
                   const diffFormatted = r.diffPercentage.toFixed(3);
-                  const pixelsFormatted = r.diffPixels?.toLocaleString() ?? '0';
-                  const totalFormatted = r.totalPixels?.toLocaleString() ?? '0';
+                  const pixelsFormatted = r.diffPixels?.toLocaleString() ?? "0";
+                  const totalFormatted = r.totalPixels?.toLocaleString() ?? "0";
                   details = `<div class="result-details">diff: ${diffFormatted}% (${pixelsFormatted} / ${totalFormatted} pixels)</div>`;
                 }
 
-                let images = '';
+                let images = "";
                 if (!r.error && !r.passed && r.diffPath) {
                   images = `<div class="result-images">
                     ${
@@ -802,7 +771,7 @@ export function generateVrtReport(
                               <img src="file://${r.snapshotPath}" alt="Baseline" loading="lazy" />
                             </div>
                           </div>`
-                        : ''
+                        : ""
                     }
                     ${
                       r.currentPath
@@ -812,7 +781,7 @@ export function generateVrtReport(
                               <img src="file://${r.currentPath}" alt="Current" loading="lazy" />
                             </div>
                           </div>`
-                        : ''
+                        : ""
                     }
                     ${
                       r.diffPath
@@ -822,7 +791,7 @@ export function generateVrtReport(
                               <img src="file://${r.diffPath}" alt="Diff" loading="lazy" />
                             </div>
                           </div>`
-                        : ''
+                        : ""
                     }
                   </div>`;
                 }
@@ -837,10 +806,10 @@ export function generateVrtReport(
                     </div>
                     <span class="result-badge">${badge}</span>
                   </div>
-                  ${hasBody ? `<div class="result-body">${details}${images}</div>` : ''}
+                  ${hasBody ? `<div class="result-body">${details}${images}</div>` : ""}
                 </div>`;
               })
-              .join('')
+              .join("")
       }
     </div>
   </main>
@@ -870,25 +839,22 @@ export function generateVrtReport(
 /**
  * Generate VRT JSON report for CI integration.
  */
-export function generateVrtJsonReport(
-  results: VrtResult[],
-  summary: VrtSummary
-): string {
+export function generateVrtJsonReport(results: VrtResult[], summary: VrtSummary): string {
   return JSON.stringify(
     {
       timestamp: new Date().toISOString(),
       summary,
       results: results.map((r) => ({
-        art: path.basename(r.artPath, '.art.vue'),
+        art: path.basename(r.artPath, ".art.vue"),
         variant: r.variantName,
         viewport: r.viewport.name || `${r.viewport.width}x${r.viewport.height}`,
-        status: r.error ? 'error' : r.isNew ? 'new' : r.passed ? 'passed' : 'failed',
+        status: r.error ? "error" : r.isNew ? "new" : r.passed ? "passed" : "failed",
         diffPercentage: r.diffPercentage,
         error: r.error,
       })),
     },
     null,
-    2
+    2,
   );
 }
 
@@ -902,10 +868,10 @@ async function readPng(filepath: string): Promise<PNG> {
     const chunks: Buffer[] = [];
     fs.createReadStream(filepath)
       .pipe(new PNG())
-      .on('parsed', function (this: PNG) {
+      .on("parsed", function (this: PNG) {
         resolve(this);
       })
-      .on('error', reject);
+      .on("error", reject);
   });
 }
 
@@ -914,11 +880,7 @@ async function readPng(filepath: string): Promise<PNG> {
  */
 async function writePng(png: PNG, filepath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    png
-      .pack()
-      .pipe(fs.createWriteStream(filepath))
-      .on('finish', resolve)
-      .on('error', reject);
+    png.pack().pipe(fs.createWriteStream(filepath)).on("finish", resolve).on("error", reject);
   });
 }
 
@@ -934,7 +896,7 @@ function colorDelta(
   r2: number,
   g2: number,
   b2: number,
-  a2: number
+  a2: number,
 ): number {
   // Blend with white if alpha is not fully opaque
   if (a1 !== 255) {
@@ -989,11 +951,11 @@ async function fileExists(filepath: string): Promise<boolean> {
  */
 function escapeHtml(str: string): string {
   return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
 }
 
 export default MuseaVrtRunner;

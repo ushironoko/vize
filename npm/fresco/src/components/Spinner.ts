@@ -2,24 +2,24 @@
  * Spinner Component - Loading indicator
  */
 
-import { defineComponent, h, ref, onMounted, onUnmounted, type PropType } from '@vue/runtime-core';
-import { Text } from './Text.js';
+import { defineComponent, h, ref, onMounted, onUnmounted, type PropType } from "@vue/runtime-core";
+import { Text } from "./Text.js";
 
 /**
  * Spinner frame sets
  */
 export const spinnerTypes = {
-  dots: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
-  dots2: ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'],
-  line: ['-', '\\', '|', '/'],
-  arc: ['◜', '◠', '◝', '◞', '◡', '◟'],
-  circle: ['◐', '◓', '◑', '◒'],
-  bounce: ['⠁', '⠂', '⠄', '⡀', '⢀', '⠠', '⠐', '⠈'],
-  box: ['▖', '▘', '▝', '▗'],
-  arrow: ['←', '↖', '↑', '↗', '→', '↘', '↓', '↙'],
-  clock: ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'],
-  moon: ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'],
-  earth: ['🌍', '🌎', '🌏'],
+  dots: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+  dots2: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
+  line: ["-", "\\", "|", "/"],
+  arc: ["◜", "◠", "◝", "◞", "◡", "◟"],
+  circle: ["◐", "◓", "◑", "◒"],
+  bounce: ["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"],
+  box: ["▖", "▘", "▝", "▗"],
+  arrow: ["←", "↖", "↑", "↗", "→", "↘", "↓", "↙"],
+  clock: ["🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚"],
+  moon: ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"],
+  earth: ["🌍", "🌎", "🌏"],
 } as const;
 
 export type SpinnerType = keyof typeof spinnerTypes;
@@ -38,11 +38,11 @@ export interface SpinnerProps {
 }
 
 export const Spinner = defineComponent({
-  name: 'Spinner',
+  name: "Spinner",
   props: {
     type: {
       type: String as PropType<SpinnerType>,
-      default: 'dots',
+      default: "dots",
     },
     frames: Array as PropType<string[]>,
     interval: {

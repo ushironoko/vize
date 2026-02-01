@@ -1,12 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
-import {
-  ExtensionContext,
-  commands,
-  window,
-  workspace,
-  OutputChannel,
-} from "vscode";
+import { ExtensionContext, commands, window, workspace, OutputChannel } from "vscode";
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -32,7 +26,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const serverPath = await findServerPath(context, config);
   if (!serverPath) {
     window.showErrorMessage(
-      "Vize: Could not find language server. Please install vize or set vize.serverPath."
+      "Vize: Could not find language server. Please install vize or set vize.serverPath.",
     );
     return;
   }
@@ -60,12 +54,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
   };
 
   // Create the language client
-  client = new LanguageClient(
-    "vize",
-    "Vize Language Server",
-    serverOptions,
-    clientOptions
-  );
+  client = new LanguageClient("vize", "Vize Language Server", serverOptions, clientOptions);
 
   // Register commands
   context.subscriptions.push(
@@ -85,11 +74,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     commands.registerCommand("vize.findReferences", async () => {
       const editor = window.activeTextEditor;
       if (editor) {
-        await commands.executeCommand(
-          "editor.action.referenceSearch.trigger"
-        );
+        await commands.executeCommand("editor.action.referenceSearch.trigger");
       }
-    })
+    }),
   );
 
   // Start the client
@@ -115,7 +102,7 @@ export async function deactivate(): Promise<void> {
  */
 async function findServerPath(
   context: ExtensionContext,
-  config: ReturnType<typeof workspace.getConfiguration>
+  config: ReturnType<typeof workspace.getConfiguration>,
 ): Promise<string | undefined> {
   const exeName = process.platform === "win32" ? "vize.exe" : "vize";
 

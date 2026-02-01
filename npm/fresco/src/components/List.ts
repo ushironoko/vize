@@ -2,7 +2,7 @@
  * List Component - Scrollable list of items
  */
 
-import { defineComponent, h, ref, computed, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, ref, computed, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface ListItem {
   key: string;
@@ -32,7 +32,7 @@ export interface ListProps {
 }
 
 export const List = defineComponent({
-  name: 'List',
+  name: "List",
   props: {
     items: {
       type: Array as PropType<ListItem[]>,
@@ -46,20 +46,20 @@ export const List = defineComponent({
     },
     indicator: {
       type: String,
-      default: '> ',
+      default: "> ",
     },
     indicatorEmpty: {
       type: String,
-      default: '  ',
+      default: "  ",
     },
     fg: String,
     selectedFg: {
       type: String,
-      default: 'cyan',
+      default: "cyan",
     },
     selectedBg: String,
   },
-  emits: ['update:modelValue', 'select'],
+  emits: ["update:modelValue", "select"],
   setup(props, { emit }) {
     const scrollOffset = ref(0);
     const highlightedIndex = ref(0);
@@ -88,9 +88,7 @@ export const List = defineComponent({
 
       // Scroll up indicator
       if (scrollIndicator.value.showUp) {
-        children.push(
-          h('text', { key: 'scroll-up', dim: true }, '  ...')
-        );
+        children.push(h("text", { key: "scroll-up", dim: true }, "  ..."));
       }
 
       // Visible items
@@ -102,7 +100,7 @@ export const List = defineComponent({
 
         children.push(
           h(
-            'text',
+            "text",
             {
               key: item.key,
               fg: isHighlighted ? props.selectedFg : props.fg,
@@ -110,25 +108,23 @@ export const List = defineComponent({
               dim: item.disabled,
               bold: isSelected,
             },
-            `${indicator}${item.label}`
-          )
+            `${indicator}${item.label}`,
+          ),
         );
       });
 
       // Scroll down indicator
       if (scrollIndicator.value.showDown) {
-        children.push(
-          h('text', { key: 'scroll-down', dim: true }, '  ...')
-        );
+        children.push(h("text", { key: "scroll-down", dim: true }, "  ..."));
       }
 
       return h(
-        'box',
+        "box",
         {
-          style: { flex_direction: 'column' },
+          style: { flex_direction: "column" },
           fg: props.fg,
         },
-        children
+        children,
       );
     };
   },

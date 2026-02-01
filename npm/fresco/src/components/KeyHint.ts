@@ -2,7 +2,7 @@
  * KeyHint Component - Display keyboard shortcut hints
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface KeyBinding {
   keys: string[];
@@ -13,7 +13,7 @@ export interface KeyHintProps {
   /** Key bindings to display */
   bindings: KeyBinding[];
   /** Layout direction */
-  direction?: 'horizontal' | 'vertical';
+  direction?: "horizontal" | "vertical";
   /** Key foreground color */
   keyFg?: string;
   /** Key background color */
@@ -25,78 +25,79 @@ export interface KeyHintProps {
 }
 
 export const KeyHint = defineComponent({
-  name: 'KeyHint',
+  name: "KeyHint",
   props: {
     bindings: {
       type: Array as PropType<KeyBinding[]>,
       required: true,
     },
     direction: {
-      type: String as PropType<'horizontal' | 'vertical'>,
-      default: 'horizontal',
+      type: String as PropType<"horizontal" | "vertical">,
+      default: "horizontal",
     },
     keyFg: {
       type: String,
-      default: 'black',
+      default: "black",
     },
     keyBg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     descFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     separator: {
       type: String,
-      default: ' ',
+      default: " ",
     },
   },
   setup(props) {
     return () => {
       const children = props.bindings.map((binding, index) => {
-        const keyParts = binding.keys.map((key, keyIndex) => [
-          h(
-            'text',
-            {
-              key: `key-${keyIndex}`,
-              fg: props.keyFg,
-              bg: props.keyBg,
-              bold: true,
-            },
-            ` ${key} `
-          ),
-          keyIndex < binding.keys.length - 1
-            ? h('text', { key: `plus-${keyIndex}` }, '+')
-            : null,
-        ]).flat().filter(Boolean);
+        const keyParts = binding.keys
+          .map((key, keyIndex) => [
+            h(
+              "text",
+              {
+                key: `key-${keyIndex}`,
+                fg: props.keyFg,
+                bg: props.keyBg,
+                bold: true,
+              },
+              ` ${key} `,
+            ),
+            keyIndex < binding.keys.length - 1 ? h("text", { key: `plus-${keyIndex}` }, "+") : null,
+          ])
+          .flat()
+          .filter(Boolean);
 
         return h(
-          'box',
+          "box",
           {
             key: `binding-${index}`,
             style: {
-              flex_direction: 'row',
-              margin_right: props.direction === 'horizontal' ? 2 : 0,
+              flex_direction: "row",
+              margin_right: props.direction === "horizontal" ? 2 : 0,
             },
           },
           [
             ...keyParts,
-            h('text', {}, props.separator),
-            h('text', { fg: props.descFg }, binding.description),
-          ]
+            h("text", {}, props.separator),
+            h("text", { fg: props.descFg }, binding.description),
+          ],
         );
       });
 
       return h(
-        'box',
+        "box",
         {
           style: {
-            flex_direction: props.direction === 'horizontal' ? 'row' : 'column',
-            flex_wrap: 'wrap',
+            flex_direction: props.direction === "horizontal" ? "row" : "column",
+            flex_wrap: "wrap",
           },
         },
-        children
+        children,
       );
     };
   },

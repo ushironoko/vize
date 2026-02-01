@@ -2,9 +2,9 @@
  * ProgressBar Component - Progress indicator
  */
 
-import { defineComponent, h, computed, type PropType } from '@vue/runtime-core';
-import { Box } from './Box.js';
-import { Text } from './Text.js';
+import { defineComponent, h, computed, type PropType } from "@vue/runtime-core";
+import { Box } from "./Box.js";
+import { Text } from "./Text.js";
 
 export interface ProgressBarProps {
   /** Progress value (0-100) */
@@ -14,7 +14,7 @@ export interface ProgressBarProps {
   /** Show percentage label */
   showLabel?: boolean;
   /** Label position */
-  labelPosition?: 'left' | 'right' | 'inside';
+  labelPosition?: "left" | "right" | "inside";
   /** Filled character */
   filledChar?: string;
   /** Empty character */
@@ -30,7 +30,7 @@ export interface ProgressBarProps {
 }
 
 export const ProgressBar = defineComponent({
-  name: 'ProgressBar',
+  name: "ProgressBar",
   props: {
     value: {
       type: Number,
@@ -46,42 +46,38 @@ export const ProgressBar = defineComponent({
       default: true,
     },
     labelPosition: {
-      type: String as PropType<'left' | 'right' | 'inside'>,
-      default: 'right',
+      type: String as PropType<"left" | "right" | "inside">,
+      default: "right",
     },
     filledChar: {
       type: String,
-      default: '█',
+      default: "█",
     },
     emptyChar: {
       type: String,
-      default: '░',
+      default: "░",
     },
     leftBorder: {
       type: String,
-      default: '',
+      default: "",
     },
     rightBorder: {
       type: String,
-      default: '',
+      default: "",
     },
     filledFg: {
       type: String,
-      default: 'green',
+      default: "green",
     },
     emptyFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
   },
   setup(props) {
-    const normalizedValue = computed(() =>
-      Math.max(0, Math.min(100, props.value))
-    );
+    const normalizedValue = computed(() => Math.max(0, Math.min(100, props.value)));
 
-    const filledWidth = computed(() =>
-      Math.round((normalizedValue.value / 100) * props.width)
-    );
+    const filledWidth = computed(() => Math.round((normalizedValue.value / 100) * props.width));
 
     const emptyWidth = computed(() => props.width - filledWidth.value);
 
@@ -99,30 +95,21 @@ export const ProgressBar = defineComponent({
       ].filter(Boolean);
 
       if (!props.showLabel) {
-        return h(Box, { flexDirection: 'row' }, () => barContent);
+        return h(Box, { flexDirection: "row" }, () => barContent);
       }
 
       const labelElement = h(Text, { dim: true }, () => label.value);
 
       switch (props.labelPosition) {
-        case 'left':
-          return h(Box, { flexDirection: 'row', gap: 1 }, () => [
-            labelElement,
-            ...barContent,
-          ]);
-        case 'inside':
+        case "left":
+          return h(Box, { flexDirection: "row", gap: 1 }, () => [labelElement, ...barContent]);
+        case "inside":
           // For inside, we'd need more complex rendering
           // For now, show on right
-          return h(Box, { flexDirection: 'row', gap: 1 }, () => [
-            ...barContent,
-            labelElement,
-          ]);
-        case 'right':
+          return h(Box, { flexDirection: "row", gap: 1 }, () => [...barContent, labelElement]);
+        case "right":
         default:
-          return h(Box, { flexDirection: 'row', gap: 1 }, () => [
-            ...barContent,
-            labelElement,
-          ]);
+          return h(Box, { flexDirection: "row", gap: 1 }, () => [...barContent, labelElement]);
       }
     };
   },
@@ -132,7 +119,7 @@ export const ProgressBar = defineComponent({
  * Indeterminate progress bar (animated)
  */
 export const IndeterminateProgressBar = defineComponent({
-  name: 'IndeterminateProgressBar',
+  name: "IndeterminateProgressBar",
   props: {
     width: {
       type: Number,
@@ -140,14 +127,14 @@ export const IndeterminateProgressBar = defineComponent({
     },
     fg: {
       type: String,
-      default: 'cyan',
+      default: "cyan",
     },
   },
   setup(props) {
     // This would need animation support
     // For now, show a static pattern
     return () => {
-      const pattern = '▓▒░░░░░░░░░░░░░░░░░░';
+      const pattern = "▓▒░░░░░░░░░░░░░░░░░░";
       const display = pattern.slice(0, props.width);
 
       return h(Text, { fg: props.fg }, () => display);

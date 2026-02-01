@@ -2,7 +2,7 @@
  * Confirm Component - Confirmation dialog
  */
 
-import { defineComponent, h, ref, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, ref, type PropType } from "@vue/runtime-core";
 
 export interface ConfirmProps {
   /** Confirmation message */
@@ -22,7 +22,7 @@ export interface ConfirmProps {
 }
 
 export const Confirm = defineComponent({
-  name: 'Confirm',
+  name: "Confirm",
   props: {
     message: {
       type: String,
@@ -30,11 +30,11 @@ export const Confirm = defineComponent({
     },
     confirmText: {
       type: String,
-      default: 'Yes',
+      default: "Yes",
     },
     cancelText: {
       type: String,
-      default: 'No',
+      default: "No",
     },
     defaultConfirm: {
       type: Boolean,
@@ -42,18 +42,18 @@ export const Confirm = defineComponent({
     },
     confirmFg: {
       type: String,
-      default: 'green',
+      default: "green",
     },
     cancelFg: {
       type: String,
-      default: 'red',
+      default: "red",
     },
     selectedFg: {
       type: String,
-      default: 'cyan',
+      default: "cyan",
     },
   },
-  emits: ['confirm', 'cancel', 'select'],
+  emits: ["confirm", "cancel", "select"],
   setup(props, { emit }) {
     const isConfirmSelected = ref(props.defaultConfirm);
 
@@ -63,59 +63,55 @@ export const Confirm = defineComponent({
 
     const confirm = () => {
       if (isConfirmSelected.value) {
-        emit('confirm');
+        emit("confirm");
       } else {
-        emit('cancel');
+        emit("cancel");
       }
-      emit('select', isConfirmSelected.value);
+      emit("select", isConfirmSelected.value);
     };
 
     return () => {
       return h(
-        'box',
+        "box",
         {
-          style: { flex_direction: 'column' },
+          style: { flex_direction: "column" },
         },
         [
           // Message
-          h(
-            'text',
-            { key: 'message' },
-            props.message
-          ),
+          h("text", { key: "message" }, props.message),
           // Buttons
           h(
-            'box',
+            "box",
             {
-              key: 'buttons',
+              key: "buttons",
               style: {
-                flex_direction: 'row',
+                flex_direction: "row",
                 gap: 2,
                 margin_top: 1,
               },
             },
             [
               h(
-                'text',
+                "text",
                 {
-                  key: 'confirm',
+                  key: "confirm",
                   fg: isConfirmSelected.value ? props.selectedFg : props.confirmFg,
                   bold: isConfirmSelected.value,
                 },
-                `[${props.confirmText}]`
+                `[${props.confirmText}]`,
               ),
               h(
-                'text',
+                "text",
                 {
-                  key: 'cancel',
+                  key: "cancel",
                   fg: !isConfirmSelected.value ? props.selectedFg : props.cancelFg,
                   bold: !isConfirmSelected.value,
                 },
-                `[${props.cancelText}]`
+                `[${props.cancelText}]`,
               ),
-            ]
+            ],
           ),
-        ]
+        ],
       );
     };
   },

@@ -7,14 +7,14 @@ import {
   type RendererOptions,
   type RendererNode,
   type RendererElement,
-} from '@vue/runtime-core';
+} from "@vue/runtime-core";
 
 /**
  * Fresco node types
  */
 export interface FrescoNode extends RendererNode {
   id: number;
-  type: 'box' | 'text' | 'input' | 'root';
+  type: "box" | "text" | "input" | "root";
   props: Record<string, unknown>;
   children: FrescoNode[];
   parent: FrescoNode | null;
@@ -28,7 +28,7 @@ export interface FrescoElement extends FrescoNode, RendererElement {}
 
 let nextId = 0;
 
-function createNode(type: FrescoNode['type']): FrescoNode {
+function createNode(type: FrescoNode["type"]): FrescoNode {
   return {
     id: nextId++,
     type,
@@ -74,14 +74,14 @@ const rendererOptions: RendererOptions<FrescoNode, FrescoElement> = {
   },
 
   createText(text) {
-    const node = createNode('text');
+    const node = createNode("text");
     node.text = text;
     return node;
   },
 
   createComment() {
     // Comments are ignored in TUI
-    return createNode('text');
+    return createNode("text");
   },
 
   setText(node, text) {
@@ -107,20 +107,20 @@ const rendererOptions: RendererOptions<FrescoNode, FrescoElement> = {
 /**
  * Map Vue element types to Fresco node types
  */
-function mapElementType(type: string): FrescoNode['type'] {
+function mapElementType(type: string): FrescoNode["type"] {
   switch (type.toLowerCase()) {
-    case 'box':
-    case 'div':
-    case 'view':
-      return 'box';
-    case 'text':
-    case 'span':
-      return 'text';
-    case 'input':
-    case 'textinput':
-      return 'input';
+    case "box":
+    case "div":
+    case "view":
+      return "box";
+    case "text":
+    case "span":
+      return "text";
+    case "input":
+    case "textinput":
+      return "input";
     default:
-      return 'box';
+      return "box";
   }
 }
 

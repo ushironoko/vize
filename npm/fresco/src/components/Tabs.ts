@@ -2,7 +2,7 @@
  * Tabs Component - Tab navigation
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface Tab {
   key: string;
@@ -16,7 +16,7 @@ export interface TabsProps {
   /** Currently active tab key */
   modelValue?: string;
   /** Tab bar position */
-  position?: 'top' | 'bottom';
+  position?: "top" | "bottom";
   /** Separator between tabs */
   separator?: string;
   /** Active tab foreground color */
@@ -30,7 +30,7 @@ export interface TabsProps {
 }
 
 export const Tabs = defineComponent({
-  name: 'Tabs',
+  name: "Tabs",
   props: {
     tabs: {
       type: Array as PropType<Tab[]>,
@@ -38,16 +38,16 @@ export const Tabs = defineComponent({
     },
     modelValue: String,
     position: {
-      type: String as PropType<'top' | 'bottom'>,
-      default: 'top',
+      type: String as PropType<"top" | "bottom">,
+      default: "top",
     },
     separator: {
       type: String,
-      default: ' | ',
+      default: " | ",
     },
     activeFg: {
       type: String,
-      default: 'cyan',
+      default: "cyan",
     },
     activeBg: String,
     inactiveFg: String,
@@ -56,13 +56,13 @@ export const Tabs = defineComponent({
       default: true,
     },
   },
-  emits: ['update:modelValue', 'change'],
+  emits: ["update:modelValue", "change"],
   setup(props, { slots, emit }) {
     const selectTab = (key: string) => {
       const tab = props.tabs.find((t) => t.key === key);
       if (tab && !tab.disabled) {
-        emit('update:modelValue', key);
-        emit('change', key);
+        emit("update:modelValue", key);
+        emit("change", key);
       }
     };
 
@@ -72,16 +72,14 @@ export const Tabs = defineComponent({
 
       props.tabs.forEach((tab, index) => {
         if (index > 0) {
-          tabItems.push(
-            h('text', { key: `sep-${index}`, dim: true }, props.separator)
-          );
+          tabItems.push(h("text", { key: `sep-${index}`, dim: true }, props.separator));
         }
 
         const isActive = tab.key === props.modelValue;
 
         tabItems.push(
           h(
-            'text',
+            "text",
             {
               key: tab.key,
               fg: isActive ? props.activeFg : props.inactiveFg,
@@ -90,43 +88,43 @@ export const Tabs = defineComponent({
               underline: isActive && props.underline,
               dim: tab.disabled,
             },
-            tab.label
-          )
+            tab.label,
+          ),
         );
       });
 
       const tabBar = h(
-        'box',
+        "box",
         {
-          key: 'tab-bar',
+          key: "tab-bar",
           style: {
-            flex_direction: 'row',
-            padding_bottom: props.position === 'top' ? 1 : 0,
-            padding_top: props.position === 'bottom' ? 1 : 0,
+            flex_direction: "row",
+            padding_bottom: props.position === "top" ? 1 : 0,
+            padding_top: props.position === "bottom" ? 1 : 0,
           },
         },
-        tabItems
+        tabItems,
       );
 
       // Content area
       const content = h(
-        'box',
+        "box",
         {
-          key: 'content',
+          key: "content",
           style: { flex_grow: 1 },
         },
-        slots.default?.()
+        slots.default?.(),
       );
 
       // Arrange based on position
-      const children = props.position === 'top' ? [tabBar, content] : [content, tabBar];
+      const children = props.position === "top" ? [tabBar, content] : [content, tabBar];
 
       return h(
-        'box',
+        "box",
         {
-          style: { flex_direction: 'column', flex_grow: 1 },
+          style: { flex_direction: "column", flex_grow: 1 },
         },
-        children
+        children,
       );
     };
   },

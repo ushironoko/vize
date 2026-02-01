@@ -2,7 +2,7 @@
  * Select Component - Dropdown/menu selection
  */
 
-import { defineComponent, h, ref, computed, type PropType, watch } from '@vue/runtime-core';
+import { defineComponent, h, ref, computed, type PropType, watch } from "@vue/runtime-core";
 
 export interface SelectOption {
   label: string;
@@ -34,7 +34,7 @@ export interface SelectProps {
 }
 
 export const Select = defineComponent({
-  name: 'Select',
+  name: "Select",
   props: {
     options: {
       type: Array as PropType<SelectOption[]>,
@@ -43,7 +43,7 @@ export const Select = defineComponent({
     modelValue: String,
     placeholder: {
       type: String,
-      default: 'Select an option',
+      default: "Select an option",
     },
     focused: {
       type: Boolean,
@@ -51,21 +51,21 @@ export const Select = defineComponent({
     },
     indicator: {
       type: String,
-      default: '> ',
+      default: "> ",
     },
     indicatorEmpty: {
       type: String,
-      default: '  ',
+      default: "  ",
     },
     fg: String,
     bg: String,
     selectedFg: {
       type: String,
-      default: 'cyan',
+      default: "cyan",
     },
     selectedBg: String,
   },
-  emits: ['update:modelValue', 'select'],
+  emits: ["update:modelValue", "select"],
   setup(props, { emit }) {
     const highlightedIndex = ref(0);
 
@@ -80,14 +80,14 @@ export const Select = defineComponent({
           }
         }
       },
-      { immediate: true }
+      { immediate: true },
     );
 
     const selectOption = (index: number) => {
       const option = props.options[index];
       if (option && !option.disabled) {
-        emit('update:modelValue', option.value);
-        emit('select', option);
+        emit("update:modelValue", option.value);
+        emit("select", option);
       }
     };
 
@@ -118,33 +118,33 @@ export const Select = defineComponent({
         const indicator = isHighlighted ? props.indicator : props.indicatorEmpty;
 
         return h(
-          'box',
+          "box",
           {
             key: option.value,
-            style: { flex_direction: 'row' },
+            style: { flex_direction: "row" },
           },
           [
             h(
-              'text',
+              "text",
               {
                 fg: isHighlighted ? props.selectedFg : props.fg,
                 bg: isHighlighted ? props.selectedBg : props.bg,
                 dim: option.disabled,
               },
-              `${indicator}${option.label}${isSelected ? ' (selected)' : ''}`
+              `${indicator}${option.label}${isSelected ? " (selected)" : ""}`,
             ),
-          ]
+          ],
         );
       });
 
       return h(
-        'box',
+        "box",
         {
-          style: { flex_direction: 'column' },
+          style: { flex_direction: "column" },
           fg: props.fg,
           bg: props.bg,
         },
-        children
+        children,
       );
     };
   },

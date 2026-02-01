@@ -2,7 +2,7 @@
  * RadioGroup Component - Radio button group selection
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface RadioOption {
   label: string;
@@ -16,7 +16,7 @@ export interface RadioGroupProps {
   /** Currently selected value */
   modelValue?: string;
   /** Layout direction */
-  direction?: 'horizontal' | 'vertical';
+  direction?: "horizontal" | "vertical";
   /** Focused option index */
   focusedIndex?: number;
   /** Selected indicator */
@@ -30,7 +30,7 @@ export interface RadioGroupProps {
 }
 
 export const RadioGroup = defineComponent({
-  name: 'RadioGroup',
+  name: "RadioGroup",
   props: {
     options: {
       type: Array as PropType<RadioOption[]>,
@@ -38,25 +38,25 @@ export const RadioGroup = defineComponent({
     },
     modelValue: String,
     direction: {
-      type: String as PropType<'horizontal' | 'vertical'>,
-      default: 'vertical',
+      type: String as PropType<"horizontal" | "vertical">,
+      default: "vertical",
     },
     focusedIndex: Number,
     selected: {
       type: String,
-      default: '◉',
+      default: "◉",
     },
     unselected: {
       type: String,
-      default: '○',
+      default: "○",
     },
     fg: String,
     selectedFg: {
       type: String,
-      default: 'green',
+      default: "green",
     },
   },
-  emits: ['update:modelValue', 'change'],
+  emits: ["update:modelValue", "change"],
   setup(props, { emit }) {
     return () => {
       const children = props.options.map((option, index) => {
@@ -65,26 +65,26 @@ export const RadioGroup = defineComponent({
         const indicator = isSelected ? props.selected : props.unselected;
 
         return h(
-          'text',
+          "text",
           {
             key: option.value,
             fg: isSelected ? props.selectedFg : props.fg,
             bold: isFocused,
             dim: option.disabled,
           },
-          `${indicator} ${option.label}`
+          `${indicator} ${option.label}`,
         );
       });
 
       return h(
-        'box',
+        "box",
         {
           style: {
-            flex_direction: props.direction === 'horizontal' ? 'row' : 'column',
-            gap: props.direction === 'horizontal' ? 2 : 0,
+            flex_direction: props.direction === "horizontal" ? "row" : "column",
+            gap: props.direction === "horizontal" ? 2 : 0,
           },
         },
-        children
+        children,
       );
     };
   },

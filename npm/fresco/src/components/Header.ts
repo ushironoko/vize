@@ -2,7 +2,7 @@
  * Header Component - Application header
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface HeaderProps {
   /** Header title */
@@ -24,7 +24,7 @@ export interface HeaderProps {
 }
 
 export const Header = defineComponent({
-  name: 'Header',
+  name: "Header",
   props: {
     title: {
       type: String,
@@ -36,11 +36,11 @@ export const Header = defineComponent({
     bg: String,
     titleFg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     subtitleFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     borderBottom: {
       type: Boolean,
@@ -49,66 +49,60 @@ export const Header = defineComponent({
   },
   setup(props, { slots }) {
     return () => {
-      const leftContent = slots.left?.() ?? (props.left ? [h('text', {}, props.left)] : []);
-      const rightContent = slots.right?.() ?? (props.right ? [h('text', {}, props.right)] : []);
+      const leftContent = slots.left?.() ?? (props.left ? [h("text", {}, props.left)] : []);
+      const rightContent = slots.right?.() ?? (props.right ? [h("text", {}, props.right)] : []);
 
       const centerContent = [
         h(
-          'text',
+          "text",
           {
             fg: props.titleFg,
             bold: true,
           },
-          props.title
+          props.title,
         ),
       ];
 
       if (props.subtitle) {
         centerContent.push(
           h(
-            'text',
+            "text",
             {
               fg: props.subtitleFg,
               dim: true,
             },
-            ` - ${props.subtitle}`
-          )
+            ` - ${props.subtitle}`,
+          ),
         );
       }
 
       const children: VNode[] = [
         h(
-          'box',
+          "box",
           {
-            key: 'header-content',
+            key: "header-content",
             bg: props.bg,
             style: {
-              flex_direction: 'row',
-              justify_content: 'space-between',
-              align_items: 'center',
-              width: '100%',
+              flex_direction: "row",
+              justify_content: "space-between",
+              align_items: "center",
+              width: "100%",
               padding: 1,
             },
           },
           [
-            h('box', { key: 'left', style: { flex_direction: 'row' } }, leftContent),
-            h('box', { key: 'center', style: { flex_direction: 'row' } }, centerContent),
-            h('box', { key: 'right', style: { flex_direction: 'row' } }, rightContent),
-          ]
+            h("box", { key: "left", style: { flex_direction: "row" } }, leftContent),
+            h("box", { key: "center", style: { flex_direction: "row" } }, centerContent),
+            h("box", { key: "right", style: { flex_direction: "row" } }, rightContent),
+          ],
         ),
       ];
 
       if (props.borderBottom) {
-        children.push(
-          h('text', { key: 'border', dim: true }, '─'.repeat(80))
-        );
+        children.push(h("text", { key: "border", dim: true }, "─".repeat(80)));
       }
 
-      return h(
-        'box',
-        { style: { flex_direction: 'column' } },
-        children
-      );
+      return h("box", { style: { flex_direction: "column" } }, children);
     };
   },
 });

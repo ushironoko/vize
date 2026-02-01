@@ -3,8 +3,8 @@
  * Generates design token documentation from Style Dictionary format.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Design token value.
@@ -50,7 +50,7 @@ export interface StyleDictionaryConfig {
    * Output format for documentation.
    * @default 'html'
    */
-  outputFormat?: 'html' | 'json' | 'markdown';
+  outputFormat?: "html" | "json" | "markdown";
 
   /**
    * Output directory for generated documentation.
@@ -80,7 +80,7 @@ export async function parseTokens(tokensPath: string): Promise<TokenCategory[]> 
     return parseTokenDirectory(absolutePath);
   }
 
-  const content = await fs.promises.readFile(absolutePath, 'utf-8');
+  const content = await fs.promises.readFile(absolutePath, "utf-8");
   const tokens = JSON.parse(content);
   return flattenTokens(tokens);
 }
@@ -93,11 +93,13 @@ async function parseTokenDirectory(dirPath: string): Promise<TokenCategory[]> {
   const categories: TokenCategory[] = [];
 
   for (const entry of entries) {
-    if (entry.isFile() && (entry.name.endsWith('.json') || entry.name.endsWith('.tokens.json'))) {
+    if (entry.isFile() && (entry.name.endsWith(".json") || entry.name.endsWith(".tokens.json"))) {
       const filePath = path.join(dirPath, entry.name);
-      const content = await fs.promises.readFile(filePath, 'utf-8');
+      const content = await fs.promises.readFile(filePath, "utf-8");
       const tokens = JSON.parse(content);
-      const categoryName = path.basename(entry.name, path.extname(entry.name)).replace('.tokens', '');
+      const categoryName = path
+        .basename(entry.name, path.extname(entry.name))
+        .replace(".tokens", "");
 
       categories.push({
         name: formatCategoryName(categoryName),
@@ -122,7 +124,7 @@ function flattenTokens(tokens: Record<string, unknown>, prefix: string[] = []): 
       continue;
     }
 
-    if (typeof value === 'object' && value !== null) {
+    if (typeof value === "object" && value !== null) {
       const categoryTokens = extractTokens(value as Record<string, unknown>);
       const subcategories = flattenTokens(value as Record<string, unknown>, [...prefix, key]);
 
@@ -161,7 +163,7 @@ function extractSubcategories(obj: Record<string, unknown>): TokenCategory[] | u
   const subcategories: TokenCategory[] = [];
 
   for (const [key, value] of Object.entries(obj)) {
-    if (!isTokenValue(value) && typeof value === 'object' && value !== null) {
+    if (!isTokenValue(value) && typeof value === "object" && value !== null) {
       const categoryTokens = extractTokens(value as Record<string, unknown>);
       const nested = extractSubcategories(value as Record<string, unknown>);
 
@@ -182,9 +184,9 @@ function extractSubcategories(obj: Record<string, unknown>): TokenCategory[] | u
  * Check if a value is a token definition.
  */
 function isTokenValue(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false;
+  if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
-  return 'value' in obj && (typeof obj.value === 'string' || typeof obj.value === 'number');
+  return "value" in obj && (typeof obj.value === "string" || typeof obj.value === "number");
 }
 
 /**
@@ -204,11 +206,11 @@ function normalizeToken(raw: Record<string, unknown>): DesignToken {
  */
 function formatCategoryName(name: string): string {
   return name
-    .replace(/[-_]/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
+    .replace(/[-_]/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }
 
 /**
@@ -216,22 +218,22 @@ function formatCategoryName(name: string): string {
  */
 export function generateTokensHtml(categories: TokenCategory[]): string {
   const renderToken = (name: string, token: DesignToken): string => {
-    const isColor = typeof token.value === 'string' && (
-      token.value.startsWith('#') ||
-      token.value.startsWith('rgb') ||
-      token.value.startsWith('hsl') ||
-      token.type === 'color'
-    );
+    const isColor =
+      typeof token.value === "string" &&
+      (token.value.startsWith("#") ||
+        token.value.startsWith("rgb") ||
+        token.value.startsWith("hsl") ||
+        token.type === "color");
 
     return `
       <div class="token">
         <div class="token-preview">
-          ${isColor ? `<div class="color-swatch" style="background: ${token.value}"></div>` : ''}
+          ${isColor ? `<div class="color-swatch" style="background: ${token.value}"></div>` : ""}
         </div>
         <div class="token-info">
           <div class="token-name">${name}</div>
           <div class="token-value">${token.value}</div>
-          ${token.description ? `<div class="token-description">${token.description}</div>` : ''}
+          ${token.description ? `<div class="token-description">${token.description}</div>` : ""}
         </div>
       </div>
     `;
@@ -246,7 +248,7 @@ export function generateTokensHtml(categories: TokenCategory[]): string {
       html += renderToken(name, token);
     }
 
-    html += '</div>';
+    html += "</div>";
 
     if (category.subcategories) {
       for (const sub of category.subcategories) {
@@ -336,7 +338,7 @@ export function generateTokensHtml(categories: TokenCategory[]): string {
 </head>
 <body>
   <h1>Design Tokens</h1>
-  ${categories.map(cat => renderCategory(cat)).join('')}
+  ${categories.map((cat) => renderCategory(cat)).join("")}
 </body>
 </html>`;
 }
@@ -346,18 +348,18 @@ export function generateTokensHtml(categories: TokenCategory[]): string {
  */
 export function generateTokensMarkdown(categories: TokenCategory[]): string {
   const renderCategory = (category: TokenCategory, level: number = 2): string => {
-    const heading = '#'.repeat(level);
+    const heading = "#".repeat(level);
     let md = `\n${heading} ${category.name}\n\n`;
 
     if (Object.keys(category.tokens).length > 0) {
-      md += '| Token | Value | Description |\n';
-      md += '|-------|-------|-------------|\n';
+      md += "| Token | Value | Description |\n";
+      md += "|-------|-------|-------------|\n";
 
       for (const [name, token] of Object.entries(category.tokens)) {
-        const desc = token.description || '-';
+        const desc = token.description || "-";
         md += `| \`${name}\` | \`${token.value}\` | ${desc} |\n`;
       }
-      md += '\n';
+      md += "\n";
     }
 
     if (category.subcategories) {
@@ -369,7 +371,7 @@ export function generateTokensMarkdown(categories: TokenCategory[]): string {
     return md;
   };
 
-  let markdown = '# Design Tokens\n\n';
+  let markdown = "# Design Tokens\n\n";
   markdown += `> Generated by Musea on ${new Date().toISOString()}\n`;
 
   for (const category of categories) {
@@ -382,10 +384,12 @@ export function generateTokensMarkdown(categories: TokenCategory[]): string {
 /**
  * Style Dictionary plugin for Musea.
  */
-export async function processStyleDictionary(config: StyleDictionaryConfig): Promise<StyleDictionaryOutput> {
+export async function processStyleDictionary(
+  config: StyleDictionaryConfig,
+): Promise<StyleDictionaryOutput> {
   const categories = await parseTokens(config.tokensPath);
-  const outputDir = config.outputDir ?? '.vize/tokens';
-  const outputFormat = config.outputFormat ?? 'html';
+  const outputDir = config.outputDir ?? ".vize/tokens";
+  const outputFormat = config.outputFormat ?? "html";
 
   // Ensure output directory exists
   await fs.promises.mkdir(outputDir, { recursive: true });
@@ -395,22 +399,22 @@ export async function processStyleDictionary(config: StyleDictionaryConfig): Pro
   let filename: string;
 
   switch (outputFormat) {
-    case 'html':
+    case "html":
       content = generateTokensHtml(categories);
-      filename = 'tokens.html';
+      filename = "tokens.html";
       break;
-    case 'markdown':
+    case "markdown":
       content = generateTokensMarkdown(categories);
-      filename = 'tokens.md';
+      filename = "tokens.md";
       break;
-    case 'json':
+    case "json":
     default:
       content = JSON.stringify({ categories }, null, 2);
-      filename = 'tokens.json';
+      filename = "tokens.json";
   }
 
   const outputPath = path.join(outputDir, filename);
-  await fs.promises.writeFile(outputPath, content, 'utf-8');
+  await fs.promises.writeFile(outputPath, content, "utf-8");
 
   console.log(`[musea] Generated token documentation: ${outputPath}`);
 

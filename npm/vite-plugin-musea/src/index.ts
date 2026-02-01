@@ -13,18 +13,12 @@
  * ```
  */
 
-import type { Plugin, ViteDevServer, ResolvedConfig } from 'vite';
-import { createRequire } from 'node:module';
-import fs from 'node:fs';
-import path from 'node:path';
+import type { Plugin, ViteDevServer, ResolvedConfig } from "vite";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
 
-import type {
-  MuseaOptions,
-  ArtFileInfo,
-  ArtMetadata,
-  ArtVariant,
-  CsfOutput,
-} from './types.js';
+import type { MuseaOptions, ArtFileInfo, ArtMetadata, ArtVariant, CsfOutput } from "./types.js";
 
 export type {
   MuseaOptions,
@@ -34,7 +28,7 @@ export type {
   CsfOutput,
   VrtOptions,
   ViewportConfig,
-} from './types.js';
+} from "./types.js";
 
 export {
   MuseaVrtRunner,
@@ -42,7 +36,7 @@ export {
   generateVrtJsonReport,
   type VrtResult,
   type VrtSummary,
-} from './vrt.js';
+} from "./vrt.js";
 
 export {
   processStyleDictionary,
@@ -53,18 +47,18 @@ export {
   type TokenCategory,
   type StyleDictionaryConfig,
   type StyleDictionaryOutput,
-} from './style-dictionary.js';
+} from "./style-dictionary.js";
 
 // Virtual module prefixes
-const VIRTUAL_MUSEA_PREFIX = '\0musea:';
-const VIRTUAL_GALLERY = '\0musea-gallery';
-const VIRTUAL_MANIFEST = '\0musea-manifest';
+const VIRTUAL_MUSEA_PREFIX = "\0musea:";
+const VIRTUAL_GALLERY = "\0musea-gallery";
+const VIRTUAL_MANIFEST = "\0musea-manifest";
 
 // Native binding types
 interface NativeBinding {
   parseArt: (
     source: string,
-    options?: { filename?: string }
+    options?: { filename?: string },
   ) => {
     filename: string;
     metadata: {
@@ -88,7 +82,7 @@ interface NativeBinding {
   };
   artToCsf: (
     source: string,
-    options?: { filename?: string }
+    options?: { filename?: string },
   ) => {
     code: string;
     filename: string;
@@ -103,12 +97,10 @@ function loadNative(): NativeBinding {
 
   const require = createRequire(import.meta.url);
   try {
-    native = require('@vizejs/native') as NativeBinding;
+    native = require("@vizejs/native") as NativeBinding;
     return native;
   } catch (e) {
-    throw new Error(
-      `Failed to load @vizejs/native. Make sure it's installed and built:\n${e}`
-    );
+    throw new Error(`Failed to load @vizejs/native. Make sure it's installed and built:\n${e}`);
   }
 }
 
@@ -116,11 +108,11 @@ function loadNative(): NativeBinding {
  * Create Musea Vite plugin.
  */
 export function musea(options: MuseaOptions = {}): Plugin[] {
-  const include = options.include ?? ['**/*.art.vue'];
-  const exclude = options.exclude ?? ['node_modules/**', 'dist/**'];
-  const basePath = options.basePath ?? '/__musea__';
+  const include = options.include ?? ["**/*.art.vue"];
+  const exclude = options.exclude ?? ["node_modules/**", "dist/**"];
+  const basePath = options.basePath ?? "/__musea__";
   const storybookCompat = options.storybookCompat ?? false;
-  const storybookOutDir = options.storybookOutDir ?? '.storybook/stories';
+  const storybookOutDir = options.storybookOutDir ?? ".storybook/stories";
 
   let config: ResolvedConfig;
   let server: ViteDevServer | null = null;
@@ -128,8 +120,8 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
   // Main plugin
   const mainPlugin: Plugin = {
-    name: 'vite-plugin-musea',
-    enforce: 'pre',
+    name: "vite-plugin-musea",
+    enforce: "pre",
 
     config() {
       // Add Vue alias for runtime template compilation
@@ -137,7 +129,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
       return {
         resolve: {
           alias: {
-            vue: 'vue/dist/vue.esm-bundler.js',
+            vue: "vue/dist/vue.esm-bundler.js",
           },
         },
       };
@@ -152,9 +144,9 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
       // Gallery UI route
       devServer.middlewares.use(basePath, async (req, res, next) => {
-        if (req.url === '/' || req.url === '/index.html') {
+        if (req.url === "/" || req.url === "/index.html") {
           const html = generateGalleryHtml(basePath);
-          res.setHeader('Content-Type', 'text/html');
+          res.setHeader("Content-Type", "text/html");
           res.end(html);
           return;
         }
@@ -163,27 +155,27 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
       // Preview module route - serves the JavaScript module for a specific variant
       devServer.middlewares.use(`${basePath}/preview-module`, async (req, res, next) => {
-        const url = new URL(req.url || '', `http://localhost`);
-        const artPath = url.searchParams.get('art');
-        const variantName = url.searchParams.get('variant');
+        const url = new URL(req.url || "", `http://localhost`);
+        const artPath = url.searchParams.get("art");
+        const variantName = url.searchParams.get("variant");
 
         if (!artPath || !variantName) {
           res.statusCode = 400;
-          res.end('Missing art or variant parameter');
+          res.end("Missing art or variant parameter");
           return;
         }
 
         const art = artFiles.get(artPath);
         if (!art) {
           res.statusCode = 404;
-          res.end('Art not found');
+          res.end("Art not found");
           return;
         }
 
         const variant = art.variants.find((v) => v.name === variantName);
         if (!variant) {
           res.statusCode = 404;
-          res.end('Variant not found');
+          res.end("Variant not found");
           return;
         }
 
@@ -193,11 +185,11 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         // Transform the module through Vite to resolve imports
         try {
           const result = await devServer.transformRequest(
-            `virtual:musea-preview:${artPath}:${variantName}`
+            `virtual:musea-preview:${artPath}:${variantName}`,
           );
           if (result) {
-            res.setHeader('Content-Type', 'application/javascript');
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader("Content-Type", "application/javascript");
+            res.setHeader("Cache-Control", "no-cache");
             res.end(result.code);
             return;
           }
@@ -206,34 +198,34 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         }
 
         // Fallback: serve the module directly (imports won't be resolved)
-        res.setHeader('Content-Type', 'application/javascript');
-        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader("Content-Type", "application/javascript");
+        res.setHeader("Cache-Control", "no-cache");
         res.end(moduleCode);
       });
 
       // VRT preview route - renders a single variant for screenshot
       devServer.middlewares.use(`${basePath}/preview`, async (req, res, next) => {
-        const url = new URL(req.url || '', `http://localhost`);
-        const artPath = url.searchParams.get('art');
-        const variantName = url.searchParams.get('variant');
+        const url = new URL(req.url || "", `http://localhost`);
+        const artPath = url.searchParams.get("art");
+        const variantName = url.searchParams.get("variant");
 
         if (!artPath || !variantName) {
           res.statusCode = 400;
-          res.end('Missing art or variant parameter');
+          res.end("Missing art or variant parameter");
           return;
         }
 
         const art = artFiles.get(artPath);
         if (!art) {
           res.statusCode = 404;
-          res.end('Art not found');
+          res.end("Art not found");
           return;
         }
 
         const variant = art.variants.find((v) => v.name === variantName);
         if (!variant) {
           res.statusCode = 404;
-          res.end('Variant not found');
+          res.end("Variant not found");
           return;
         }
 
@@ -241,15 +233,15 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         // Transform HTML through Vite to properly resolve module imports
         const html = await devServer.transformIndexHtml(
           `${basePath}/preview?art=${encodeURIComponent(artPath)}&variant=${encodeURIComponent(variantName)}`,
-          rawHtml
+          rawHtml,
         );
-        res.setHeader('Content-Type', 'text/html');
+        res.setHeader("Content-Type", "text/html");
         res.end(html);
       });
 
       // Art module route - serves transformed art file as ES module
       devServer.middlewares.use(`${basePath}/art`, async (req, res, next) => {
-        const url = new URL(req.url || '', 'http://localhost');
+        const url = new URL(req.url || "", "http://localhost");
         const artPath = decodeURIComponent(url.pathname.slice(1)); // Remove leading /
 
         if (!artPath) {
@@ -260,7 +252,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         const art = artFiles.get(artPath);
         if (!art) {
           res.statusCode = 404;
-          res.end('Art not found: ' + artPath);
+          res.end("Art not found: " + artPath);
           return;
         }
 
@@ -269,20 +261,20 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
           const virtualId = `virtual:musea-art:${artPath}`;
           const result = await devServer.transformRequest(virtualId);
           if (result) {
-            res.setHeader('Content-Type', 'application/javascript');
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader("Content-Type", "application/javascript");
+            res.setHeader("Cache-Control", "no-cache");
             res.end(result.code);
           } else {
             // Fallback: generate and serve the module directly
             const moduleCode = generateArtModule(art, artPath);
-            res.setHeader('Content-Type', 'application/javascript');
+            res.setHeader("Content-Type", "application/javascript");
             res.end(moduleCode);
           }
         } catch (err) {
-          console.error('[musea] Failed to transform art module:', err);
+          console.error("[musea] Failed to transform art module:", err);
           // Fallback if transform fails
           const moduleCode = generateArtModule(art, artPath);
-          res.setHeader('Content-Type', 'application/javascript');
+          res.setHeader("Content-Type", "application/javascript");
           res.end(moduleCode);
         }
       });
@@ -290,22 +282,22 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
       // API endpoints
       devServer.middlewares.use(`${basePath}/api`, async (req, res, next) => {
         // GET /api/arts - List all arts
-        if (req.url === '/arts' && req.method === 'GET') {
-          res.setHeader('Content-Type', 'application/json');
+        if (req.url === "/arts" && req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(Array.from(artFiles.values())));
           return;
         }
 
         // GET /api/arts/:path - Get single art
-        if (req.url?.startsWith('/arts/') && req.method === 'GET') {
+        if (req.url?.startsWith("/arts/") && req.method === "GET") {
           const artPath = decodeURIComponent(req.url.slice(6));
           const art = artFiles.get(artPath);
           if (art) {
-            res.setHeader('Content-Type', 'application/json');
+            res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(art));
           } else {
             res.statusCode = 404;
-            res.end(JSON.stringify({ error: 'Art not found' }));
+            res.end(JSON.stringify({ error: "Art not found" }));
           }
           return;
         }
@@ -314,21 +306,21 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
       });
 
       // Watch for Art file changes
-      devServer.watcher.on('change', async (file) => {
-        if (file.endsWith('.art.vue') && shouldProcess(file, include, exclude, config.root)) {
+      devServer.watcher.on("change", async (file) => {
+        if (file.endsWith(".art.vue") && shouldProcess(file, include, exclude, config.root)) {
           await processArtFile(file);
           console.log(`[musea] Reloaded: ${path.relative(config.root, file)}`);
         }
       });
 
-      devServer.watcher.on('add', async (file) => {
-        if (file.endsWith('.art.vue') && shouldProcess(file, include, exclude, config.root)) {
+      devServer.watcher.on("add", async (file) => {
+        if (file.endsWith(".art.vue") && shouldProcess(file, include, exclude, config.root)) {
           await processArtFile(file);
           console.log(`[musea] Added: ${path.relative(config.root, file)}`);
         }
       });
 
-      devServer.watcher.on('unlink', (file) => {
+      devServer.watcher.on("unlink", (file) => {
         if (artFiles.has(file)) {
           artFiles.delete(file);
           console.log(`[musea] Removed: ${path.relative(config.root, file)}`);
@@ -360,17 +352,17 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         return VIRTUAL_MANIFEST;
       }
       // Handle virtual:musea-preview: prefix for preview modules
-      if (id.startsWith('virtual:musea-preview:')) {
-        return '\0musea-preview:' + id.slice('virtual:musea-preview:'.length);
+      if (id.startsWith("virtual:musea-preview:")) {
+        return "\0musea-preview:" + id.slice("virtual:musea-preview:".length);
       }
       // Handle virtual:musea-art: prefix for preview modules
-      if (id.startsWith('virtual:musea-art:')) {
-        const artPath = id.slice('virtual:musea-art:'.length);
+      if (id.startsWith("virtual:musea-art:")) {
+        const artPath = id.slice("virtual:musea-art:".length);
         if (artFiles.has(artPath)) {
-          return '\0musea-art:' + artPath;
+          return "\0musea-art:" + artPath;
         }
       }
-      if (id.endsWith('.art.vue')) {
+      if (id.endsWith(".art.vue")) {
         const resolved = path.resolve(config.root, id);
         if (artFiles.has(resolved)) {
           return VIRTUAL_MUSEA_PREFIX + resolved;
@@ -387,9 +379,9 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         return generateManifestModule(artFiles);
       }
       // Handle \0musea-preview: prefix for preview modules
-      if (id.startsWith('\0musea-preview:')) {
-        const rest = id.slice('\0musea-preview:'.length);
-        const lastColonIndex = rest.lastIndexOf(':');
+      if (id.startsWith("\0musea-preview:")) {
+        const rest = id.slice("\0musea-preview:".length);
+        const lastColonIndex = rest.lastIndexOf(":");
         if (lastColonIndex !== -1) {
           const artPath = rest.slice(0, lastColonIndex);
           const variantName = rest.slice(lastColonIndex + 1);
@@ -401,8 +393,8 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         }
       }
       // Handle \0musea-art: prefix for preview modules
-      if (id.startsWith('\0musea-art:')) {
-        const artPath = id.slice('\0musea-art:'.length);
+      if (id.startsWith("\0musea-art:")) {
+        const artPath = id.slice("\0musea-art:".length);
         const art = artFiles.get(artPath);
         if (art) {
           return generateArtModule(art, artPath);
@@ -420,7 +412,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
     async handleHotUpdate(ctx) {
       const { file } = ctx;
-      if (file.endsWith('.art.vue') && artFiles.has(file)) {
+      if (file.endsWith(".art.vue") && artFiles.has(file)) {
         await processArtFile(file);
 
         // Invalidate virtual modules
@@ -438,7 +430,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
   async function processArtFile(filePath: string): Promise<void> {
     try {
-      const source = await fs.promises.readFile(filePath, 'utf-8');
+      const source = await fs.promises.readFile(filePath, "utf-8");
       const binding = loadNative();
       const parsed = binding.parseArt(source, { filename: filePath });
 
@@ -450,7 +442,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
           component: parsed.metadata.component,
           category: parsed.metadata.category,
           tags: parsed.metadata.tags,
-          status: parsed.metadata.status as 'draft' | 'ready' | 'deprecated',
+          status: parsed.metadata.status as "draft" | "ready" | "deprecated",
           order: parsed.metadata.order,
         },
         variants: parsed.variants.map((v) => ({
@@ -475,12 +467,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
 // Utility functions
 
-function shouldProcess(
-  file: string,
-  include: string[],
-  exclude: string[],
-  root: string
-): boolean {
+function shouldProcess(file: string, include: string[], exclude: string[], root: string): boolean {
   const relative = path.relative(root, file);
 
   // Check exclude patterns
@@ -504,18 +491,14 @@ function matchGlob(filepath: string, pattern: string): boolean {
   // Simple glob matching (supports * and **)
   // Escape . first, then replace glob patterns
   const regex = pattern
-    .replace(/\./g, '\\.')
-    .replace(/\*\*/g, '.*')
-    .replace(/\*(?!\*)/g, '[^/]*');
+    .replace(/\./g, "\\.")
+    .replace(/\*\*/g, ".*")
+    .replace(/\*(?!\*)/g, "[^/]*");
 
   return new RegExp(`^${regex}$`).test(filepath);
 }
 
-async function scanArtFiles(
-  root: string,
-  include: string[],
-  exclude: string[]
-): Promise<string[]> {
+async function scanArtFiles(root: string, include: string[], exclude: string[]): Promise<string[]> {
   const files: string[] = [];
 
   async function scan(dir: string): Promise<void> {
@@ -538,7 +521,7 @@ async function scanArtFiles(
 
       if (entry.isDirectory()) {
         await scan(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.art.vue')) {
+      } else if (entry.isFile() && entry.name.endsWith(".art.vue")) {
         // Check include
         for (const pattern of include) {
           if (matchGlob(relative, pattern)) {
@@ -1298,7 +1281,7 @@ export async function loadArts() {
 function generatePreviewModule(
   art: ArtFileInfo,
   variantComponentName: string,
-  variantName: string
+  variantName: string,
 ): string {
   const artModuleId = `virtual:musea-art:${art.path}`;
   const escapedVariantName = escapeTemplate(variantName);
@@ -1339,7 +1322,6 @@ async function mount() {
 
 mount();
 `;
-
 }
 
 function generateManifestModule(artFiles: Map<string, ArtFileInfo>): string {
@@ -1358,9 +1340,7 @@ function generateArtModule(art: ArtFileInfo, filePath: string): string {
   }
 
   // Extract component name from path (e.g., './Button.vue' -> 'Button')
-  const componentName = componentPath
-    ? path.basename(componentPath, '.vue')
-    : null;
+  const componentName = componentPath ? path.basename(componentPath, ".vue") : null;
 
   let code = `
 // Auto-generated module for: ${path.basename(filePath)}
@@ -1381,9 +1361,9 @@ export const variants = ${JSON.stringify(art.variants)};
     const variantComponentName = toPascalCase(variant.name);
     // Escape the template for use in a JS string
     const escapedTemplate = variant.template
-      .replace(/\\/g, '\\\\')
-      .replace(/`/g, '\\`')
-      .replace(/\$/g, '\\$');
+      .replace(/\\/g, "\\\\")
+      .replace(/`/g, "\\`")
+      .replace(/\$/g, "\\$");
 
     // Wrap template with the variant container
     const fullTemplate = `<div class="musea-variant" data-variant="${variant.name}">${escapedTemplate}</div>`;
@@ -1420,7 +1400,7 @@ export default ${toPascalCase(defaultVariant.name)};
 async function generateStorybookFiles(
   artFiles: Map<string, ArtFileInfo>,
   root: string,
-  outDir: string
+  outDir: string,
 ): Promise<void> {
   const binding = loadNative();
   const outputDir = path.resolve(root, outDir);
@@ -1430,11 +1410,11 @@ async function generateStorybookFiles(
 
   for (const [filePath, _art] of artFiles) {
     try {
-      const source = await fs.promises.readFile(filePath, 'utf-8');
+      const source = await fs.promises.readFile(filePath, "utf-8");
       const csf = binding.artToCsf(source, { filename: filePath });
 
       const outputPath = path.join(outputDir, csf.filename);
-      await fs.promises.writeFile(outputPath, csf.code, 'utf-8');
+      await fs.promises.writeFile(outputPath, csf.code, "utf-8");
 
       console.log(`[musea] Generated: ${path.relative(root, outputPath)}`);
     } catch (e) {
@@ -1448,21 +1428,14 @@ function toPascalCase(str: string): string {
     .split(/[\s\-_]+/)
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join('');
+    .join("");
 }
 
 function escapeTemplate(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\n/g, '\\n');
+  return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
 }
 
-function generatePreviewHtml(
-  art: ArtFileInfo,
-  variant: ArtVariant,
-  basePath: string
-): string {
+function generatePreviewHtml(art: ArtFileInfo, variant: ArtVariant, basePath: string): string {
   const variantComponentName = toPascalCase(variant.name);
   // Create a unique module URL for each variant to avoid caching issues
   const previewModuleUrl = `${basePath}/preview-module?art=${encodeURIComponent(art.path)}&variant=${encodeURIComponent(variant.name)}`;
@@ -1545,11 +1518,11 @@ function generatePreviewHtml(
 
 function escapeHtml(str: string): string {
   return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
 }
 
 export default musea;

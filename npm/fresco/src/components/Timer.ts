@@ -2,9 +2,17 @@
  * Timer Component - Countdown/stopwatch timer
  */
 
-import { defineComponent, h, ref, onMounted, onUnmounted, type PropType, computed } from '@vue/runtime-core';
+import {
+  defineComponent,
+  h,
+  ref,
+  onMounted,
+  onUnmounted,
+  type PropType,
+  computed,
+} from "@vue/runtime-core";
 
-export type TimerMode = 'countdown' | 'stopwatch';
+export type TimerMode = "countdown" | "stopwatch";
 
 export interface TimerProps {
   /** Timer mode */
@@ -26,11 +34,11 @@ export interface TimerProps {
 }
 
 export const Timer = defineComponent({
-  name: 'Timer',
+  name: "Timer",
   props: {
     mode: {
       type: String as PropType<TimerMode>,
-      default: 'stopwatch',
+      default: "stopwatch",
     },
     initialSeconds: {
       type: Number,
@@ -50,25 +58,25 @@ export const Timer = defineComponent({
     },
     fg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     warningFg: {
       type: String,
-      default: 'yellow',
+      default: "yellow",
     },
     dangerFg: {
       type: String,
-      default: 'red',
+      default: "red",
     },
   },
-  emits: ['tick', 'complete'],
+  emits: ["tick", "complete"],
   setup(props, { emit, expose }) {
     const elapsed = ref(0); // milliseconds
     const isRunning = ref(false);
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const totalMs = computed(() => {
-      if (props.mode === 'countdown') {
+      if (props.mode === "countdown") {
         return Math.max(0, props.initialSeconds * 1000 - elapsed.value);
       }
       return elapsed.value;
@@ -82,19 +90,19 @@ export const Timer = defineComponent({
       const seconds = totalSeconds % 60;
       const milliseconds = Math.floor((ms % 1000) / 10);
 
-      let result = '';
+      let result = "";
       if (props.showHours || hours > 0) {
-        result += `${String(hours).padStart(2, '0')}:`;
+        result += `${String(hours).padStart(2, "0")}:`;
       }
-      result += `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+      result += `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
       if (props.showMilliseconds) {
-        result += `.${String(milliseconds).padStart(2, '0')}`;
+        result += `.${String(milliseconds).padStart(2, "0")}`;
       }
       return result;
     });
 
     const color = computed(() => {
-      if (props.mode === 'countdown') {
+      if (props.mode === "countdown") {
         const seconds = totalMs.value / 1000;
         if (seconds <= 5) return props.dangerFg;
         if (seconds <= 10) return props.warningFg;
@@ -107,11 +115,11 @@ export const Timer = defineComponent({
       isRunning.value = true;
       intervalId = setInterval(() => {
         elapsed.value += 100;
-        emit('tick', totalMs.value);
+        emit("tick", totalMs.value);
 
-        if (props.mode === 'countdown' && totalMs.value <= 0) {
+        if (props.mode === "countdown" && totalMs.value <= 0) {
           stop();
-          emit('complete');
+          emit("complete");
         }
       }, 100);
     };
@@ -150,12 +158,12 @@ export const Timer = defineComponent({
 
     return () => {
       return h(
-        'text',
+        "text",
         {
           fg: color.value,
           bold: true,
         },
-        formatted.value
+        formatted.value,
       );
     };
   },

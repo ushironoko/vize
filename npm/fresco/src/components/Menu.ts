@@ -2,7 +2,7 @@
  * Menu Component - Command menu/palette
  */
 
-import { defineComponent, h, ref, computed, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, ref, computed, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface MenuItem {
   key: string;
@@ -19,7 +19,7 @@ export interface MenuProps {
   /** Focused item index */
   focusedIndex?: number;
   /** Show border */
-  border?: 'single' | 'double' | 'rounded' | 'none';
+  border?: "single" | "double" | "rounded" | "none";
   /** Width */
   width?: number;
   /** Foreground color */
@@ -33,7 +33,7 @@ export interface MenuProps {
 }
 
 export const Menu = defineComponent({
-  name: 'Menu',
+  name: "Menu",
   props: {
     items: {
       type: Array as PropType<MenuItem[]>,
@@ -44,25 +44,25 @@ export const Menu = defineComponent({
       default: 0,
     },
     border: {
-      type: String as PropType<MenuProps['border']>,
-      default: 'single',
+      type: String as PropType<MenuProps["border"]>,
+      default: "single",
     },
     width: Number,
     fg: String,
     focusedFg: {
       type: String,
-      default: 'black',
+      default: "black",
     },
     focusedBg: {
       type: String,
-      default: 'cyan',
+      default: "cyan",
     },
     shortcutFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
   },
-  emits: ['select'],
+  emits: ["select"],
   setup(props, { emit }) {
     return () => {
       const children: VNode[] = [];
@@ -70,7 +70,7 @@ export const Menu = defineComponent({
       props.items.forEach((item, index) => {
         if (item.separator) {
           children.push(
-            h('text', { key: `sep-${index}`, dim: true }, '─'.repeat(props.width ?? 20))
+            h("text", { key: `sep-${index}`, dim: true }, "─".repeat(props.width ?? 20)),
           );
           return;
         }
@@ -80,68 +80,66 @@ export const Menu = defineComponent({
 
         // Icon
         if (item.icon) {
-          itemContent.push(
-            h('text', { key: 'icon' }, `${item.icon} `)
-          );
+          itemContent.push(h("text", { key: "icon" }, `${item.icon} `));
         }
 
         // Label
         itemContent.push(
           h(
-            'text',
+            "text",
             {
-              key: 'label',
+              key: "label",
               fg: isFocused ? props.focusedFg : props.fg,
               bg: isFocused ? props.focusedBg : undefined,
               dim: item.disabled,
               style: { flex_grow: 1 },
             },
-            item.label
-          )
+            item.label,
+          ),
         );
 
         // Shortcut
         if (item.shortcut) {
           itemContent.push(
             h(
-              'text',
+              "text",
               {
-                key: 'shortcut',
+                key: "shortcut",
                 fg: props.shortcutFg,
                 dim: true,
               },
-              `  ${item.shortcut}`
-            )
+              `  ${item.shortcut}`,
+            ),
           );
         }
 
         children.push(
           h(
-            'box',
+            "box",
             {
               key: item.key,
               style: {
-                flex_direction: 'row',
+                flex_direction: "row",
                 padding_left: 1,
                 padding_right: 1,
               },
               bg: isFocused ? props.focusedBg : undefined,
             },
-            itemContent
-          )
+            itemContent,
+          ),
         );
       });
 
       return h(
-        'box',
+        "box",
         {
-          border: props.border === 'none' ? undefined : props.border,
+          border: props.border === "none" ? undefined : props.border,
           style: {
-            flex_direction: 'column',
+            flex_direction: "column",
             width: props.width ? String(props.width) : undefined,
           },
         },
-        children
+        children,
       );
     };
   },

@@ -2,7 +2,7 @@
  * Code Component - Code block display
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface CodeProps {
   /** Code content */
@@ -16,7 +16,7 @@ export interface CodeProps {
   /** Highlight specific lines */
   highlightLines?: number[];
   /** Border style */
-  border?: 'single' | 'double' | 'rounded' | 'none';
+  border?: "single" | "double" | "rounded" | "none";
   /** Code foreground color */
   fg?: string;
   /** Line number foreground color */
@@ -26,7 +26,7 @@ export interface CodeProps {
 }
 
 export const Code = defineComponent({
-  name: 'Code',
+  name: "Code",
   props: {
     code: {
       type: String,
@@ -46,25 +46,25 @@ export const Code = defineComponent({
       default: () => [],
     },
     border: {
-      type: String as PropType<CodeProps['border']>,
-      default: 'single',
+      type: String as PropType<CodeProps["border"]>,
+      default: "single",
     },
     fg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     lineNumberFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     highlightBg: {
       type: String,
-      default: 'blue',
+      default: "blue",
     },
   },
   setup(props) {
     return () => {
-      const lines = props.code.split('\n');
+      const lines = props.code.split("\n");
       const maxLineNum = props.startLine + lines.length - 1;
       const lineNumWidth = String(maxLineNum).length;
 
@@ -77,35 +77,35 @@ export const Code = defineComponent({
         if (props.lineNumbers) {
           parts.push(
             h(
-              'text',
+              "text",
               {
                 key: `ln-${lineNum}`,
                 fg: props.lineNumberFg,
               },
-              `${String(lineNum).padStart(lineNumWidth)} │ `
-            )
+              `${String(lineNum).padStart(lineNumWidth)} │ `,
+            ),
           );
         }
 
         parts.push(
           h(
-            'text',
+            "text",
             {
               key: `code-${lineNum}`,
               fg: props.fg,
               bg: isHighlighted ? props.highlightBg : undefined,
             },
-            line || ' '
-          )
+            line || " ",
+          ),
         );
 
         return h(
-          'box',
+          "box",
           {
             key: `line-${lineNum}`,
-            style: { flex_direction: 'row' },
+            style: { flex_direction: "row" },
           },
-          parts
+          parts,
         );
       });
 
@@ -113,27 +113,27 @@ export const Code = defineComponent({
       if (props.language) {
         children.unshift(
           h(
-            'text',
+            "text",
             {
-              key: 'lang',
+              key: "lang",
               dim: true,
               style: { margin_bottom: 1 },
             },
-            `// ${props.language}`
-          )
+            `// ${props.language}`,
+          ),
         );
       }
 
       return h(
-        'box',
+        "box",
         {
-          border: props.border === 'none' ? undefined : props.border,
+          border: props.border === "none" ? undefined : props.border,
           style: {
-            flex_direction: 'column',
-            padding: props.border !== 'none' ? 1 : 0,
+            flex_direction: "column",
+            padding: props.border !== "none" ? 1 : 0,
           },
         },
-        children
+        children,
       );
     };
   },

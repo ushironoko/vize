@@ -27,9 +27,12 @@
     "bin"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "lint": "oxlint"
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "oxlint --type-aware --tsconfig tsconfig.json",
+    "lint:fix": "oxlint --type-aware --tsconfig tsconfig.json --fix",
+    "fmt": "oxfmt --write src",
+    "fmt:check": "oxfmt src"
   },
   "keywords": [
     "vite",
@@ -53,7 +56,7 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@types/pngjs": "^6.0.5",
-    "oxlint": "^0.16.0",
+    "tsdown": "^0.9.0",
     "typescript": "^5.7.0",
     "vite": "^8.0.0-beta.0"
   },

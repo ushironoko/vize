@@ -2,11 +2,11 @@
  * Divider Component - Horizontal or vertical divider line
  */
 
-import { defineComponent, h, type PropType } from '@vue/runtime-core';
+import { defineComponent, h, type PropType } from "@vue/runtime-core";
 
 export interface DividerProps {
   /** Divider direction */
-  direction?: 'horizontal' | 'vertical';
+  direction?: "horizontal" | "vertical";
   /** Divider character */
   char?: string;
   /** Title in the middle of the divider */
@@ -18,63 +18,63 @@ export interface DividerProps {
 }
 
 export const Divider = defineComponent({
-  name: 'Divider',
+  name: "Divider",
   props: {
     direction: {
-      type: String as PropType<'horizontal' | 'vertical'>,
-      default: 'horizontal',
+      type: String as PropType<"horizontal" | "vertical">,
+      default: "horizontal",
     },
     char: String,
     title: String,
     fg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
     titleFg: String,
   },
   setup(props) {
     return () => {
-      const dividerChar = props.char ?? (props.direction === 'horizontal' ? '─' : '│');
+      const dividerChar = props.char ?? (props.direction === "horizontal" ? "─" : "│");
 
-      if (props.direction === 'vertical') {
+      if (props.direction === "vertical") {
         return h(
-          'text',
+          "text",
           {
             fg: props.fg,
           },
-          dividerChar
+          dividerChar,
         );
       }
 
       // Horizontal divider
       if (props.title) {
         return h(
-          'box',
+          "box",
           {
-            style: { flex_direction: 'row', align_items: 'center' },
+            style: { flex_direction: "row", align_items: "center" },
           },
           [
-            h('text', { fg: props.fg }, dividerChar.repeat(3)),
+            h("text", { fg: props.fg }, dividerChar.repeat(3)),
             h(
-              'text',
+              "text",
               {
                 fg: props.titleFg ?? props.fg,
                 bold: true,
               },
-              ` ${props.title} `
+              ` ${props.title} `,
             ),
-            h('text', { fg: props.fg }, dividerChar.repeat(3)),
-          ]
+            h("text", { fg: props.fg }, dividerChar.repeat(3)),
+          ],
         );
       }
 
       // Simple divider - width is handled by parent container
       return h(
-        'text',
+        "text",
         {
           fg: props.fg,
         },
-        dividerChar.repeat(40)
+        dividerChar.repeat(40),
       );
     };
   },

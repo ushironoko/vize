@@ -15,15 +15,11 @@
  *   -h, --help       Show help
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  MuseaVrtRunner,
-  generateVrtReport,
-  generateVrtJsonReport,
-} from './vrt.js';
-import type { ArtFileInfo, VrtOptions } from './types.js';
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { MuseaVrtRunner, generateVrtReport, generateVrtJsonReport } from "./vrt.js";
+import type { ArtFileInfo, VrtOptions } from "./types.js";
 
 interface CliOptions {
   update: boolean;
@@ -39,46 +35,46 @@ interface CliOptions {
 function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = {
     update: false,
-    config: 'vite.config.ts',
-    output: '.vize',
+    config: "vite.config.ts",
+    output: ".vize",
     threshold: 0.1,
     json: false,
     ci: false,
     help: false,
-    baseUrl: 'http://localhost:5173',
+    baseUrl: "http://localhost:5173",
   };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     switch (arg) {
-      case '-u':
-      case '--update':
+      case "-u":
+      case "--update":
         options.update = true;
         break;
-      case '-c':
-      case '--config':
-        options.config = args[++i] || 'vite.config.ts';
+      case "-c":
+      case "--config":
+        options.config = args[++i] || "vite.config.ts";
         break;
-      case '-o':
-      case '--output':
-        options.output = args[++i] || '.vize';
+      case "-o":
+      case "--output":
+        options.output = args[++i] || ".vize";
         break;
-      case '-t':
-      case '--threshold':
+      case "-t":
+      case "--threshold":
         options.threshold = parseFloat(args[++i]) || 0.1;
         break;
-      case '--json':
+      case "--json":
         options.json = true;
         break;
-      case '--ci':
+      case "--ci":
         options.ci = true;
         break;
-      case '-b':
-      case '--base-url':
-        options.baseUrl = args[++i] || 'http://localhost:5173';
+      case "-b":
+      case "--base-url":
+        options.baseUrl = args[++i] || "http://localhost:5173";
         break;
-      case '-h':
-      case '--help':
+      case "-h":
+      case "--help":
         options.help = true;
         break;
     }
@@ -132,13 +128,13 @@ async function scanArtFiles(root: string): Promise<string[]> {
       const fullPath = path.join(dir, entry.name);
 
       // Skip node_modules and dist
-      if (entry.name === 'node_modules' || entry.name === 'dist') {
+      if (entry.name === "node_modules" || entry.name === "dist") {
         continue;
       }
 
       if (entry.isDirectory()) {
         await scan(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.art.vue')) {
+      } else if (entry.isFile() && entry.name.endsWith(".art.vue")) {
         files.push(fullPath);
       }
     }
@@ -150,14 +146,14 @@ async function scanArtFiles(root: string): Promise<string[]> {
 
 async function parseArtFile(filePath: string): Promise<ArtFileInfo | null> {
   try {
-    const source = await fs.promises.readFile(filePath, 'utf-8');
+    const source = await fs.promises.readFile(filePath, "utf-8");
 
     // Simple parsing - in production, use @vizejs/native
     const titleMatch = source.match(/<art[^>]*\stitle=["']([^"']+)["']/);
     const componentMatch = source.match(/<art[^>]*\scomponent=["']([^"']+)["']/);
     const categoryMatch = source.match(/<art[^>]*\scategory=["']([^"']+)["']/);
 
-    const variants: ArtFileInfo['variants'] = [];
+    const variants: ArtFileInfo["variants"] = [];
     const variantRegex = /<variant\s+([^>]*)>([\s\S]*?)<\/variant>/g;
     let match;
 
@@ -182,11 +178,11 @@ async function parseArtFile(filePath: string): Promise<ArtFileInfo | null> {
     return {
       path: filePath,
       metadata: {
-        title: titleMatch?.[1] || path.basename(filePath, '.art.vue'),
+        title: titleMatch?.[1] || path.basename(filePath, ".art.vue"),
         component: componentMatch?.[1],
         category: categoryMatch?.[1],
         tags: [],
-        status: 'ready',
+        status: "ready",
       },
       variants,
       hasScriptSetup: /<script\s+setup/.test(source),
@@ -210,15 +206,15 @@ async function main(): Promise<void> {
 
   const cwd = process.cwd();
 
-  console.log('\n  Musea VRT');
-  console.log('  =========\n');
+  console.log("\n  Musea VRT");
+  console.log("  =========\n");
 
   // Scan for art files
-  console.log('  Scanning for art files...');
+  console.log("  Scanning for art files...");
   const artFilePaths = await scanArtFiles(cwd);
 
   if (artFilePaths.length === 0) {
-    console.log('  No art files found.\n');
+    console.log("  No art files found.\n");
     process.exit(0);
   }
 
@@ -236,31 +232,31 @@ async function main(): Promise<void> {
   // Count total variants
   const totalVariants = artFiles.reduce(
     (sum, art) => sum + art.variants.filter((v) => !v.skipVrt).length,
-    0
+    0,
   );
 
   console.log(`  Testing ${totalVariants} variant(s) across ${artFiles.length} art file(s)\n`);
 
   // Initialize VRT runner
   const vrtOptions: VrtOptions = {
-    snapshotDir: path.join(options.output, 'snapshots'),
+    snapshotDir: path.join(options.output, "snapshots"),
     threshold: options.threshold,
   };
 
   const runner = new MuseaVrtRunner(vrtOptions);
 
   try {
-    console.log('  Launching browser...');
+    console.log("  Launching browser...");
     await runner.init();
 
-    console.log('  Running visual regression tests...\n');
+    console.log("  Running visual regression tests...\n");
 
     // Run tests
     const results = await runner.runAllTests(artFiles, options.baseUrl);
     const summary = runner.getSummary(results);
 
     // Print results
-    console.log('  Results:');
+    console.log("  Results:");
     console.log(`  ---------`);
     console.log(`    Passed:  ${summary.passed}`);
     console.log(`    Failed:  ${summary.failed}`);
@@ -271,7 +267,7 @@ async function main(): Promise<void> {
 
     // Update baselines if requested
     if (options.update) {
-      console.log('  Updating baselines...');
+      console.log("  Updating baselines...");
       const updated = await runner.updateBaselines(results);
       console.log(`  Updated ${updated} baseline(s)\n`);
     }
@@ -282,23 +278,23 @@ async function main(): Promise<void> {
 
     if (options.json) {
       const jsonReport = generateVrtJsonReport(results, summary);
-      const jsonPath = path.join(reportDir, 'vrt-report.json');
+      const jsonPath = path.join(reportDir, "vrt-report.json");
       await fs.promises.writeFile(jsonPath, jsonReport);
       console.log(`  JSON report: ${jsonPath}\n`);
     } else {
       const htmlReport = generateVrtReport(results, summary);
-      const htmlPath = path.join(reportDir, 'vrt-report.html');
+      const htmlPath = path.join(reportDir, "vrt-report.html");
       await fs.promises.writeFile(htmlPath, htmlReport);
       console.log(`  HTML report: ${htmlPath}\n`);
     }
 
     // CI mode - exit with error if failures
     if (options.ci && summary.failed > 0) {
-      console.log('  CI mode: Exiting with error due to failures\n');
+      console.log("  CI mode: Exiting with error due to failures\n");
       process.exit(1);
     }
   } catch (error) {
-    console.error('\n  Error:', error);
+    console.error("\n  Error:", error);
     process.exit(1);
   } finally {
     await runner.close();
@@ -306,6 +302,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error('Fatal error:', error);
+  console.error("Fatal error:", error);
   process.exit(1);
 });

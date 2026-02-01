@@ -2,8 +2,8 @@
  * Vize configuration utilities
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Vize configuration for vite plugin
@@ -60,7 +60,7 @@ export interface VizeConfig {
     /**
      * Rules to enable/disable
      */
-    rules?: Record<string, 'off' | 'warn' | 'error'>;
+    rules?: Record<string, "off" | "warn" | "error">;
   };
 }
 
@@ -75,7 +75,7 @@ export interface LoadConfigOptions {
    * - 'auto': Automatically detect (same as 'nearest')
    * - 'none': Don't load config file
    */
-  mode?: 'root' | 'nearest' | 'auto' | 'none';
+  mode?: "root" | "nearest" | "auto" | "none";
   /**
    * Explicit config file path
    */
@@ -90,11 +90,11 @@ export function defineConfig(config: VizeConfig): VizeConfig {
 }
 
 const CONFIG_FILES = [
-  'vize.config.ts',
-  'vize.config.js',
-  'vize.config.mjs',
-  'vize.config.cjs',
-  'vize.config.json',
+  "vize.config.ts",
+  "vize.config.js",
+  "vize.config.mjs",
+  "vize.config.cjs",
+  "vize.config.json",
 ];
 
 /**
@@ -102,22 +102,20 @@ const CONFIG_FILES = [
  */
 export async function loadConfig(
   root: string,
-  options: LoadConfigOptions = {}
+  options: LoadConfigOptions = {},
 ): Promise<VizeConfig | null> {
-  const { mode = 'root', configFile } = options;
+  const { mode = "root", configFile } = options;
 
-  if (mode === 'none') {
+  if (mode === "none") {
     return null;
   }
 
   // Treat 'auto' as 'nearest'
-  const searchMode = mode === 'auto' ? 'nearest' : mode;
+  const searchMode = mode === "auto" ? "nearest" : mode;
 
   // If explicit config file is provided
   if (configFile) {
-    const configPath = path.isAbsolute(configFile)
-      ? configFile
-      : path.resolve(root, configFile);
+    const configPath = path.isAbsolute(configFile) ? configFile : path.resolve(root, configFile);
     return loadConfigFile(configPath);
   }
 
@@ -132,7 +130,7 @@ export async function loadConfig(
       }
     }
 
-    if (searchMode === 'root') {
+    if (searchMode === "root") {
       break;
     }
 
@@ -154,8 +152,8 @@ async function loadConfigFile(configPath: string): Promise<VizeConfig | null> {
 
   const ext = path.extname(configPath);
 
-  if (ext === '.json') {
-    const content = fs.readFileSync(configPath, 'utf-8');
+  if (ext === ".json") {
+    const content = fs.readFileSync(configPath, "utf-8");
     return JSON.parse(content);
   }
 

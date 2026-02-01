@@ -5,12 +5,12 @@ export interface VizeConfig {
   /**
    * Vue compiler options
    */
-  compiler?: CompilerConfig
+  compiler?: CompilerConfig;
 
   /**
    * Vite plugin options
    */
-  vite?: VitePluginConfig
+  vite?: VitePluginConfig;
 }
 
 /**
@@ -21,19 +21,19 @@ export interface CompilerConfig {
    * Enable Vapor mode compilation
    * @default false
    */
-  vapor?: boolean
+  vapor?: boolean;
 
   /**
    * Enable SSR mode
    * @default false
    */
-  ssr?: boolean
+  ssr?: boolean;
 
   /**
    * Enable source map generation
    * @default true in development, false in production
    */
-  sourceMap?: boolean
+  sourceMap?: boolean;
 }
 
 /**
@@ -44,25 +44,25 @@ export interface VitePluginConfig {
    * Files to include in compilation
    * @default /\.vue$/
    */
-  include?: string | RegExp | (string | RegExp)[]
+  include?: string | RegExp | (string | RegExp)[];
 
   /**
    * Files to exclude from compilation
    * @default /node_modules/
    */
-  exclude?: string | RegExp | (string | RegExp)[]
+  exclude?: string | RegExp | (string | RegExp)[];
 
   /**
    * Glob patterns to scan for .vue files during pre-compilation
    * @default ['**\/*.vue']
    */
-  scanPatterns?: string[]
+  scanPatterns?: string[];
 
   /**
    * Glob patterns to ignore during pre-compilation
    * @default ['node_modules/**', 'dist/**', '.git/**']
    */
-  ignorePatterns?: string[]
+  ignorePatterns?: string[];
 }
 
 /**
@@ -75,10 +75,10 @@ export interface LoadConfigOptions {
    * - 'auto': Search from cwd upward until finding a config file
    * @default 'root'
    */
-  mode?: 'root' | 'auto'
+  mode?: "root" | "auto";
 
   /**
    * Custom config file path (overrides automatic search)
    */
-  configFile?: string
+  configFile?: string;
 }

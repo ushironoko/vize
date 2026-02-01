@@ -2,7 +2,7 @@
  * Form Component - Form container with labels
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface FormField {
   key: string;
@@ -19,7 +19,7 @@ export interface FormProps {
   /** Gap between fields */
   gap?: number;
   /** Label position */
-  labelPosition?: 'left' | 'top';
+  labelPosition?: "left" | "top";
   /** Label foreground color */
   labelFg?: string;
   /** Required indicator */
@@ -29,7 +29,7 @@ export interface FormProps {
 }
 
 export const Form = defineComponent({
-  name: 'Form',
+  name: "Form",
   props: {
     fields: {
       type: Array as PropType<FormField[]>,
@@ -44,17 +44,17 @@ export const Form = defineComponent({
       default: 1,
     },
     labelPosition: {
-      type: String as PropType<'left' | 'top'>,
-      default: 'left',
+      type: String as PropType<"left" | "top">,
+      default: "left",
     },
     labelFg: String,
     requiredIndicator: {
       type: String,
-      default: '*',
+      default: "*",
     },
     hintFg: {
       type: String,
-      default: 'gray',
+      default: "gray",
     },
   },
   setup(props, { slots }) {
@@ -64,80 +64,76 @@ export const Form = defineComponent({
       props.fields.forEach((field, index) => {
         const labelContent = [
           h(
-            'text',
+            "text",
             {
               fg: props.labelFg,
             },
-            field.label.padEnd(props.labelWidth)
+            field.label.padEnd(props.labelWidth),
           ),
         ];
 
         if (field.required) {
-          labelContent.push(
-            h('text', { fg: 'red' }, props.requiredIndicator)
-          );
+          labelContent.push(h("text", { fg: "red" }, props.requiredIndicator));
         }
 
         const fieldSlot = slots[field.key]?.();
 
-        if (props.labelPosition === 'top') {
+        if (props.labelPosition === "top") {
           children.push(
             h(
-              'box',
+              "box",
               {
                 key: field.key,
-                style: { flex_direction: 'column', margin_bottom: props.gap },
+                style: { flex_direction: "column", margin_bottom: props.gap },
               },
               [
-                h('box', { style: { flex_direction: 'row' } }, labelContent),
-                fieldSlot ? h('box', { style: { margin_top: 0.5 } }, fieldSlot) : null,
-                field.hint
-                  ? h('text', { fg: props.hintFg, dim: true }, field.hint)
-                  : null,
-              ].filter(Boolean)
-            )
+                h("box", { style: { flex_direction: "row" } }, labelContent),
+                fieldSlot ? h("box", { style: { margin_top: 0.5 } }, fieldSlot) : null,
+                field.hint ? h("text", { fg: props.hintFg, dim: true }, field.hint) : null,
+              ].filter(Boolean),
+            ),
           );
         } else {
           children.push(
             h(
-              'box',
+              "box",
               {
                 key: field.key,
                 style: {
-                  flex_direction: 'row',
-                  align_items: 'center',
+                  flex_direction: "row",
+                  align_items: "center",
                   margin_bottom: props.gap,
                 },
               },
               [
-                h('box', { style: { width: String(props.labelWidth), flex_direction: 'row' } }, labelContent),
-                h('box', { style: { flex_grow: 1 } }, fieldSlot),
-              ]
-            )
+                h(
+                  "box",
+                  { style: { width: String(props.labelWidth), flex_direction: "row" } },
+                  labelContent,
+                ),
+                h("box", { style: { flex_grow: 1 } }, fieldSlot),
+              ],
+            ),
           );
 
           if (field.hint) {
             children.push(
               h(
-                'text',
+                "text",
                 {
                   key: `hint-${field.key}`,
                   fg: props.hintFg,
                   dim: true,
                   style: { margin_left: props.labelWidth, margin_bottom: props.gap },
                 },
-                field.hint
-              )
+                field.hint,
+              ),
             );
           }
         }
       });
 
-      return h(
-        'box',
-        { style: { flex_direction: 'column' } },
-        children
-      );
+      return h("box", { style: { flex_direction: "column" } }, children);
     };
   },
 });

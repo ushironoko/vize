@@ -2,9 +2,9 @@
  * useApp - App context composable
  */
 
-import { ref, provide, inject, type InjectionKey, type Ref } from '@vue/runtime-core';
+import { ref, provide, inject, type InjectionKey, type Ref } from "@vue/runtime-core";
 
-const APP_KEY: InjectionKey<UseAppReturn> = Symbol('fresco-app');
+const APP_KEY: InjectionKey<UseAppReturn> = Symbol("fresco-app");
 
 export interface UseAppReturn {
   /** Terminal width */
@@ -44,11 +44,11 @@ export function createAppContext(): UseAppReturn {
   };
 
   // Try to get terminal size
-  if (typeof process !== 'undefined' && process.stdout) {
+  if (typeof process !== "undefined" && process.stdout) {
     width.value = process.stdout.columns ?? 80;
     height.value = process.stdout.rows ?? 24;
 
-    process.stdout.on?.('resize', () => {
+    process.stdout.on?.("resize", () => {
       width.value = process.stdout.columns ?? 80;
       height.value = process.stdout.rows ?? 24;
     });

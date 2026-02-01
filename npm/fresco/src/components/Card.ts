@@ -2,7 +2,7 @@
  * Card Component - Container card with optional header and footer
  */
 
-import { defineComponent, h, type PropType, type VNode } from '@vue/runtime-core';
+import { defineComponent, h, type PropType, type VNode } from "@vue/runtime-core";
 
 export interface CardProps {
   /** Card title */
@@ -12,7 +12,7 @@ export interface CardProps {
   /** Footer text */
   footer?: string;
   /** Border style */
-  border?: 'single' | 'double' | 'rounded' | 'heavy' | 'none';
+  border?: "single" | "double" | "rounded" | "heavy" | "none";
   /** Padding */
   padding?: number;
   /** Title foreground color */
@@ -24,14 +24,14 @@ export interface CardProps {
 }
 
 export const Card = defineComponent({
-  name: 'Card',
+  name: "Card",
   props: {
     title: String,
     subtitle: String,
     footer: String,
     border: {
-      type: String as PropType<CardProps['border']>,
-      default: 'rounded',
+      type: String as PropType<CardProps["border"]>,
+      default: "rounded",
     },
     padding: {
       type: Number,
@@ -39,7 +39,7 @@ export const Card = defineComponent({
     },
     titleFg: {
       type: String,
-      default: 'white',
+      default: "white",
     },
     borderFg: String,
     bg: String,
@@ -53,70 +53,68 @@ export const Card = defineComponent({
         const headerContent: VNode[] = [];
 
         if (props.title) {
-          headerContent.push(
-            h('text', { fg: props.titleFg, bold: true }, props.title)
-          );
+          headerContent.push(h("text", { fg: props.titleFg, bold: true }, props.title));
         }
 
         if (props.subtitle) {
           headerContent.push(
-            h('text', { dim: true }, props.title ? ` - ${props.subtitle}` : props.subtitle)
+            h("text", { dim: true }, props.title ? ` - ${props.subtitle}` : props.subtitle),
           );
         }
 
         children.push(
           h(
-            'box',
+            "box",
             {
-              key: 'header',
+              key: "header",
               style: {
-                flex_direction: 'row',
+                flex_direction: "row",
                 margin_bottom: 1,
               },
             },
-            headerContent
-          )
+            headerContent,
+          ),
         );
       }
 
       // Content
       children.push(
         h(
-          'box',
+          "box",
           {
-            key: 'content',
+            key: "content",
             style: { flex_grow: 1 },
           },
-          slots.default?.()
-        )
+          slots.default?.(),
+        ),
       );
 
       // Footer
       if (props.footer || slots.footer) {
         children.push(
           h(
-            'box',
+            "box",
             {
-              key: 'footer',
+              key: "footer",
               style: { margin_top: 1 },
             },
-            slots.footer?.() ?? [h('text', { dim: true }, props.footer)]
-          )
+            slots.footer?.() ?? [h("text", { dim: true }, props.footer)],
+          ),
         );
       }
 
       return h(
-        'box',
+        "box",
         {
-          border: props.border === 'none' ? undefined : props.border,
+          border: props.border === "none" ? undefined : props.border,
           fg: props.borderFg,
           bg: props.bg,
           style: {
-            flex_direction: 'column',
+            flex_direction: "column",
             padding: props.padding,
           },
         },
-        children
+        children,
       );
     };
   },
