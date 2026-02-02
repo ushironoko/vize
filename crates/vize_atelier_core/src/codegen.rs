@@ -606,10 +606,12 @@ mod tests {
     #[test]
     fn test_codegen_escape_newline_in_attribute() {
         // Attribute values containing newlines should be properly escaped
-        let result = compile!(r#"<div style="
+        let result = compile!(
+            r#"<div style="
             color: red;
             background: blue;
-        "></div>"#);
+        "></div>"#
+        );
         // Should have properly escaped newlines
         assert!(
             result.code.contains("\\n"),
@@ -639,10 +641,12 @@ mod tests {
     #[test]
     fn test_codegen_escape_multiline_style_attribute() {
         // Complex multiline style attribute (real-world case from Discord issue)
-        let result = compile!(r#"<div style="
+        let result = compile!(
+            r#"<div style="
             display: flex;
             flex-direction: column;
-        "></div>"#);
+        "></div>"#
+        );
         // Should produce valid JavaScript
         assert!(
             result.code.contains("style:"),

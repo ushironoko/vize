@@ -1117,7 +1117,8 @@ export default {
 
         // Should still contain the component logic
         assert!(
-            result.code.contains("name: 'MyComponent'") || result.code.contains("name: \"MyComponent\""),
+            result.code.contains("name: 'MyComponent'")
+                || result.code.contains("name: \"MyComponent\""),
             "Should have component name. Got:\n{}",
             result.code
         );
@@ -1162,7 +1163,10 @@ export default {
         };
         let result = compile_sfc(&descriptor, opts).expect("Failed to compile SFC");
 
-        eprintln!("=== Non-script-setup TS preserved output ===\n{}", result.code);
+        eprintln!(
+            "=== Non-script-setup TS preserved output ===\n{}",
+            result.code
+        );
 
         // Should still contain TypeScript syntax when is_ts = true
         assert!(
