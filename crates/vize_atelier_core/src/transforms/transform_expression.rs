@@ -1534,55 +1534,7 @@ mod tests {
         assert!(result.contains("filter"));
     }
 
-    // =============================================================================
-    // Patch Tests: Multiline arrow function handling
-    // =============================================================================
-
-    #[test]
-    fn test_multiline_arrow_function_not_truncated() {
-        // Test that multiline arrow functions are not truncated at first semicolon
-        let code = r#"() => {
-    const x = 1;
-    const y = 2;
-    return x + y;
-}"#;
-        // The function body should contain all statements
-        assert!(code.contains("const x = 1;"));
-        assert!(code.contains("const y = 2;"));
-        assert!(code.contains("return x + y;"));
-    }
-
-    #[test]
-    fn test_rfind_vs_find_semicolon_concept() {
-        // Demonstrate the difference between find(';') and rfind(';')
-        // This tests the concept used in the multiline arrow function fix
-        let code = "const a = 1; const b = 2;";
-
-        // find(';') returns position of FIRST semicolon (0-indexed)
-        let first_semi = code.find(';');
-        assert_eq!(first_semi, Some(11)); // 'c','o','n','s','t',' ','a',' ','=',' ','1' = 11 chars
-
-        // rfind(';') returns position of LAST semicolon
-        let last_semi = code.rfind(';');
-        assert_eq!(last_semi, Some(24)); // End of second statement
-
-        // The fix: use rfind to find the last semicolon, not the first
-        assert!(first_semi.unwrap() < last_semi.unwrap());
-    }
-
-    // =============================================================================
-    // Patch Tests: ES6 shorthand expansion
-    // =============================================================================
-
-    #[test]
-    fn test_shorthand_property_detection() {
-        // This tests the concept - actual implementation is in codegen
-        // { foo } should be detected as shorthand
-        let shorthand = "{ foo }";
-        assert!(shorthand.contains("{ foo }"));
-
-        // { foo: bar } is not shorthand
-        let non_shorthand = "{ foo: bar }";
-        assert!(!non_shorthand.contains("{ foo }"));
-    }
 }
+
+// Note: Multiline arrow function handling and ES6 shorthand expansion
+// are tested via SFC snapshot tests in tests/fixtures/sfc/patches.toml.

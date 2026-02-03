@@ -9,10 +9,16 @@ use super::expression::generate_expression;
 use super::helpers::escape_js_string;
 use super::node::generate_node;
 
+/// Check if a string content represents a numeric literal (for v-for range)
+/// Used internally by `is_numeric_source` for the actual check.
+fn is_numeric_content(content: &str) -> bool {
+    !content.is_empty() && content.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Check if source is a numeric literal (for v-for range)
 pub fn is_numeric_source(source: &ExpressionNode<'_>) -> bool {
     if let ExpressionNode::Simple(exp) = source {
-        exp.content.chars().all(|c| c.is_ascii_digit())
+        is_numeric_content(&exp.content)
     } else {
         false
     }
@@ -445,94 +451,33 @@ pub fn generate_for_item(ctx: &mut CodegenContext, node: &TemplateChildNode<'_>,
 
 #[cfg(test)]
 mod tests {
-    //! Tests for v-for directive skipping logic.
-    //!
-    //! Note: These tests use the crate's test infrastructure which provides
-    //! helpers for creating AST nodes with proper bumpalo allocation.
-    //! For comprehensive testing of the directive skipping behavior,
-    //! see the SFC snapshot tests in tests/fixtures/sfc/patches.toml.
+    use super::is_numeric_content;
 
-    /// Test that directive names are correctly categorized for skipping.
-    /// This tests the logic without creating actual AST nodes.
+    /// Test numeric source detection for v-for range expressions.
+    /// This tests the actual `is_numeric_content` helper function.
     #[test]
-    fn test_directive_skip_categories() {
-        // List of directives that SHOULD be skipped
-        let skip_directives = [
-            "click-outside", // custom directive
-            "focus",         // custom directive
-            "tooltip",       // custom directive
-            "for",           // handled by parent
-        ];
+    fn test_is_numeric_content() {
+        // Valid numeric literals (v-for="n in 10")
+        assert!(is_numeric_content("10"));
+        assert!(is_numeric_content("100"));
+        assert!(is_numeric_content("0"));
+        assert!(is_numeric_content("12345"));
 
-        // List of directives that should NOT be skipped
-        let keep_directives = [
-            "on",    // event handlers
-            "model", // v-model
-            "html",  // v-html
-            "text",  // v-text
-        ];
+        // Invalid: variable names
+        assert!(!is_numeric_content("items"));
+        assert!(!is_numeric_content("arr"));
 
-        // Test skip logic for directive names
-        for name in skip_directives {
-            let should_skip = match name {
-                "for" => true,
-                "on" | "model" | "html" | "text" => false,
-                _ => true, // custom directives
-            };
-            assert!(
-                should_skip,
-                "Directive '{}' should be skipped",
-                name
-            );
-        }
+        // Invalid: expressions
+        assert!(!is_numeric_content("arr.length"));
+        assert!(!is_numeric_content("10 + 5"));
 
-        for name in keep_directives {
-            let should_skip = match name {
-                "for" => true,
-                "on" | "model" | "html" | "text" => false,
-                _ => true,
-            };
-            assert!(
-                !should_skip,
-                "Directive '{}' should NOT be skipped",
-                name
-            );
-        }
-    }
+        // Invalid: floating point
+        assert!(!is_numeric_content("10.5"));
 
-    /// Test that v-bind:key is handled specially
-    #[test]
-    fn test_key_binding_special_case() {
-        // :key should be skipped (handled separately by v-for)
-        let is_key_binding = |name: &str, arg: Option<&str>| -> bool {
-            name == "bind" && arg == Some("key")
-        };
-
-        assert!(is_key_binding("bind", Some("key")));
-        assert!(!is_key_binding("bind", Some("class")));
-        assert!(!is_key_binding("bind", Some("style")));
-        assert!(!is_key_binding("bind", None)); // v-bind="obj"
-    }
-
-    /// Test that numeric source detection logic works for v-for range
-    #[test]
-    fn test_numeric_source_logic() {
-        // Test the numeric detection logic directly
-        // Note: Empty string returns true for is_all_digits since there are no non-digit chars,
-        // but in practice, empty sources won't appear in v-for expressions.
-        fn is_numeric_like(content: &str) -> bool {
-            !content.is_empty() && content.chars().all(|c| c.is_ascii_digit())
-        }
-
-        assert!(is_numeric_like("10"));
-        assert!(is_numeric_like("100"));
-        assert!(is_numeric_like("0"));
-        assert!(is_numeric_like("12345"));
-
-        assert!(!is_numeric_like("items"));
-        assert!(!is_numeric_like("arr.length"));
-        assert!(!is_numeric_like("10 + 5"));
-        assert!(!is_numeric_like("10.5"));
-        assert!(!is_numeric_like(""));
+        // Invalid: empty string
+        assert!(!is_numeric_content(""));
     }
 }
+
+// Note: Directive skipping behavior (v-for with custom directives, :key handling)
+// is tested via SFC snapshot tests in tests/fixtures/sfc/patches.toml.
