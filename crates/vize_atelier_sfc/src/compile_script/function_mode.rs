@@ -278,10 +278,12 @@ pub fn compile_script_setup(
         // Handle TypeScript type declarations (skip them)
         if in_ts_type {
             // Track balanced brackets for complex types like: type X = { a: string } | { b: number }
+            // Remove => to avoid counting arrow function's > as angle bracket
+            let line_no_arrow = trimmed.replace("=>", "  ");
             ts_type_depth += trimmed.matches('{').count() as i32;
             ts_type_depth -= trimmed.matches('}').count() as i32;
-            ts_type_depth += trimmed.matches('<').count() as i32;
-            ts_type_depth -= trimmed.matches('>').count() as i32;
+            ts_type_depth += line_no_arrow.matches('<').count() as i32;
+            ts_type_depth -= line_no_arrow.matches('>').count() as i32;
             ts_type_depth += trimmed.matches('(').count() as i32;
             ts_type_depth -= trimmed.matches(')').count() as i32;
             // Type declaration ends when balanced and NOT a continuation line
@@ -300,16 +302,35 @@ pub fn compile_script_setup(
         }
 
         // Detect TypeScript type alias start
+        // Must be: "type Identifier =" or "export type Identifier ="
+        // Exclude comparisons like "type === 'value'" or "type !== 'value'"
         if outside_template_literal
             && (trimmed.starts_with("type ") || trimmed.starts_with("export type "))
         {
+            // Exclude comparison expressions: type === or type !== or type == or type !=
+            let after_type = if trimmed.starts_with("export type ") {
+                &trimmed[12..]
+            } else {
+                &trimmed[5..]
+            };
+            // If it starts with comparison operator, it's not a type declaration
+            if after_type.starts_with("===")
+                || after_type.starts_with("!==")
+                || after_type.starts_with("==")
+                || after_type.starts_with("!=")
+            {
+                // This is a comparison expression, not a type declaration
+                // Fall through to add to setup_lines
+            } else {
             // Check if it's a single-line type
             let has_equals = trimmed.contains('=');
             if has_equals {
+                // Remove => to avoid counting arrow function's > as angle bracket
+                let line_no_arrow = trimmed.replace("=>", "  ");
                 ts_type_depth = trimmed.matches('{').count() as i32
                     - trimmed.matches('}').count() as i32
-                    + trimmed.matches('<').count() as i32
-                    - trimmed.matches('>').count() as i32
+                    + line_no_arrow.matches('<').count() as i32
+                    - line_no_arrow.matches('>').count() as i32
                     + trimmed.matches('(').count() as i32
                     - trimmed.matches(')').count() as i32;
                 if ts_type_depth <= 0
@@ -326,6 +347,7 @@ pub fn compile_script_setup(
                 in_ts_type = true;
             }
             continue;
+            } // close else block for comparison check
         }
 
         if !trimmed.is_empty() {
@@ -372,11 +394,17 @@ pub fn compile_script_setup(
         output.extend_from_slice(b"import { useModel as _useModel } from 'vue'\n");
     }
 
-    // Output imports (filtering out type-only imports)
+    // Output imports (filtering out type-only imports and duplicates)
+    let mut seen_imports: HashSet<String> = HashSet::new();
     for import in &imports {
         if let Some(processed) = process_import_for_types(import) {
             if !processed.is_empty() {
-                output.extend_from_slice(processed.as_bytes());
+                // Use trimmed import text as key to detect duplicates
+                let key = processed.trim().to_string();
+                if !seen_imports.contains(&key) {
+                    seen_imports.insert(key);
+                    output.extend_from_slice(processed.as_bytes());
+                }
             }
         }
     }
@@ -408,12 +436,42 @@ pub fn compile_script_setup(
         if has_defaults {
             // Use mergeDefaults format: _mergeDefaults(['prop1', 'prop2'], { prop2: default })
             // Get the original props argument from defineProps
-            let original_props = ctx
+            // For type-based defineProps, we need to extract prop names from type_args
+            let original_props: String = ctx
                 .macros
                 .define_props
                 .as_ref()
-                .map(|p| p.args.as_str())
-                .unwrap_or("[]");
+                .map(|p| {
+                    if !p.args.is_empty() {
+                        // Runtime props argument
+                        p.args.clone()
+                    } else if let Some(ref type_args) = p.type_args {
+                        // Type-based defineProps - extract prop names from type
+                        let prop_types = extract_prop_types_from_type(type_args);
+                        if prop_types.is_empty() {
+                            "[]".to_string()
+                        } else {
+                            // Generate runtime props object: { propName: { type: Type, required: bool } }
+                            let mut props_obj = String::from("{\n");
+                            let mut sorted_props: Vec<_> = prop_types.iter().collect();
+                            sorted_props.sort_by(|a, b| a.0.cmp(b.0));
+                            for (name, prop_type) in sorted_props {
+                                props_obj.push_str("    ");
+                                props_obj.push_str(name);
+                                props_obj.push_str(": { type: ");
+                                props_obj.push_str(&prop_type.js_type);
+                                props_obj.push_str(", required: ");
+                                props_obj.push_str(if prop_type.optional { "false" } else { "true" });
+                                props_obj.push_str(" },\n");
+                            }
+                            props_obj.push_str("  }");
+                            props_obj
+                        }
+                    } else {
+                        "[]".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "[]".to_string());
 
             output.extend_from_slice(b"  props: /*@__PURE__*/_mergeDefaults(");
             output.extend_from_slice(original_props.as_bytes());
@@ -544,8 +602,43 @@ pub fn compile_script_setup(
         }
     }
 
+    // Check if script has top-level await (needs async setup)
+    let has_top_level_await = setup_lines.iter().any(|line| {
+        let trimmed = line.trim();
+        // Skip comments
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
+            return false;
+        }
+        // Check for await keyword (followed by space or parenthesis)
+        // This is a simple heuristic - for exact detection would need full AST parsing
+        if let Some(pos) = line.find("await") {
+            let after = &line[pos + 5..];
+            // Must be followed by whitespace, '(' or end of word boundary
+            if after.is_empty()
+                || after.starts_with(' ')
+                || after.starts_with('(')
+                || after.starts_with('\t')
+            {
+                // Check it's not inside a string literal (simplified check)
+                let before = &line[..pos];
+                let single_quotes = before.matches('\'').count() - before.matches("\\'").count();
+                let double_quotes = before.matches('"').count() - before.matches("\\\"").count();
+                let backticks = before.matches('`').count() - before.matches("\\`").count();
+                // If odd number of quotes, we're inside a string
+                if single_quotes % 2 == 0 && double_quotes % 2 == 0 && backticks % 2 == 0 {
+                    return true;
+                }
+            }
+        }
+        false
+    });
+
     // Setup function
-    output.extend_from_slice(b"  setup(__props, { expose: __expose, emit: __emit }) {\n");
+    if has_top_level_await {
+        output.extend_from_slice(b"  async setup(__props, { expose: __expose, emit: __emit }) {\n");
+    } else {
+        output.extend_from_slice(b"  setup(__props, { expose: __expose, emit: __emit }) {\n");
+    }
 
     // Always call __expose() - Vue runtime requires this for proper component initialization
     // If defineExpose has args, use those; otherwise call with no args
@@ -662,6 +755,7 @@ pub fn compile_script_setup(
     }
 
     // Compiler macros preset - these are compile-time only and should not be in __returned__
+    // Also include JavaScript reserved words that can't be used as shorthand properties
     let compiler_macros: HashSet<&str> = [
         "defineProps",
         "defineEmits",
@@ -670,6 +764,44 @@ pub fn compile_script_setup(
         "defineSlots",
         "defineModel",
         "withDefaults",
+        // JavaScript reserved words
+        "default",
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "break",
+        "continue",
+        "return",
+        "throw",
+        "try",
+        "catch",
+        "finally",
+        "new",
+        "delete",
+        "typeof",
+        "void",
+        "this",
+        "super",
+        "class",
+        "extends",
+        "import",
+        "export",
+        "function",
+        "const",
+        "let",
+        "var",
+        "in",
+        "of",
+        "instanceof",
+        "true",
+        "false",
+        "null",
+        "undefined",
+        "required",  // commonly used in props but not a binding
     ]
     .into_iter()
     .collect();

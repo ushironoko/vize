@@ -26,7 +26,7 @@ const __sfc__ = /*@__PURE__*/ _defineComponent({
 
 export function render(_ctx, _cache, $props, $setup, $data, $options) {
   return _withDirectives((_openBlock(), _createElementBlock("input", {
-    "onUpdate:modelValue": $event => (($setup.msg) = $event)
+    "onUpdate:modelValue": $event => ((msg) = $event)
   }, null, 8 /* PROPS */, ["onUpdate:modelValue"])), [
     [_vModelText, $setup.msg]
   ])

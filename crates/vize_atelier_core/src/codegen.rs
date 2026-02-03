@@ -208,7 +208,8 @@ fn generate_js_child_node_to_bytes(
         JsChildNode::SimpleExpression(exp) => {
             if exp.is_static {
                 out.push(b'"');
-                out.extend_from_slice(exp.content.as_bytes());
+                // Escape special characters (newlines, quotes, backslashes) in static strings
+                out.extend_from_slice(escape_js_string(&exp.content).as_bytes());
                 out.push(b'"');
             } else {
                 // Expression should already be processed by transform
@@ -363,7 +364,8 @@ fn generate_props_expression_to_bytes(
         PropsExpression::Simple(exp) => {
             if exp.is_static {
                 out.push(b'"');
-                out.extend_from_slice(exp.content.as_bytes());
+                // Escape special characters (newlines, quotes, backslashes) in static strings
+                out.extend_from_slice(escape_js_string(&exp.content).as_bytes());
                 out.push(b'"');
             } else {
                 // Expression should already be processed by transform

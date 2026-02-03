@@ -30,10 +30,10 @@ const __sfc__ = /*@__PURE__*/ _defineComponent({
 
 export function render(_ctx, _cache, $props, $setup, $data, $options) {
   return (_openBlock(), _createBlock($setup.Dialog, {
-    modelValue: $setup.isOpen,
-    "onUpdate:modelValue": $event => (($setup.isOpen) = $event),
-    value: $setup.formValue,
-    "onUpdate:value": $event => (($setup.formValue) = $event)
+    modelValue: isOpen,
+    "onUpdate:modelValue": $event => ((isOpen) = $event),
+    value: formValue,
+    "onUpdate:value": $event => ((formValue) = $event)
   }, null, 8 /* PROPS */, ["modelValue", "onUpdate:modelValue", "value", "onUpdate:value"]))
 }
 

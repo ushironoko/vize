@@ -45,13 +45,27 @@ export function generateOutput(compiled: CompiledModule, options: GenerateOutput
   // Use regex to match only line-start "export default" (not inside strings)
   const exportDefaultRegex = /^export default /m;
   const hasExportDefault = exportDefaultRegex.test(output);
-  if (hasExportDefault) {
+
+  // Check if _sfc_main is already defined (Case 2: non-script-setup SFCs)
+  // In this case, the compiler already outputs: const _sfc_main = ...; export default _sfc_main
+  const hasSfcMainDefined = /\bconst\s+_sfc_main\s*=/.test(output);
+
+  if (hasExportDefault && !hasSfcMainDefined) {
     output = output.replace(exportDefaultRegex, "const _sfc_main = ");
     // Add __scopeId for scoped CSS support
     if (compiled.hasScoped && compiled.scopeId) {
       output += `\n_sfc_main.__scopeId = "data-v-${compiled.scopeId}";`;
     }
     output += "\nexport default _sfc_main;";
+  } else if (hasExportDefault && hasSfcMainDefined) {
+    // _sfc_main already defined, just add scopeId if needed
+    if (compiled.hasScoped && compiled.scopeId) {
+      // Insert scopeId assignment before the export default line
+      output = output.replace(
+        /^export default _sfc_main/m,
+        `_sfc_main.__scopeId = "data-v-${compiled.scopeId}";\nexport default _sfc_main`,
+      );
+    }
   }
 
   // Inject CSS (skip in production if extracting)

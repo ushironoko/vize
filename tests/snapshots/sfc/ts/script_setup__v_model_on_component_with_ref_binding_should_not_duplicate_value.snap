@@ -28,8 +28,8 @@ const __sfc__ = /*@__PURE__*/ _defineComponent({
 
 export function render(_ctx, _cache, $props, $setup, $data, $options) {
   return (_openBlock(), _createBlock($setup.MyInput, {
-    modelValue: $setup.message,
-    "onUpdate:modelValue": $event => (($setup.message) = $event)
+    modelValue: message,
+    "onUpdate:modelValue": $event => ((message) = $event)
   }, null, 8 /* PROPS */, ["modelValue", "onUpdate:modelValue"]))
 }
 

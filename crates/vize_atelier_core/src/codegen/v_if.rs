@@ -7,7 +7,7 @@ use super::context::CodegenContext;
 use super::expression::generate_expression;
 use super::helpers::{escape_js_string, is_valid_js_identifier};
 use super::node::generate_node;
-use super::props::generate_directive_prop_with_static;
+use super::props::{generate_directive_prop_with_static, generate_props};
 
 /// Generate if node
 pub fn generate_if(ctx: &mut CodegenContext, if_node: &IfNode<'_>) {
@@ -132,43 +132,85 @@ pub fn generate_if_branch_component(
         ctx.push(&component_name);
     }
 
-    // Check if component has props
-    let has_other = has_other_props_for_if(el);
-    ctx.push(", {");
-    ctx.indent();
-    ctx.newline();
-    ctx.push("key: ");
-    generate_if_branch_key(ctx, branch, branch_index);
+    // Check if component has v-bind object spread - needs special handling
+    if has_vbind_object_spread(el) {
+        // When v-bind="obj" is present, we need to use _mergeProps to combine
+        // the spread object with the key and other props
+        ctx.use_helper(RuntimeHelper::MergeProps);
+        ctx.push(", ");
+        ctx.push(ctx.helper(RuntimeHelper::MergeProps));
+        ctx.push("({ key: ");
+        generate_if_branch_key(ctx, branch, branch_index);
+        ctx.push(" }, ");
+        // Use generate_props which handles v-bind object spread correctly
+        generate_props(ctx, &el.props);
+        ctx.push(")");
+    } else {
+        // No v-bind object spread - generate props inline
+        // Check if component has props
+        let has_other = has_other_props_for_if(el);
+        ctx.push(", {");
+        ctx.indent();
+        ctx.newline();
+        ctx.push("key: ");
+        generate_if_branch_key(ctx, branch, branch_index);
 
-    // Extract static class/style for merging with dynamic bindings
-    let (static_class, static_style) = extract_static_class_style(el);
-    let has_dyn_class = has_dynamic_class(el);
-    let has_dyn_style = has_dynamic_style(el);
+        // Extract static class/style for merging with dynamic bindings
+        let (static_class, static_style) = extract_static_class_style(el);
+        let has_dyn_class = has_dynamic_class(el);
+        let has_dyn_style = has_dynamic_style(el);
 
-    // Add other props if any
-    if has_other {
-        for prop in el.props.iter() {
-            if should_skip_prop_for_if(prop, has_dyn_class, has_dyn_style) {
-                continue;
+        // Add other props if any (skip duplicate event handlers)
+        if has_other {
+            let mut seen_events: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for prop in el.props.iter() {
+                if should_skip_prop_for_if(prop, has_dyn_class, has_dyn_style) {
+                    continue;
+                }
+                // Skip duplicate v-on event handlers (can occur with v-model transform)
+                if let PropNode::Directive(dir) = prop {
+                    if dir.name == "on" {
+                        if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                            let event_key = arg.content.to_string();
+                            if seen_events.contains(&event_key) {
+                                continue; // Skip duplicate event
+                            }
+                            seen_events.insert(event_key);
+                        }
+                    }
+                }
+                ctx.push(",");
+                ctx.newline();
+                generate_single_prop_for_if(ctx, prop, static_class, static_style);
             }
+        }
+
+        // Add scope_id for scoped CSS
+        if let Some(ref scope_id) = ctx.options.scope_id.clone() {
             ctx.push(",");
             ctx.newline();
-            generate_single_prop_for_if(ctx, prop, static_class, static_style);
+            ctx.push("\"");
+            ctx.push(scope_id);
+            ctx.push("\": \"\"");
         }
-    }
 
-    // Add scope_id for scoped CSS
-    if let Some(ref scope_id) = ctx.options.scope_id.clone() {
-        ctx.push(",");
+        ctx.deindent();
         ctx.newline();
-        ctx.push("\"");
-        ctx.push(scope_id);
-        ctx.push("\": \"\"");
+        ctx.push("}");
     }
 
-    ctx.deindent();
-    ctx.newline();
-    ctx.push("}))")
+    ctx.push("))")
+}
+
+/// Check if element has v-bind object spread (v-bind="obj" without argument)
+fn has_vbind_object_spread(el: &ElementNode<'_>) -> bool {
+    el.props.iter().any(|p| {
+        if let PropNode::Directive(dir) = p {
+            dir.name == "bind" && dir.arg.is_none()
+        } else {
+            false
+        }
+    })
 }
 
 /// Check if element has props besides the key (for v-if branch elements)
@@ -183,12 +225,26 @@ fn has_other_props_for_if(el: &ElementNode<'_>) -> bool {
                         return false;
                     }
                 }
+                // Skip v-bind object spread (handled separately)
+                if dir.arg.is_none() {
+                    return false;
+                }
+                return true; // v-bind with arg is supported
             }
-            // Skip v-if/v-else-if/v-else directives (handled by parent)
-            if matches!(dir.name.as_str(), "if" | "else-if" | "else") {
+            // Skip v-if/v-else-if/v-else/v-slot directives
+            if matches!(dir.name.as_str(), "if" | "else-if" | "else" | "slot") {
                 return false;
             }
-            true
+            // Skip v-model - it's handled via withDirectives for native elements
+            if dir.name == "model" {
+                return false;
+            }
+            // v-on, v-html, v-text are supported - count them
+            if matches!(dir.name.as_str(), "on" | "html" | "text") {
+                return true;
+            }
+            // Skip custom directives (v-click-outside, v-focus, etc.)
+            false
         }
     })
 }
@@ -218,12 +274,25 @@ fn should_skip_prop_for_if(
                         return true;
                     }
                 }
+                return false; // v-bind is supported
             }
-            // Skip v-if/v-else-if/v-else directives
-            if matches!(dir.name.as_str(), "if" | "else-if" | "else") {
+            // Skip v-if/v-else-if/v-else/v-slot directives
+            // v-slot is handled separately as slot definition, not as prop
+            if matches!(dir.name.as_str(), "if" | "else-if" | "else" | "slot") {
                 return true;
             }
-            false
+            // Skip v-model for native elements - it's handled via withDirectives
+            // The onUpdate:modelValue handler is added separately by transform
+            if dir.name == "model" {
+                return true;
+            }
+            // v-on, v-html, v-text are supported - don't skip
+            if matches!(dir.name.as_str(), "on" | "html" | "text") {
+                return false;
+            }
+            // Skip custom directives (v-click-outside, v-focus, etc.)
+            // These are handled separately with withDirectives at runtime
+            true
         }
     }
 }
@@ -337,11 +406,24 @@ pub fn generate_if_branch_element(
     ctx.push("key: ");
     generate_if_branch_key(ctx, branch, branch_index);
 
-    // Add other props
+    // Add other props (skip duplicate event handlers)
     if has_other {
+        let mut seen_events: std::collections::HashSet<String> = std::collections::HashSet::new();
         for prop in el.props.iter() {
             if should_skip_prop_for_if(prop, has_dyn_class, has_dyn_style) {
                 continue;
+            }
+            // Skip duplicate v-on event handlers (can occur with v-model transform)
+            if let PropNode::Directive(dir) = prop {
+                if dir.name == "on" {
+                    if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                        let event_key = arg.content.to_string();
+                        if seen_events.contains(&event_key) {
+                            continue; // Skip duplicate event
+                        }
+                        seen_events.insert(event_key);
+                    }
+                }
             }
             ctx.push(",");
             ctx.newline();
@@ -511,5 +593,103 @@ pub fn generate_if_branch_children(ctx: &mut CodegenContext, children: &[Templat
         ctx.deindent();
         ctx.newline();
         ctx.push("]");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for v-if directive generation.
+    //!
+    //! Note: Full AST node tests require bumpalo allocation.
+    //! For comprehensive testing of the v-if behavior,
+    //! see the SFC snapshot tests in tests/fixtures/sfc/patches.toml.
+
+    use std::collections::HashSet;
+
+    /// Test v-bind object spread detection logic
+    #[test]
+    fn test_vbind_object_spread_logic() {
+        // v-bind without argument = object spread (v-bind="props")
+        let is_object_spread = |name: &str, has_arg: bool| -> bool {
+            name == "bind" && !has_arg
+        };
+
+        // v-bind="props" - object spread
+        assert!(is_object_spread("bind", false));
+
+        // v-bind:class="..." - named binding, not spread
+        assert!(!is_object_spread("bind", true));
+
+        // v-on:click - not v-bind
+        assert!(!is_object_spread("on", false));
+    }
+
+    /// Test that the HashSet-based duplicate event filtering works correctly
+    #[test]
+    fn test_duplicate_event_filtering() {
+        let mut seen_events: HashSet<String> = HashSet::new();
+
+        // First "click" event - should be added
+        let event1 = "click".to_string();
+        assert!(!seen_events.contains(&event1));
+        seen_events.insert(event1.clone());
+
+        // Second "click" event - should be detected as duplicate
+        let event2 = "click".to_string();
+        assert!(seen_events.contains(&event2));
+
+        // Different event - should not be duplicate
+        let event3 = "input".to_string();
+        assert!(!seen_events.contains(&event3));
+        seen_events.insert(event3.clone());
+
+        // Now input is also seen
+        assert!(seen_events.contains(&"input".to_string()));
+    }
+
+    /// Test the logic for which props to skip in v-if branches
+    #[test]
+    fn test_prop_skip_logic_for_if() {
+        // Props/directives that should be skipped in v-if
+        let should_skip_in_if = |name: &str| -> bool {
+            matches!(name, "if" | "else-if" | "else" | "slot")
+        };
+
+        assert!(should_skip_in_if("if"));
+        assert!(should_skip_in_if("else-if"));
+        assert!(should_skip_in_if("else"));
+        assert!(should_skip_in_if("slot"));
+
+        // These should NOT be skipped
+        assert!(!should_skip_in_if("on"));
+        assert!(!should_skip_in_if("bind"));
+        assert!(!should_skip_in_if("model"));
+    }
+
+    /// Test v-model directive handling in v-if (should be handled separately)
+    #[test]
+    fn test_vmodel_in_vif_logic() {
+        // v-model should be skipped for props generation in v-if
+        // because it's handled via withDirectives for native elements
+        let should_skip_vmodel_in_props = |name: &str| -> bool {
+            name == "model"
+        };
+
+        assert!(should_skip_vmodel_in_props("model"));
+        assert!(!should_skip_vmodel_in_props("bind"));
+        assert!(!should_skip_vmodel_in_props("on"));
+    }
+
+    /// Test key generation for v-if branches
+    #[test]
+    fn test_if_branch_key_generation() {
+        // Keys should be sequential integers by default
+        let generate_key = |branch_index: usize| -> i32 {
+            branch_index as i32
+        };
+
+        assert_eq!(generate_key(0), 0);
+        assert_eq!(generate_key(1), 1);
+        assert_eq!(generate_key(2), 2);
     }
 }

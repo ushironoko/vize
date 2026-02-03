@@ -357,7 +357,7 @@ impl ScriptCompileContext {
                             // Handle destructuring like: const { prop1, prop2 } = defineProps()
                             let mut is_props_destructure = false;
                             if let Some(init) = &decl.init {
-                                if let Some((macro_name, _)) = extract_macro_from_expr(init, source)
+                                if let Some((macro_name, macro_call)) = extract_macro_from_expr(init, source)
                                 {
                                     if macro_name == "defineProps" {
                                         is_props_destructure = true;
@@ -376,6 +376,10 @@ impl ScriptCompileContext {
                                         }
 
                                         self.macros.props_destructure = Some(destructure);
+
+                                        // Also register the defineProps macro for type_args access
+                                        self.macros.define_props = Some(macro_call);
+                                        self.has_define_props_call = true;
                                     }
                                 }
                             }

@@ -211,16 +211,28 @@ export function vize(options: VizeOptions = {}): Plugin {
         // For non-vue files, resolve relative to the real importer
         if (!id.endsWith(".vue")) {
           if (id.startsWith("./") || id.startsWith("../")) {
+            // Separate query params (e.g., ?inline, ?raw) from the path
+            const [pathPart, queryPart] = id.split("?");
+            const querySuffix = queryPart ? `?${queryPart}` : "";
+
             // Relative imports - resolve and check if file exists
-            const resolved = path.resolve(path.dirname(cleanImporter), id);
+            const resolved = path.resolve(path.dirname(cleanImporter), pathPart);
             for (const ext of ["", ".ts", ".tsx", ".js", ".jsx", ".json"]) {
               if (fs.existsSync(resolved + ext)) {
-                logger.log(`resolveId: resolved relative ${id} to ${resolved + ext}`);
-                return resolved + ext;
+                const finalPath = resolved + ext + querySuffix;
+                logger.log(`resolveId: resolved relative ${id} to ${finalPath}`);
+                return finalPath;
               }
             }
           } else {
             // External package imports (e.g., '@mdi/js', 'vue')
+            // Check if the id looks like an already-resolved path (contains /dist/ or /lib/)
+            // This can happen when other plugins (like vue-i18n) have already transformed the import
+            if (id.includes("/dist/") || id.includes("/lib/") || id.includes("/es/")) {
+              // Already looks resolved, return null to let Vite handle it
+              logger.log(`resolveId: skipping already-resolved path ${id}`);
+              return null;
+            }
             // Re-resolve with the real importer path
             logger.log(`resolveId: resolving external ${id} from ${cleanImporter}`);
             const resolved = await this.resolve(id, cleanImporter, { skipSelf: true });

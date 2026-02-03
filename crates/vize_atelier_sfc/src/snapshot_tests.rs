@@ -129,3 +129,66 @@ fn test_basic_sfc_ts_snapshots() {
         });
     }
 }
+
+/// Compile an SFC to JavaScript output (TypeScript stripped)
+fn compile_sfc_js(input: &str) -> String {
+    let descriptor = match parse_sfc(input, Default::default()) {
+        Ok(d) => d,
+        Err(e) => return format!("Parse error: {:?}", e),
+    };
+
+    let mut options = SfcCompileOptions::default();
+    // Disable TypeScript output mode - transpile to JavaScript
+    options.script.is_ts = false;
+    options.template.is_ts = false;
+    options.script.id = Some("test.vue".to_string());
+
+    match compile_sfc(&descriptor, options) {
+        Ok(result) => result.code,
+        Err(e) => format!("Compile error: {:?}", e),
+    }
+}
+
+#[test]
+fn test_patches_ts_snapshots() {
+    let snapshot_path = snapshots_path().join("sfc").join("ts");
+    std::fs::create_dir_all(&snapshot_path).ok();
+
+    let fixture_path = fixtures_path().join("sfc").join("patches.toml");
+    let fixture = load_fixture(&fixture_path).expect("Failed to load patches fixture");
+
+    for case in &fixture.cases {
+        let normalized_name = normalize_name(&case.name);
+        let ts_output = compile_sfc_ts(&case.input);
+
+        insta::with_settings!({
+            snapshot_path => &snapshot_path,
+            prepend_module_to_snapshot => false,
+            snapshot_suffix => "",
+        }, {
+            insta::assert_snapshot!(format!("patches__{}", normalized_name), ts_output);
+        });
+    }
+}
+
+#[test]
+fn test_patches_js_snapshots() {
+    let snapshot_path = snapshots_path().join("sfc").join("js");
+    std::fs::create_dir_all(&snapshot_path).ok();
+
+    let fixture_path = fixtures_path().join("sfc").join("patches.toml");
+    let fixture = load_fixture(&fixture_path).expect("Failed to load patches fixture");
+
+    for case in &fixture.cases {
+        let normalized_name = normalize_name(&case.name);
+        let js_output = compile_sfc_js(&case.input);
+
+        insta::with_settings!({
+            snapshot_path => &snapshot_path,
+            prepend_module_to_snapshot => false,
+            snapshot_suffix => "",
+        }, {
+            insta::assert_snapshot!(format!("patches__{}", normalized_name), js_output);
+        });
+    }
+}

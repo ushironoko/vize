@@ -30,10 +30,10 @@ const __sfc__ = /*@__PURE__*/ _defineComponent({
 
 export function render(_ctx, _cache, $props, $setup, $data, $options) {
   return (_openBlock(), _createBlock($setup.MyEditor, {
-    modelValue: $setup.content,
-    "onUpdate:modelValue": $event => (($setup.content) = $event),
-    title: $setup.title,
-    "onUpdate:title": $event => (($setup.title) = $event)
+    modelValue: content,
+    "onUpdate:modelValue": $event => ((content) = $event),
+    title: title,
+    "onUpdate:title": $event => ((title) = $event)
   }, null, 8 /* PROPS */, ["modelValue", "onUpdate:modelValue", "title", "onUpdate:title"]))
 }
 

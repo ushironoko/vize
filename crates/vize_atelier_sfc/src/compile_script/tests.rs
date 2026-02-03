@@ -535,4 +535,226 @@ const getNumberOfTeachers = (
             result.code
         );
     }
+
+    // =============================================================================
+    // Patch Tests: Props destructure with type-based defineProps
+    // =============================================================================
+
+    #[test]
+    fn test_props_destructure_type_based_with_defaults() {
+        // Issue: _mergeDefaults first argument was empty for type-based props
+        let content = r#"
+const { color = "primary", size = "medium" } = defineProps<{
+  color?: "primary" | "secondary";
+  size?: "small" | "medium" | "large";
+}>();
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("Type-based props destructure output:\n{}", result.code);
+
+        // Should have _mergeDefaults with proper first argument
+        assert!(
+            result.code.contains("_mergeDefaults("),
+            "Should use _mergeDefaults"
+        );
+        // First argument should NOT be empty
+        assert!(
+            !result.code.contains("_mergeDefaults(, {"),
+            "First argument should not be empty. Got:\n{}",
+            result.code
+        );
+        // Should contain prop definitions
+        assert!(
+            result.code.contains("color") && result.code.contains("size"),
+            "Should have prop definitions"
+        );
+    }
+
+    #[test]
+    fn test_props_destructure_type_based_generates_runtime_props() {
+        let content = r#"
+const { title, count = 0 } = defineProps<{
+  title: string;
+  count?: number;
+}>();
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("Runtime props generation:\n{}", result.code);
+
+        // Should generate runtime props object with type and required fields
+        assert!(
+            result.code.contains("type:") || result.code.contains("String") || result.code.contains("Number"),
+            "Should generate runtime type information"
+        );
+    }
+
+    // =============================================================================
+    // Patch Tests: Duplicate import filtering
+    // =============================================================================
+
+    #[test]
+    fn test_duplicate_imports_filtered() {
+        let content = r#"
+import { ref } from 'vue'
+import { ref } from 'vue'
+import { computed } from 'vue'
+const count = ref(0)
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("Duplicate imports output:\n{}", result.code);
+
+        // Count occurrences of "import { ref }"
+        let ref_imports = result
+            .code
+            .matches("import { ref }")
+            .count();
+        assert!(
+            ref_imports <= 1,
+            "Should have at most 1 ref import, got {}. Output:\n{}",
+            ref_imports,
+            result.code
+        );
+    }
+
+    // =============================================================================
+    // Patch Tests: Async setup detection
+    // =============================================================================
+
+    #[test]
+    fn test_top_level_await_generates_async_setup() {
+        let content = r#"
+const data = await fetch('/api').then(r => r.json())
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("Async setup output:\n{}", result.code);
+
+        assert!(
+            result.code.contains("async setup("),
+            "Should generate async setup for top-level await. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_await_in_string_does_not_trigger_async() {
+        let content = r#"
+const message = "please await for response"
+const code = 'await is a keyword'
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("String await output:\n{}", result.code);
+
+        assert!(
+            !result.code.contains("async setup("),
+            "Should NOT generate async setup for await in string. Got:\n{}",
+            result.code
+        );
+    }
+
+    // =============================================================================
+    // Patch Tests: Type comparison detection
+    // =============================================================================
+
+    #[test]
+    fn test_type_comparison_not_stripped() {
+        let content = r#"
+const props = defineProps(['type'])
+const isButton = props.type === 'button'
+const isLink = props.type !== 'link'
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("Type comparison output:\n{}", result.code);
+
+        // The comparison expressions should still be present
+        assert!(
+            result.code.contains("===") || result.code.contains("!=="),
+            "Type comparison operators should be preserved. Got:\n{}",
+            result.code
+        );
+        // The variable assignments should be present
+        assert!(
+            result.code.contains("isButton") && result.code.contains("isLink"),
+            "Variable assignments should be preserved. Got:\n{}",
+            result.code
+        );
+    }
+
+    // =============================================================================
+    // Patch Tests: TypeScript generic stripping
+    // =============================================================================
+
+    #[test]
+    fn test_generic_function_call_stripped() {
+        let ts_code = r#"const store = useStore<RootState>()"#;
+        let result = transform_typescript_to_js(ts_code);
+        println!("Generic stripped result: {}", result);
+
+        assert!(
+            !result.contains("<RootState>"),
+            "Generic type argument should be stripped. Got: {}",
+            result
+        );
+        assert!(
+            result.contains("useStore()"),
+            "Function call should remain. Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_ref_with_generic_stripped() {
+        let ts_code = r#"const user = ref<User | null>(null)"#;
+        let result = transform_typescript_to_js(ts_code);
+        println!("Ref generic stripped result: {}", result);
+
+        assert!(
+            !result.contains("<User | null>"),
+            "Generic type argument should be stripped. Got: {}",
+            result
+        );
+        assert!(
+            result.contains("ref(null)"),
+            "Function call should remain. Got: {}",
+            result
+        );
+    }
+
+    // =============================================================================
+    // Patch Tests: Arrow function type annotation stripping
+    // =============================================================================
+
+    #[test]
+    fn test_arrow_function_param_types_stripped() {
+        let ts_code = r#"items.filter((x: number) => x > 1)"#;
+        let result = transform_typescript_to_js(ts_code);
+        println!("Arrow param type stripped: {}", result);
+
+        assert!(
+            !result.contains(": number"),
+            "Parameter type should be stripped. Got: {}",
+            result
+        );
+    }
+
+    // =============================================================================
+    // Patch Tests: JavaScript reserved words
+    // =============================================================================
+
+    #[test]
+    fn test_reserved_word_not_in_shorthand() {
+        // This test verifies that reserved words like 'default' are not used as shorthand
+        let content = r#"
+import DefaultComponent from './Default.vue'
+const result = { default: DefaultComponent }
+"#;
+        let result = compile_script_setup(content, "Test", false, false, None).unwrap();
+        println!("Reserved word output:\n{}", result.code);
+
+        // The code should compile without syntax errors
+        // (If reserved words were used as shorthand, it would fail)
+        assert!(
+            result.code.contains("__returned__"),
+            "Should successfully compile with reserved word prop"
+        );
+    }
 }

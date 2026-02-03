@@ -35,9 +35,78 @@ fn prefix_identifiers_with_context(content: &str, ctx: &CodegenContext) -> Strin
                 local_vars: &'a mut FxHashSet<String>,
                 ctx: &'b CodegenContext,
                 offset: u32,
+                in_assignment_lhs: bool,
+            }
+
+            impl<'a, 'b> IdentifierVisitor<'a, 'b> {
+                fn is_setup_let(&self, name: &str) -> bool {
+                    if let Some(ref metadata) = self.ctx.options.binding_metadata {
+                        if let Some(binding_type) = metadata.bindings.get(name) {
+                            return matches!(
+                                binding_type,
+                                BindingType::SetupLet | BindingType::SetupMaybeRef
+                            );
+                        }
+                    }
+                    false
+                }
+
+                fn visit_assignment_target(&mut self, target: &oxc_ast::ast::AssignmentTarget<'_>) {
+                    use oxc_ast::ast::AssignmentTarget;
+                    match target {
+                        AssignmentTarget::AssignmentTargetIdentifier(ident) => {
+                            self.visit_identifier_reference(ident);
+                        }
+                        AssignmentTarget::ComputedMemberExpression(computed) => {
+                            self.visit_expression(&computed.object);
+                            self.visit_expression(&computed.expression);
+                        }
+                        AssignmentTarget::StaticMemberExpression(static_expr) => {
+                            self.visit_expression(&static_expr.object);
+                        }
+                        AssignmentTarget::PrivateFieldExpression(private) => {
+                            self.visit_expression(&private.object);
+                        }
+                        AssignmentTarget::ArrayAssignmentTarget(arr) => {
+                            for elem in arr.elements.iter().flatten() {
+                                if let Some(t) = elem.as_assignment_target() {
+                                    self.visit_assignment_target(t);
+                                }
+                            }
+                        }
+                        AssignmentTarget::ObjectAssignmentTarget(obj) => {
+                            for prop in &obj.properties {
+                                match prop {
+                                    oxc_ast::ast::AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(ident_prop) => {
+                                        self.visit_identifier_reference(&ident_prop.binding);
+                                    }
+                                    oxc_ast::ast::AssignmentTargetProperty::AssignmentTargetPropertyProperty(prop) => {
+                                        if let Some(t) = prop.binding.as_assignment_target() {
+                                            self.visit_assignment_target(t);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             impl<'a, 'b> Visit<'_> for IdentifierVisitor<'a, 'b> {
+                fn visit_assignment_expression(
+                    &mut self,
+                    assign: &oxc_ast::ast::AssignmentExpression<'_>,
+                ) {
+                    // For assignment LHS, we need to use .value for SetupLet bindings
+                    self.in_assignment_lhs = true;
+                    self.visit_assignment_target(&assign.left);
+                    self.in_assignment_lhs = false;
+
+                    // Visit right-hand side normally
+                    self.visit_expression(&assign.right);
+                }
+
                 fn visit_identifier_reference(
                     &mut self,
                     ident: &oxc_ast::ast::IdentifierReference<'_>,
@@ -59,33 +128,47 @@ fn prefix_identifiers_with_context(content: &str, ctx: &CodegenContext) -> Strin
                         return;
                     }
 
-                    // Determine prefix based on binding metadata
-                    let prefix = if let Some(ref metadata) = self.ctx.options.binding_metadata {
+                    // Determine prefix and suffix based on binding metadata
+                    let (prefix, suffix) = if let Some(ref metadata) = self.ctx.options.binding_metadata {
                         if let Some(binding_type) = metadata.bindings.get(name) {
                             match binding_type {
-                                BindingType::Props | BindingType::PropsAliased => "$props.",
+                                BindingType::Props | BindingType::PropsAliased => ("$props.", ""),
+                                BindingType::SetupLet | BindingType::SetupMaybeRef => {
+                                    // SetupLet needs special handling
+                                    if self.ctx.options.inline {
+                                        // Inline mode: refs need .value
+                                        ("", if self.in_assignment_lhs { ".value" } else { "" })
+                                    } else {
+                                        // Function mode: use $setup.xxx.value for assignment LHS
+                                        if self.in_assignment_lhs {
+                                            ("$setup.", ".value")
+                                        } else {
+                                            ("$setup.", "")
+                                        }
+                                    }
+                                }
                                 _ => {
                                     // In inline mode, no prefix
                                     // In function mode, use $setup.
                                     if self.ctx.options.inline {
-                                        ""
+                                        ("", "")
                                     } else {
-                                        "$setup."
+                                        ("$setup.", "")
                                     }
                                 }
                             }
                         } else {
-                            "_ctx."
+                            ("_ctx.", "")
                         }
                     } else {
-                        "_ctx."
+                        ("_ctx.", "")
                     };
 
-                    if !prefix.is_empty() {
+                    if !prefix.is_empty() || !suffix.is_empty() {
                         let start = (ident.span.start - self.offset) as usize;
                         let end = (ident.span.end - self.offset) as usize;
                         self.rewrites
-                            .push((start, end, format!("{}{}", prefix, name)));
+                            .push((start, end, format!("{}{}{}", prefix, name, suffix)));
                     }
                 }
 
@@ -120,6 +203,80 @@ fn prefix_identifiers_with_context(content: &str, ctx: &CodegenContext) -> Strin
                     // Visit body
                     self.visit_function_body(&arrow.body);
                 }
+
+                fn visit_object_expression(
+                    &mut self,
+                    obj: &oxc_ast::ast::ObjectExpression<'_>,
+                ) {
+                    use oxc_ast::ast::{ObjectPropertyKind, Expression};
+
+                    for prop in &obj.properties {
+                        match prop {
+                            ObjectPropertyKind::ObjectProperty(p) => {
+                                // Handle shorthand properties: { foo } -> { foo: $setup.foo }
+                                if p.shorthand {
+                                    if let Expression::Identifier(ident) = &p.value {
+                                        let name = ident.name.as_str();
+
+                                        // Skip if local variable
+                                        if self.local_vars.contains(name) {
+                                            continue;
+                                        }
+
+                                        // Skip globals
+                                        if is_global_allowed(name) {
+                                            continue;
+                                        }
+
+                                        // Skip slot params
+                                        if self.ctx.is_slot_param(name) {
+                                            continue;
+                                        }
+
+                                        // Determine prefix based on binding metadata
+                                        let prefix =
+                                            if let Some(ref metadata) = self.ctx.options.binding_metadata {
+                                                if let Some(binding_type) = metadata.bindings.get(name) {
+                                                    match binding_type {
+                                                        BindingType::Props | BindingType::PropsAliased => {
+                                                            "$props."
+                                                        }
+                                                        _ => {
+                                                            if self.ctx.options.inline {
+                                                                ""
+                                                            } else {
+                                                                "$setup."
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    "_ctx."
+                                                }
+                                            } else {
+                                                "_ctx."
+                                            };
+
+                                        if !prefix.is_empty() {
+                                            // For shorthand, replace the whole property with expanded form
+                                            // { foo } -> { foo: $setup.foo }
+                                            let start = (p.span.start - self.offset) as usize;
+                                            let end = (p.span.end - self.offset) as usize;
+                                            self.rewrites
+                                                .push((start, end, format!("{}: {}{}", name, prefix, name)));
+                                        }
+                                        continue;
+                                    }
+                                }
+
+                                // For non-shorthand properties, visit value normally
+                                self.visit_expression(&p.value);
+                            }
+                            ObjectPropertyKind::SpreadProperty(spread) => {
+                                self.visit_expression(&spread.argument);
+                            }
+                        }
+                    }
+                }
             }
 
             let mut visitor = IdentifierVisitor {
@@ -127,6 +284,7 @@ fn prefix_identifiers_with_context(content: &str, ctx: &CodegenContext) -> Strin
                 local_vars: &mut local_vars,
                 ctx,
                 offset: 1, // Account for the '(' we added
+                in_assignment_lhs: false,
             };
             visitor.visit_expression(&expr);
 
@@ -189,8 +347,8 @@ pub fn generate_simple_expression(ctx: &mut CodegenContext, exp: &SimpleExpressi
         ctx.push(&exp.content);
         ctx.push("\"");
     } else {
-        // Strip TypeScript if needed
-        if ctx.options.is_ts && exp.content.contains(" as ") {
+        // Strip TypeScript if needed (when is_ts is false, we transpile to JavaScript)
+        if !ctx.options.is_ts && exp.content.contains(" as ") {
             let stripped = crate::transforms::strip_typescript_from_expression(&exp.content);
             ctx.push(&stripped);
         } else {
@@ -277,8 +435,8 @@ pub fn generate_event_handler(
 
             let content = &simple.content;
 
-            // Step 1: Strip TypeScript if needed
-            let ts_stripped = if ctx.options.is_ts && content.contains(" as ") {
+            // Step 1: Strip TypeScript if needed (when is_ts is false, we transpile to JavaScript)
+            let ts_stripped = if !ctx.options.is_ts && content.contains(" as ") {
                 crate::transforms::strip_typescript_from_expression(content)
             } else {
                 content.to_string()

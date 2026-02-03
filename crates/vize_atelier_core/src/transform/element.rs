@@ -148,9 +148,10 @@ fn process_element_props<'a>(ctx: &mut TransformContext<'a>, el: &mut Box<'a, El
 
     for &idx in model_indices.iter() {
         if let Some(PropNode::Directive(dir)) = el.props.get(idx) {
-            // Get value expression
+            // Get value expression - use ORIGINAL source for handler, not transformed content
+            // The transformed content may have _unref() which is invalid for assignment LHS
             let value_exp = match &dir.exp {
-                Some(ExpressionNode::Simple(s)) => s.content.clone(),
+                Some(ExpressionNode::Simple(s)) => s.loc.source.clone(),
                 Some(ExpressionNode::Compound(c)) => c.loc.source.clone(),
                 None => continue,
             };
