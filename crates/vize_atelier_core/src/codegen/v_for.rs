@@ -9,10 +9,15 @@ use super::expression::generate_expression;
 use super::helpers::escape_js_string;
 use super::node::generate_node;
 
+/// Check if content is a numeric literal (for v-for range)
+fn is_numeric_content(content: &str) -> bool {
+    !content.is_empty() && content.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Check if source is a numeric literal (for v-for range)
 pub fn is_numeric_source(source: &ExpressionNode<'_>) -> bool {
     if let ExpressionNode::Simple(exp) = source {
-        exp.content.chars().all(|c| c.is_ascii_digit())
+        is_numeric_content(exp.content.as_str())
     } else {
         false
     }
@@ -162,6 +167,10 @@ fn should_skip_prop(p: &PropNode<'_>) -> bool {
         }
         // Skip v-for directive
         if dir.name == "for" {
+            return true;
+        }
+        // Skip custom/unsupported directives (handled via withDirectives)
+        if !super::props::is_supported_directive(dir) {
             return true;
         }
     }
@@ -428,3 +437,36 @@ pub fn generate_for_item(ctx: &mut CodegenContext, node: &TemplateChildNode<'_>,
         _ => generate_node(ctx, node),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_numeric_content;
+
+    /// Test numeric source detection for v-for range expressions.
+    /// This tests the actual `is_numeric_content` helper function.
+    #[test]
+    fn test_is_numeric_content() {
+        // Valid numeric literals (v-for="n in 10")
+        assert!(is_numeric_content("10"));
+        assert!(is_numeric_content("100"));
+        assert!(is_numeric_content("0"));
+        assert!(is_numeric_content("12345"));
+
+        // Invalid: variable names
+        assert!(!is_numeric_content("items"));
+        assert!(!is_numeric_content("arr"));
+
+        // Invalid: expressions
+        assert!(!is_numeric_content("arr.length"));
+        assert!(!is_numeric_content("10 + 5"));
+
+        // Invalid: floating point
+        assert!(!is_numeric_content("10.5"));
+
+        // Invalid: empty string
+        assert!(!is_numeric_content(""));
+    }
+}
+
+// Note: Directive skipping behavior (v-for with custom directives, :key handling)
+// is tested via SFC snapshot tests in tests/fixtures/sfc/patches.toml.

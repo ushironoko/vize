@@ -355,11 +355,11 @@ pub fn generate_v_once_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                     ctx.push(", null");
                 }
                 ctx.push(", ");
-                ctx.push(&format!(
-                    "{} /* {} */",
-                    filtered_flag,
-                    patch_flag_name(filtered_flag)
-                ));
+                ctx.push(&filtered_flag.to_string());
+                ctx.push(" /* ");
+                let flag_name = patch_flag_name(filtered_flag);
+                ctx.push(&flag_name);
+                ctx.push(" */");
             }
         }
         ctx.push(")");
@@ -610,7 +610,11 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             if should_emit_patch_flag {
                 if let Some(flag) = patch_flag {
                     ctx.push(", ");
-                    ctx.push(&format!("{} /* {} */", flag, patch_flag_name(flag)));
+                    ctx.push(&flag.to_string());
+                    ctx.push(" /* ");
+                    let flag_name = patch_flag_name(flag);
+                    ctx.push(&flag_name);
+                    ctx.push(" */");
                 }
             }
 
@@ -752,7 +756,11 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             // Generate patch flag
             if let Some(flag) = patch_flag {
                 ctx.push(", ");
-                ctx.push(&format!("{} /* {} */", flag, patch_flag_name(flag)));
+                ctx.push(&flag.to_string());
+                ctx.push(" /* ");
+                let flag_name = patch_flag_name(flag);
+                ctx.push(&flag_name);
+                ctx.push(" */");
             }
 
             // Generate dynamic props
@@ -894,7 +902,11 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             // Generate patch flag
             if let Some(flag) = patch_flag {
                 ctx.push(", ");
-                ctx.push(&format!("{} /* {} */", flag, patch_flag_name(flag)));
+                ctx.push(&flag.to_string());
+                ctx.push(" /* ");
+                let flag_name = patch_flag_name(flag);
+                ctx.push(&flag_name);
+                ctx.push(" */");
             }
 
             // Generate dynamic props

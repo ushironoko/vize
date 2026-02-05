@@ -6,6 +6,7 @@ use crate::ast::*;
 use crate::transforms::v_slot::{collect_slots, get_slot_name, has_v_slot};
 
 use super::context::CodegenContext;
+use super::helpers::{escape_js_string, is_valid_js_identifier};
 use super::node::generate_node;
 
 /// Get slot props expression as raw source (not transformed)
@@ -172,8 +173,12 @@ pub fn generate_slots(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                             ctx.push("_ctx.");
                             ctx.push(&slot_name);
                             ctx.push("]");
-                        } else {
+                        } else if is_valid_js_identifier(&slot_name) {
                             ctx.push(&slot_name);
+                        } else {
+                            ctx.push("\"");
+                            ctx.push(&escape_js_string(&slot_name));
+                            ctx.push("\"");
                         }
 
                         if slot_name.as_str() == "default" {
@@ -390,8 +395,94 @@ fn strip_ctx_prefix_for_slot_params(ctx: &CodegenContext, content: &str) -> std:
     let mut result = content.to_string();
     for param in &ctx.slot_params {
         // Replace _ctx.paramName with paramName
-        let prefixed = format!("_ctx.{}", param);
+        let mut prefixed = String::with_capacity(5 + param.len());
+        prefixed.push_str("_ctx.");
+        prefixed.push_str(param);
         result = result.replace(&prefixed, param);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_identifier_valid() {
+        assert!(is_identifier("foo"));
+        assert!(is_identifier("_bar"));
+        assert!(is_identifier("$baz"));
+        assert!(is_identifier("foo123"));
+        assert!(is_identifier("camelCase"));
+        assert!(is_identifier("PascalCase"));
+    }
+
+    #[test]
+    fn test_is_identifier_invalid() {
+        assert!(!is_identifier("123foo")); // starts with number
+        assert!(!is_identifier("")); // empty
+        assert!(!is_identifier("foo-bar")); // contains hyphen
+        assert!(!is_identifier("foo.bar")); // contains dot
+        assert!(!is_identifier("foo bar")); // contains space
+        assert!(!is_identifier("item-header")); // hyphenated slot name
+    }
+
+    #[test]
+    fn test_hyphenated_slot_names_need_quotes() {
+        // These slot names should NOT be valid identifiers
+        // and thus need to be quoted in the output
+        assert!(!is_identifier("item-header"));
+        assert!(!is_identifier("card-body"));
+        assert!(!is_identifier("main-content"));
+        assert!(!is_identifier("list-item"));
+    }
+
+    #[test]
+    fn test_regular_slot_names_are_valid_identifiers() {
+        // These slot names ARE valid identifiers
+        // and don't need to be quoted
+        assert!(is_identifier("default"));
+        assert!(is_identifier("header"));
+        assert!(is_identifier("footer"));
+        assert!(is_identifier("content"));
+    }
+
+    #[test]
+    fn test_extract_slot_params_destructuring() {
+        let params = extract_slot_params("{ item }");
+        assert_eq!(params, vec!["item"]);
+
+        let params = extract_slot_params("{ item, index }");
+        assert_eq!(params, vec!["item", "index"]);
+
+        let params = extract_slot_params("{ user, data }");
+        assert_eq!(params, vec!["user", "data"]);
+    }
+
+    #[test]
+    fn test_extract_slot_params_with_defaults() {
+        let params = extract_slot_params("{ item = default }");
+        assert_eq!(params, vec!["item"]);
+
+        let params = extract_slot_params("{ count = 0, name = 'test' }");
+        assert_eq!(params, vec!["count", "name"]);
+    }
+
+    #[test]
+    fn test_extract_slot_params_simple_identifier() {
+        let params = extract_slot_params("slotProps");
+        assert_eq!(params, vec!["slotProps"]);
+
+        let params = extract_slot_params("data");
+        assert_eq!(params, vec!["data"]);
+    }
+
+    #[test]
+    fn test_extract_slot_params_empty() {
+        let params = extract_slot_params("");
+        assert!(params.is_empty());
+
+        let params = extract_slot_params("   ");
+        assert!(params.is_empty());
+    }
 }

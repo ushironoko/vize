@@ -116,24 +116,32 @@ export function vize(options: VizeOptions = {}): Plugin {
 
     config() {
       // Exclude virtual modules and .vue files from dependency optimization
-      // Vize uses virtual modules with \0 prefix that shouldn't be pre-bundled
+      // Vize resolves .vue files to virtual modules with \0 prefix,
+      // which causes esbuild (Vite 6) / rolldown (Vite 8) dep scanning to fail
+      // because they try to read the \0-prefixed path as a real file.
       return {
         optimizeDeps: {
+          // Ensure vue is always pre-optimized so dep scan failures
+          // for .vue virtual modules don't cause mid-serve reloads
+          include: ["vue"],
           exclude: ["virtual:vize-styles"],
-          // Prevent esbuild from trying to scan .vue files
-          // which would cause issues with our virtual module prefix
+          // Vite 6: prevent esbuild dep scanner from processing .vue files
           esbuildOptions: {
             plugins: [
               {
-                name: "vize-vue-filter",
+                name: "vize-externalize-vue",
                 setup(build) {
-                  // Mark .vue imports as external during dep scanning
-                  build.onResolve({ filter: /\.vue$/ }, (args) => {
-                    return { path: args.path, external: true };
-                  });
+                  build.onResolve({ filter: /\.vue$/ }, (args) => ({
+                    path: args.path,
+                    external: true,
+                  }));
                 },
               },
             ],
+          },
+          // Vite 8: prevent rolldown from processing .vue files
+          rolldownOptions: {
+            external: [/\.vue$/],
           },
         },
       };
@@ -211,16 +219,28 @@ export function vize(options: VizeOptions = {}): Plugin {
         // For non-vue files, resolve relative to the real importer
         if (!id.endsWith(".vue")) {
           if (id.startsWith("./") || id.startsWith("../")) {
+            // Separate query params (e.g., ?inline, ?raw) from the path
+            const [pathPart, queryPart] = id.split("?");
+            const querySuffix = queryPart ? `?${queryPart}` : "";
+
             // Relative imports - resolve and check if file exists
-            const resolved = path.resolve(path.dirname(cleanImporter), id);
+            const resolved = path.resolve(path.dirname(cleanImporter), pathPart);
             for (const ext of ["", ".ts", ".tsx", ".js", ".jsx", ".json"]) {
               if (fs.existsSync(resolved + ext)) {
-                logger.log(`resolveId: resolved relative ${id} to ${resolved + ext}`);
-                return resolved + ext;
+                const finalPath = resolved + ext + querySuffix;
+                logger.log(`resolveId: resolved relative ${id} to ${finalPath}`);
+                return finalPath;
               }
             }
           } else {
             // External package imports (e.g., '@mdi/js', 'vue')
+            // Check if the id looks like an already-resolved path (contains /dist/ or /lib/)
+            // This can happen when other plugins (like vue-i18n) have already transformed the import
+            if (id.includes("/dist/") || id.includes("/lib/") || id.includes("/es/")) {
+              // Already looks resolved, return null to let Vite handle it
+              logger.log(`resolveId: skipping already-resolved path ${id}`);
+              return null;
+            }
             // Re-resolve with the real importer path
             logger.log(`resolveId: resolving external ${id} from ${cleanImporter}`);
             const resolved = await this.resolve(id, cleanImporter, { skipSelf: true });

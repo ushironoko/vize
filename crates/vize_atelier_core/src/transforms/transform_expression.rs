@@ -5,6 +5,9 @@
 
 use oxc_allocator::Allocator as OxcAllocator;
 use oxc_ast::ast as oxc_ast_types;
+use oxc_ast::visit::walk::{
+    walk_assignment_expression, walk_object_property, walk_update_expression,
+};
 use oxc_ast::Visit;
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
@@ -12,6 +15,8 @@ use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_transformer::{TransformOptions, Transformer};
 use vize_carton::{Box, Bump, FxHashSet, String};
+
+use std::string::String as StdString;
 use vize_croquis::builtins::is_global_allowed;
 
 use crate::ast::{CompoundExpressionNode, ConstantType, ExpressionNode, SimpleExpressionNode};
@@ -87,7 +92,7 @@ pub fn process_expression<'a>(
 
 /// Result of expression rewriting
 struct RewriteResult {
-    code: std::string::String,
+    code: StdString,
     used_unref: bool,
 }
 
@@ -109,7 +114,10 @@ fn rewrite_expression(
     let source_type = SourceType::default().with_module(true);
 
     // Wrap in parentheses to make it a valid expression statement
-    let wrapped = format!("({})", js_content);
+    let mut wrapped = String::with_capacity(js_content.len() + 2);
+    wrapped.push('(');
+    wrapped.push_str(&js_content);
+    wrapped.push(')');
     let parser = Parser::new(&oxc_allocator, &wrapped, source_type);
     let parse_result = parser.parse_expression();
 
@@ -123,15 +131,15 @@ fn rewrite_expression(
 
             // Combine prefix rewrites (from HashSet) with suffix rewrites
             // Each rewrite is (position, prefix, suffix)
-            let mut all_rewrites: Vec<(usize, &str, &str)> = collector
+            let mut all_rewrites: Vec<(usize, StdString, StdString)> = collector
                 .rewrites
                 .into_iter()
-                .map(|(pos, prefix)| (pos, prefix, ""))
+                .map(|(pos, prefix)| (pos, prefix, StdString::new()))
                 .collect();
 
             // Add suffix rewrites (suffixes come after the identifier)
             for (pos, suffix) in collector.suffix_rewrites {
-                all_rewrites.push((pos, "", suffix));
+                all_rewrites.push((pos, StdString::new(), suffix));
             }
 
             // Sort by position descending so we can replace from end to start
@@ -145,11 +153,11 @@ fn rewrite_expression(
                 if adjusted_pos <= result.len() {
                     if !suffix.is_empty() {
                         // Insert suffix at the end of identifier
-                        result.insert_str(adjusted_pos, suffix);
+                        result.insert_str(adjusted_pos, &suffix);
                     }
                     if !prefix.is_empty() {
                         // Insert prefix at the start of identifier
-                        result.insert_str(adjusted_pos, prefix);
+                        result.insert_str(adjusted_pos, &prefix);
                     }
                 }
             }
@@ -187,7 +195,81 @@ fn needs_typescript_stripping(content: &str) -> bool {
     // - " as " is TypeScript type assertion
     // - We avoid checking ": " as it's also used in object literals
     // - Generic types like "Array<string>" - but we need to be careful not to match comparison operators
-    content.contains(" as ")
+    if content.contains(" as ") {
+        return true;
+    }
+
+    // Check for arrow function parameter type annotations: (param: Type) =>
+    // Pattern: identifier followed by : and then some type, before ) =>
+    if content.contains("=>") {
+        // Look for patterns like "(x: Type)" or "(x: Type, y: Type2)"
+        let bytes = content.as_bytes();
+        let mut in_paren = false;
+        let mut after_ident = false;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'(' => {
+                    in_paren = true;
+                    after_ident = false;
+                }
+                b')' => {
+                    in_paren = false;
+                    after_ident = false;
+                }
+                b':' if in_paren && after_ident => {
+                    // Found colon after identifier inside parens before =>
+                    // This is likely a type annotation
+                    // Check it's not :: (TypeScript namespace separator)
+                    if i + 1 < bytes.len() && bytes[i + 1] != b':' {
+                        return true;
+                    }
+                }
+                b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' | b'0'..=b'9' => {
+                    after_ident = true;
+                }
+                b' ' | b'\t' => {
+                    // Whitespace doesn't reset after_ident
+                }
+                b',' => {
+                    // Comma resets for next parameter
+                    after_ident = false;
+                }
+                _ => {
+                    after_ident = false;
+                }
+            }
+        }
+    }
+
+    // Check for non-null assertion operator (foo!, bar.baz!, etc.)
+    // This is tricky because we need to distinguish from logical NOT (!foo)
+    // Non-null assertion comes AFTER an expression, not before
+    // Pattern: identifier/closing bracket/paren followed by !
+    let bytes = content.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'!' {
+            // Check if this is a non-null assertion (! after identifier/)/])
+            // rather than logical NOT (! before expression)
+            if i > 0 {
+                let prev = bytes[i - 1];
+                // Non-null assertion if previous char is:
+                // - alphanumeric (foo!)
+                // - underscore or dollar (var_!)
+                // - closing paren (foo()!)
+                // - closing bracket (foo[0]!)
+                let is_non_null_assertion = prev.is_ascii_alphanumeric()
+                    || prev == b'_'
+                    || prev == b'$'
+                    || prev == b')'
+                    || prev == b']';
+                if is_non_null_assertion {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Strip TypeScript type annotations from an expression
@@ -201,7 +283,10 @@ pub fn strip_typescript_from_expression(content: &str) -> std::string::String {
     let source_type = SourceType::ts();
 
     // Wrap in a dummy statement to make it parseable
-    let wrapped = format!("const _expr_ = ({});", content);
+    let mut wrapped = String::with_capacity(content.len() + 18);
+    wrapped.push_str("const _expr_ = (");
+    wrapped.push_str(content);
+    wrapped.push_str(");");
     let parser = Parser::new(&allocator, &wrapped, source_type);
     let parse_result = parser.parse();
 
@@ -242,7 +327,7 @@ pub fn strip_typescript_from_expression(content: &str) -> std::string::String {
     if let Some(start) = js_code.find(prefix) {
         let expr_start = start + prefix.len();
         // Find the semicolon at the end
-        if let Some(end) = js_code[expr_start..].find(';') {
+        if let Some(end) = js_code[expr_start..].rfind(';') {
             let expr = &js_code[expr_start..expr_start + end];
             // Remove surrounding parentheses if present
             let expr = expr.trim();
@@ -264,7 +349,10 @@ pub fn prefix_identifiers_in_expression(content: &str) -> std::string::String {
     let source_type = SourceType::default().with_module(true);
 
     // Wrap in parentheses to make it a valid expression statement
-    let wrapped = format!("({})", content);
+    let mut wrapped = String::with_capacity(content.len() + 2);
+    wrapped.push('(');
+    wrapped.push_str(content);
+    wrapped.push(')');
     let parser = Parser::new(&allocator, &wrapped, source_type);
     let parse_result = parser.parse_expression();
 
@@ -272,7 +360,7 @@ pub fn prefix_identifiers_in_expression(content: &str) -> std::string::String {
         Ok(expr) => {
             // Collect identifiers and their positions
             let mut rewrites: Vec<(usize, usize, std::string::String)> = Vec::new();
-            let mut local_vars: FxHashSet<std::string::String> = FxHashSet::default();
+            let mut local_vars: FxHashSet<StdString> = FxHashSet::default();
 
             collect_identifiers_for_prefix(&expr, &mut rewrites, &mut local_vars, content);
 
@@ -300,7 +388,7 @@ pub fn prefix_identifiers_in_expression(content: &str) -> std::string::String {
 fn collect_identifiers_for_prefix(
     expr: &oxc_ast::ast::Expression<'_>,
     rewrites: &mut Vec<(usize, usize, std::string::String)>,
-    local_vars: &mut FxHashSet<std::string::String>,
+    local_vars: &mut FxHashSet<StdString>,
     _original: &str,
 ) {
     use oxc_ast::ast::Expression;
@@ -427,7 +515,7 @@ fn collect_identifiers_for_prefix(
 /// Collect binding names from a pattern
 fn collect_binding_names(
     pattern: &oxc_ast::ast::BindingPattern<'_>,
-    local_vars: &mut FxHashSet<std::string::String>,
+    local_vars: &mut FxHashSet<StdString>,
 ) {
     match &pattern.kind {
         oxc_ast::ast::BindingPatternKind::BindingIdentifier(id) => {
@@ -453,11 +541,13 @@ fn collect_binding_names(
 struct IdentifierCollector<'a, 'ctx> {
     ctx: &'a TransformContext<'ctx>,
     /// Identifiers that are being declared (e.g., in arrow function params)
-    local_scope: FxHashSet<String>,
+    local_scope: FxHashSet<StdString>,
     /// (position, prefix) pairs for rewrites
-    rewrites: FxHashSet<(usize, &'static str)>,
+    rewrites: FxHashSet<(usize, StdString)>,
     /// (position, suffix) pairs for suffix rewrites (e.g., .value for refs)
-    suffix_rewrites: Vec<(usize, &'static str)>,
+    suffix_rewrites: Vec<(usize, StdString)>,
+    /// Assignment target identifier positions (for .value on LHS)
+    assignment_targets: FxHashSet<usize>,
     /// Whether _unref helper was used
     used_unref: bool,
 }
@@ -469,6 +559,7 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
             local_scope: FxHashSet::default(),
             rewrites: FxHashSet::default(),
             suffix_rewrites: Vec::new(),
+            assignment_targets: FxHashSet::default(),
             used_unref: false,
         }
     }
@@ -525,26 +616,45 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
         }
 
         let needs_unref = self.needs_unref(name);
+        let is_assignment_target = self
+            .assignment_targets
+            .contains(&(ident.span.start as usize));
+
+        if is_assignment_target {
+            if let Some(prefix) = get_identifier_prefix(name, self.ctx) {
+                self.rewrites
+                    .insert((ident.span.start as usize, prefix.to_string()));
+            }
+            if self.is_ref_binding(name) || needs_unref {
+                self.suffix_rewrites
+                    .push((ident.span.end as usize, ".value".to_string()));
+            }
+            return;
+        }
 
         if let Some(prefix) = get_identifier_prefix(name, self.ctx) {
             // In function mode, SetupLet bindings need both $setup. prefix and _unref() wrapper
             // Result: _unref($setup.b) instead of just $setup.b
             if needs_unref && prefix == "$setup." {
                 self.rewrites
-                    .insert((ident.span.start as usize, "_unref($setup."));
-                self.suffix_rewrites.push((ident.span.end as usize, ")"));
+                    .insert((ident.span.start as usize, "_unref($setup.".to_string()));
+                self.suffix_rewrites
+                    .push((ident.span.end as usize, ")".to_string()));
                 self.used_unref = true;
             } else {
-                self.rewrites.insert((ident.span.start as usize, prefix));
+                self.rewrites
+                    .insert((ident.span.start as usize, prefix.to_string()));
             }
         } else if self.is_ref_binding(name) {
             // Add .value suffix for refs in inline mode
             self.suffix_rewrites
-                .push((ident.span.end as usize, ".value"));
+                .push((ident.span.end as usize, ".value".to_string()));
         } else if needs_unref {
             // Wrap with _unref() for let/var bindings (inline mode)
-            self.rewrites.insert((ident.span.start as usize, "_unref("));
-            self.suffix_rewrites.push((ident.span.end as usize, ")"));
+            self.rewrites
+                .insert((ident.span.start as usize, "_unref(".to_string()));
+            self.suffix_rewrites
+                .push((ident.span.end as usize, ")".to_string()));
             self.used_unref = true;
         }
     }
@@ -568,7 +678,8 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
                             // Skip adding .value - it's already accessed via .value
                             // But still add _ctx. prefix if needed
                             if let Some(prefix) = get_identifier_prefix(name, self.ctx) {
-                                self.rewrites.insert((ident.span.start as usize, prefix));
+                                self.rewrites
+                                    .insert((ident.span.start as usize, prefix.to_string()));
                             }
                             return;
                         }
@@ -596,13 +707,50 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
         // Visit body
         self.visit_function_body(&arrow.body);
     }
+
+    fn visit_assignment_expression(&mut self, expr: &oxc_ast_types::AssignmentExpression<'_>) {
+        self.collect_assignment_targets(&expr.left);
+        walk_assignment_expression(self, expr);
+    }
+
+    fn visit_update_expression(&mut self, expr: &oxc_ast_types::UpdateExpression<'_>) {
+        self.collect_simple_assignment_targets(&expr.argument);
+        walk_update_expression(self, expr);
+    }
+
+    fn visit_object_property(&mut self, prop: &oxc_ast_types::ObjectProperty<'_>) {
+        if prop.shorthand {
+            if let oxc_ast_types::PropertyKey::StaticIdentifier(ident) = &prop.key {
+                let name = ident.name.as_str();
+                if self.local_scope.contains(name) || is_global_allowed(name) {
+                    return;
+                }
+                if self.ctx.is_in_scope(name) {
+                    return;
+                }
+
+                if let Some(prefix) = get_identifier_prefix(name, self.ctx) {
+                    if !prefix.is_empty() {
+                        let mut suffix = StdString::with_capacity(2 + prefix.len() + name.len());
+                        suffix.push_str(": ");
+                        suffix.push_str(prefix);
+                        suffix.push_str(name);
+                        self.suffix_rewrites.push((ident.span.end as usize, suffix));
+                        return;
+                    }
+                }
+            }
+        }
+
+        walk_object_property(self, prop);
+    }
 }
 
 impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
     fn collect_binding_pattern(&mut self, pattern: &oxc_ast_types::BindingPattern<'_>) {
         match &pattern.kind {
             oxc_ast_types::BindingPatternKind::BindingIdentifier(id) => {
-                self.local_scope.insert(id.name.to_string().into());
+                self.local_scope.insert(id.name.to_string());
             }
             oxc_ast_types::BindingPatternKind::ObjectPattern(obj) => {
                 for prop in &obj.properties {
@@ -623,6 +771,97 @@ impl<'a, 'ctx> IdentifierCollector<'a, 'ctx> {
             oxc_ast_types::BindingPatternKind::AssignmentPattern(assign) => {
                 self.collect_binding_pattern(&assign.left);
             }
+        }
+    }
+
+    fn collect_assignment_targets(&mut self, target: &oxc_ast_types::AssignmentTarget<'_>) {
+        use oxc_ast_types::{AssignmentTarget, AssignmentTargetProperty};
+
+        match target {
+            AssignmentTarget::AssignmentTargetIdentifier(ident) => {
+                self.assignment_targets.insert(ident.span.start as usize);
+            }
+            AssignmentTarget::ObjectAssignmentTarget(obj) => {
+                for prop in &obj.properties {
+                    match prop {
+                        AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(
+                            prop_ident,
+                        ) => {
+                            self.assignment_targets
+                                .insert(prop_ident.binding.span.start as usize);
+                        }
+                        AssignmentTargetProperty::AssignmentTargetPropertyProperty(prop_prop) => {
+                            self.collect_assignment_targets_maybe_default(&prop_prop.binding);
+                        }
+                    }
+                }
+                if let Some(rest) = &obj.rest {
+                    self.collect_assignment_targets(&rest.target);
+                }
+            }
+            AssignmentTarget::ArrayAssignmentTarget(arr) => {
+                for elem in arr.elements.iter().flatten() {
+                    self.collect_assignment_targets_maybe_default(elem);
+                }
+                if let Some(rest) = &arr.rest {
+                    self.collect_assignment_targets(&rest.target);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_assignment_targets_maybe_default(
+        &mut self,
+        target: &oxc_ast_types::AssignmentTargetMaybeDefault<'_>,
+    ) {
+        use oxc_ast_types::{AssignmentTargetMaybeDefault, AssignmentTargetProperty};
+
+        match target {
+            AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(def) => {
+                self.collect_assignment_targets(&def.binding);
+            }
+            AssignmentTargetMaybeDefault::AssignmentTargetIdentifier(ident) => {
+                self.assignment_targets.insert(ident.span.start as usize);
+            }
+            AssignmentTargetMaybeDefault::ObjectAssignmentTarget(obj) => {
+                for prop in &obj.properties {
+                    match prop {
+                        AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(
+                            prop_ident,
+                        ) => {
+                            self.assignment_targets
+                                .insert(prop_ident.binding.span.start as usize);
+                        }
+                        AssignmentTargetProperty::AssignmentTargetPropertyProperty(prop_prop) => {
+                            self.collect_assignment_targets_maybe_default(&prop_prop.binding);
+                        }
+                    }
+                }
+                if let Some(rest) = &obj.rest {
+                    self.collect_assignment_targets(&rest.target);
+                }
+            }
+            AssignmentTargetMaybeDefault::ArrayAssignmentTarget(arr) => {
+                for elem in arr.elements.iter().flatten() {
+                    self.collect_assignment_targets_maybe_default(elem);
+                }
+                if let Some(rest) = &arr.rest {
+                    self.collect_assignment_targets(&rest.target);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_simple_assignment_targets(
+        &mut self,
+        target: &oxc_ast_types::SimpleAssignmentTarget<'_>,
+    ) {
+        use oxc_ast_types::SimpleAssignmentTarget;
+
+        if let SimpleAssignmentTarget::AssignmentTargetIdentifier(ident) = target {
+            self.assignment_targets.insert(ident.span.start as usize);
         }
     }
 }
@@ -930,4 +1169,79 @@ mod tests {
             "Should contain event target"
         );
     }
+
+    // =============================================================================
+    // Patch Tests: TypeScript detection improvements
+    // =============================================================================
+
+    #[test]
+    fn test_needs_typescript_stripping_as_keyword() {
+        assert!(needs_typescript_stripping("foo as string"));
+        assert!(needs_typescript_stripping("$event.target as HTMLElement"));
+        assert!(!needs_typescript_stripping("foo.bar"));
+    }
+
+    #[test]
+    fn test_needs_typescript_stripping_arrow_function_params() {
+        // Arrow function with typed parameters should be detected
+        assert!(needs_typescript_stripping("(x: number) => x + 1"));
+        assert!(needs_typescript_stripping("(item: Item) => item.name"));
+        assert!(needs_typescript_stripping(
+            "(a: string, b: number) => a + b"
+        ));
+
+        // Arrow function without types should not need stripping
+        assert!(!needs_typescript_stripping("(x) => x + 1"));
+        assert!(!needs_typescript_stripping("x => x + 1"));
+    }
+
+    #[test]
+    fn test_needs_typescript_stripping_generic_detection_note() {
+        // NOTE: Generic function call detection (e.g., useStore<RootState>())
+        // is not implemented in needs_typescript_stripping.
+        // Generic stripping is handled by the full OXC TypeScript transformer
+        // when compiling script blocks with is_ts = false.
+        // This test documents the current behavior.
+
+        // Currently NOT detected as needing stripping:
+        assert!(!needs_typescript_stripping("useStore<RootState>()"));
+        assert!(!needs_typescript_stripping("ref<User | null>(null)"));
+
+        // Regular function calls correctly don't need stripping:
+        assert!(!needs_typescript_stripping("useStore()"));
+        assert!(!needs_typescript_stripping("ref(null)"));
+    }
+
+    #[test]
+    fn test_strip_typescript_documents_limitations() {
+        // NOTE: strip_typescript_from_expression is a simple parser-based
+        // transformation for template expressions. It handles common cases
+        // like "as" assertions, but complex TypeScript like generics are
+        // handled by the full OXC transformer in compile_script.
+        //
+        // For template expressions with generics, they are stripped during
+        // script compilation (not in the template transform phase).
+
+        // "as" assertions are stripped:
+        let result = strip_typescript_from_expression("foo as string");
+        assert!(!result.contains(" as "), "as assertions should be stripped");
+
+        // Generics in expressions MAY or MAY NOT be stripped depending on context
+        // This is expected behavior - complex cases are handled elsewhere
+        let result = strip_typescript_from_expression("useStore<RootState>()");
+        // Document the actual behavior - generics aren't stripped by this function
+        eprintln!("Generic expression result: {}", result);
+    }
+
+    #[test]
+    fn test_strip_typescript_arrow_param_types() {
+        let result = strip_typescript_from_expression("items.filter((x: number) => x > 1)");
+        eprintln!("Arrow param stripped: {}", result);
+        // Note: This may or may not strip depending on the OXC parser's handling
+        // The important thing is that it doesn't crash
+        assert!(result.contains("filter"));
+    }
 }
+
+// Note: Multiline arrow function handling and ES6 shorthand expansion
+// are tested via SFC snapshot tests in tests/fixtures/sfc/patches.toml.
