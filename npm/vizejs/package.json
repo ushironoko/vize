@@ -1,6 +1,6 @@
 {
   "name": "vizejs",
-  "version": "0.0.1-alpha.47",
+  "version": "0.0.1-alpha.48",
   "description": "High-performance Vue.js compiler - Main package",
   "publishConfig": {
     "provenance": true,
