@@ -2,7 +2,7 @@
   "name": "vize",
   "displayName": "Vize",
   "description": "Vue Language Support powered by Vize - A high-performance language server for Vue SFC",
-  "version": "0.0.1-alpha.11",
+  "version": "0.0.1-alpha.45",
   "publisher": "vize",
   "license": "MIT",
   "icon": "icons/logo.png",
@@ -37,8 +37,13 @@
     "languages": [
       {
         "id": "vue",
-        "aliases": ["Vue", "vue"],
-        "extensions": [".vue"],
+        "aliases": [
+          "Vue",
+          "vue"
+        ],
+        "extensions": [
+          ".vue"
+        ],
         "configuration": "./language-configuration.json",
         "icon": {
           "light": "./icons/vue.svg",
@@ -77,7 +82,11 @@
         },
         "vize.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Traces the communication between VS Code and the Vize language server"
         },
@@ -137,7 +146,7 @@
         }
       ]
     },
-"colors": [
+    "colors": [
       {
         "id": "vize.inlayHint.propsForeground",
         "description": "Foreground color for props destructure inlay hints",

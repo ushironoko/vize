@@ -132,7 +132,8 @@ rm -f Cargo.toml.bak
 
 # Update npm package versions
 echo "Updating npm packages..."
-for pkg in npm/vize-wasm npm/vize-native npm/vite-plugin-vize npm/fresco-native npm/fresco npm/musea-mcp-server npm/vite-plugin-musea npm/vize; do
+for pkg in npm/*/; do
+  pkg=${pkg%/}  # remove trailing slash
   if [ -f "$pkg/package.json" ]; then
     node -e "
       const fs = require('fs');
@@ -152,9 +153,14 @@ for pkg in npm/vize-wasm npm/vize-native npm/vite-plugin-vize npm/fresco-native 
   fi
 done
 
+# Update version references in READMEs
+echo "Updating READMEs..."
+find npm -name 'README.md' -exec sed -i.bak "s/$CURRENT_VERSION/$NEW_VERSION/g" {} \;
+find npm -name 'README.md.bak' -delete
+
 # Commit changes
 echo "Committing changes..."
-git add Cargo.toml npm/*/package.json
+git add Cargo.toml npm/*/package.json npm/*/README.md
 git commit -m "chore: release v$NEW_VERSION"
 
 # Create tag

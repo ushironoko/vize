@@ -2,7 +2,7 @@
   "name": "vize-art",
   "displayName": "Vize Art",
   "description": "Syntax highlighting for Vize Art files (*.art.vue)",
-  "version": "0.0.1-alpha.11",
+  "version": "0.0.1-alpha.45",
   "publisher": "vize",
   "repository": {
     "type": "git",
@@ -18,8 +18,13 @@
     "languages": [
       {
         "id": "art-vue",
-        "aliases": ["Art Vue", "art"],
-        "extensions": [".art.vue"],
+        "aliases": [
+          "Art Vue",
+          "art"
+        ],
+        "extensions": [
+          ".art.vue"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
