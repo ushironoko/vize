@@ -22,7 +22,7 @@ Search "Vize" in VS Code Extensions.
 ### From VSIX
 
 ```bash
-code --install-extension vize-0.0.1-alpha.62.vsix
+code --install-extension vize-0.0.1-alpha.63.vsix
 ```
 
 ### Development
