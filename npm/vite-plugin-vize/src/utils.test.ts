@@ -35,12 +35,12 @@ export default {
 assert.strictEqual(
   hasSfcMainDefined(scriptSetupCode),
   false,
-  "Script setup component should not have _sfc_main pre-defined"
+  "Script setup component should not have _sfc_main pre-defined",
 );
 assert.strictEqual(
   hasExportDefault(scriptSetupCode),
   true,
-  "Script setup component should have export default"
+  "Script setup component should have export default",
 );
 
 // Test 2: Non-script-setup component (should have _sfc_main defined)
@@ -54,12 +54,12 @@ export default _sfc_main
 assert.strictEqual(
   hasSfcMainDefined(nonScriptSetupCode),
   true,
-  "Non-script-setup component should have _sfc_main pre-defined"
+  "Non-script-setup component should have _sfc_main pre-defined",
 );
 assert.strictEqual(
   hasExportDefault(nonScriptSetupCode),
   true,
-  "Non-script-setup component should have export default"
+  "Non-script-setup component should have export default",
 );
 
 // Test 3: Variation with different spacing
@@ -67,7 +67,7 @@ const variationCode = `const  _sfc_main   =  __default__`;
 assert.strictEqual(
   hasSfcMainDefined(variationCode),
   true,
-  "Should detect _sfc_main with various whitespace"
+  "Should detect _sfc_main with various whitespace",
 );
 
 // =============================================================================
@@ -112,35 +112,35 @@ function isAlreadyResolved(id: string): boolean {
 assert.strictEqual(
   isAlreadyResolved("/node_modules/some-pkg/dist/index.mjs"),
   true,
-  "Should detect /dist/ path as resolved"
+  "Should detect /dist/ path as resolved",
 );
 
 // Test 9: lib path
 assert.strictEqual(
   isAlreadyResolved("/node_modules/some-pkg/lib/index.js"),
   true,
-  "Should detect /lib/ path as resolved"
+  "Should detect /lib/ path as resolved",
 );
 
 // Test 10: es path (ESM build)
 assert.strictEqual(
   isAlreadyResolved("/node_modules/some-pkg/es/index.mjs"),
   true,
-  "Should detect /es/ path as resolved"
+  "Should detect /es/ path as resolved",
 );
 
 // Test 11: Regular package import
 assert.strictEqual(
   isAlreadyResolved("lodash-es"),
   false,
-  "Package name should not be detected as resolved"
+  "Package name should not be detected as resolved",
 );
 
 // Test 12: Relative import
 assert.strictEqual(
   isAlreadyResolved("./components/Button.vue"),
   false,
-  "Relative import should not be detected as resolved"
+  "Relative import should not be detected as resolved",
 );
 
 // =============================================================================

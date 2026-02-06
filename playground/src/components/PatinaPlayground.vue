@@ -655,9 +655,7 @@ onUnmounted(() => {
                   type="checkbox"
                   :checked="isCategoryFullyEnabled(selectedCategory)"
                   :indeterminate="isCategoryPartiallyEnabled(selectedCategory)"
-                  @change="
-                    toggleCategory(selectedCategory, $event.target.checked)
-                  "
+                  @change="toggleCategory(selectedCategory, $event.target.checked)"
                   class="rule-checkbox"
                 />
                 <span class="category-label">{{ selectedCategory }}</span>

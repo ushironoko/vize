@@ -698,10 +698,7 @@ onMounted(async () => {
         <template v-if="mainTab === 'atelier'">
           <label class="option">
             <span>Preset:</span>
-            <select
-              :value="selectedPreset"
-              @change="handlePresetChange($event.target.value)"
-            >
+            <select :value="selectedPreset" @change="handlePresetChange($event.target.value)">
               <option v-for="(preset, key) in PRESETS" :key="key" :value="key">
                 {{ preset.name }}
               </option>
