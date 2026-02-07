@@ -21,6 +21,7 @@ pub fn generate_virtual_ts_with_scopes(
         template_ast,
         script_offset,
         template_offset,
+        &crate::virtual_ts::VirtualTsOptions::default(),
     );
     output.code
 }
