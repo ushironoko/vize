@@ -405,13 +405,24 @@ fn parse_global_entry(entry: &str) -> vize_canon::virtual_ts::TemplateGlobal {
         TemplateGlobal {
             name: name.trim().to_string(),
             type_annotation: type_ann.trim().to_string(),
+            default_value: "{} as any".to_string(),
         }
     } else {
         TemplateGlobal {
             name: entry.trim().to_string(),
             type_annotation: "any".to_string(),
+            default_value: "{} as any".to_string(),
         }
     }
+}
+
+/// Parse a comma-separated globals string from CLI `--globals` flag.
+fn parse_globals_str(globals_str: &str) -> Vec<vize_canon::virtual_ts::TemplateGlobal> {
+    globals_str
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(parse_global_entry)
+        .collect()
 }
 
 /// Run type checking directly with tsgo LSP (no file I/O)
@@ -420,7 +431,7 @@ fn run_direct(args: &CheckArgs) {
     use vize_atelier_core::parser::parse;
     use vize_atelier_sfc::{parse_sfc, SfcParseOptions};
     use vize_canon::lsp_client::TsgoLspClient;
-    use vize_canon::virtual_ts::generate_virtual_ts_with_offsets;
+    use vize_canon::virtual_ts::{generate_virtual_ts_with_offsets, VirtualTsOptions};
     use vize_carton::Bump;
     use vize_croquis::{Analyzer, AnalyzerOptions};
 
@@ -430,24 +441,25 @@ fn run_direct(args: &CheckArgs) {
     let config = crate::config::load_config(None);
     crate::config::write_schema(None);
 
-    // Build template globals.
+    // Build VirtualTsOptions from CLI args or config.
     // Priority: CLI --globals > vize.config.json check.globals > default (empty)
-    let template_globals: Vec<vize_canon::virtual_ts::TemplateGlobal> =
-        if let Some(ref globals_str) = args.globals {
-            if globals_str == "none" {
-                vec![]
-            } else {
-                globals_str
-                    .split(',')
-                    .filter(|s| !s.is_empty())
-                    .map(parse_global_entry)
-                    .collect()
+    let vts_options = if let Some(ref globals_str) = args.globals {
+        if globals_str == "none" {
+            VirtualTsOptions {
+                template_globals: vec![],
             }
-        } else if let Some(ref globals_list) = config.check.globals {
-            globals_list.iter().map(|s| parse_global_entry(s)).collect()
         } else {
-            vec![]
-        };
+            VirtualTsOptions {
+                template_globals: parse_globals_str(globals_str),
+            }
+        }
+    } else if let Some(ref globals_list) = config.check.globals {
+        VirtualTsOptions {
+            template_globals: globals_list.iter().map(|s| parse_global_entry(s)).collect(),
+        }
+    } else {
+        VirtualTsOptions::default()
+    };
 
     // Collect .vue files
     let collect_start = Instant::now();
@@ -542,7 +554,7 @@ fn run_direct(args: &CheckArgs) {
                 template_ast.as_ref(),
                 script_offset,
                 template_offset,
-                &template_globals,
+                &vts_options,
             );
 
             Some(GeneratedFile {
@@ -642,7 +654,7 @@ fn run_direct(args: &CheckArgs) {
     let uri_map: Vec<(String, String)> = generated
         .iter()
         .map(|g| {
-            let virtual_uri = format!("file://{}.ts", g.original);
+            let virtual_uri = format!("file://{}.mts", g.original);
             (virtual_uri, g.virtual_ts.clone())
         })
         .collect();
@@ -716,7 +728,7 @@ fn run_direct(args: &CheckArgs) {
                     // tsgo doesn't publish diagnostics automatically - we must request them
                     let uris: Vec<String> = indices
                         .iter()
-                        .map(|i| format!("file://{}.ts", generated[*i].original))
+                        .map(|i| format!("file://{}.mts", generated[*i].original))
                         .collect();
 
                     let batch_results = lsp_client.request_diagnostics_batch(&uris);
@@ -729,7 +741,7 @@ fn run_direct(args: &CheckArgs) {
 
                     for idx in &indices {
                         let g = &generated[*idx];
-                        let virtual_uri = format!("file://{}.ts", g.original);
+                        let virtual_uri = format!("file://{}.mts", g.original);
 
                         // Get diagnostics from batch result
                         let diagnostics = diag_map.get(&virtual_uri).cloned().unwrap_or_default();
@@ -739,30 +751,18 @@ fn run_direct(args: &CheckArgs) {
                         for diag in &diagnostics {
                             let code_num = diag.code.as_ref().and_then(|c| match c {
                                 serde_json::Value::Number(n) => n.as_u64(),
-                                serde_json::Value::String(s) => s.parse::<u64>().ok(),
+                                serde_json::Value::String(s) => {
+                                    // Handle both "2307" and "TS2307" formats
+                                    let stripped = s.strip_prefix("TS").unwrap_or(s);
+                                    stripped.parse::<u64>().ok()
+                                }
                                 _ => None,
                             });
 
-                            // Skip noise
-                            if matches!(code_num, Some(2307) | Some(2666))
-                                && diag.message.contains(".vue")
-                            {
-                                continue;
-                            }
-                            if matches!(code_num, Some(2300))
-                                && (diag.message.contains("component")
-                                    || diag.message.contains("VueComponent")
-                                    || diag.message.contains("_default"))
-                            {
-                                continue;
-                            }
-                            if matches!(code_num, Some(6133) | Some(6196) | Some(2578))
-                                && (diag.message.contains("__")
-                                    || diag.message.contains("handler")
-                                    || diag.message.contains("@ts-expect-error")
-                                    || diag.message.contains("'$"))
-                            // Vue template globals
-                            {
+                            // Module resolution: fundamental limitation of single-file mode.
+                            // tsgo cannot resolve .vue imports, path aliases, or npm packages
+                            // without a full project context. This is NOT a virtual TS bug.
+                            if matches!(code_num, Some(2307) | Some(2666)) {
                                 continue;
                             }
 

@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 /**
- * Musea VRT CLI
+ * Musea CLI
  *
  * Usage:
- *   musea-vrt [options]
+ *   musea-vrt [command] [options]
+ *
+ * Commands:
+ *   (default)       Run VRT tests
+ *   approve [pat]   Approve failed snapshots (optionally filtered by pattern)
+ *   clean           Remove orphaned snapshots
  *
  * Options:
  *   -u, --update     Update baseline snapshots
@@ -12,6 +17,7 @@
  *   -t, --threshold  Diff threshold percentage (default: 0.1)
  *   --json           Output JSON report instead of HTML
  *   --ci             CI mode - exit with non-zero code on failures
+ *   --a11y           Run accessibility audits alongside VRT
  *   -h, --help       Show help
  */
 
@@ -20,30 +26,65 @@ import path from "node:path";
 import { MuseaVrtRunner, generateVrtReport, generateVrtJsonReport } from "./vrt.js";
 import type { ArtFileInfo, VrtOptions } from "./types.js";
 
+type Command = "run" | "approve" | "clean" | "generate";
+
 interface CliOptions {
+  command: Command;
   update: boolean;
   config: string;
   output: string;
   threshold: number;
   json: boolean;
   ci: boolean;
+  a11y: boolean;
   help: boolean;
   baseUrl: string;
+  pattern?: string;
+  componentPath?: string;
 }
 
 function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = {
+    command: "run",
     update: false,
     config: "vite.config.ts",
     output: ".vize",
     threshold: 0.1,
     json: false,
     ci: false,
+    a11y: false,
     help: false,
     baseUrl: "http://localhost:5173",
   };
 
-  for (let i = 0; i < args.length; i++) {
+  let i = 0;
+
+  // Check for subcommand as first arg
+  if (args.length > 0 && !args[0].startsWith("-")) {
+    const sub = args[0];
+    if (sub === "approve") {
+      options.command = "approve";
+      i = 1;
+      // Optional pattern argument after approve
+      if (args.length > 1 && !args[1].startsWith("-")) {
+        options.pattern = args[1];
+        i = 2;
+      }
+    } else if (sub === "clean") {
+      options.command = "clean";
+      i = 1;
+    } else if (sub === "generate") {
+      options.command = "generate";
+      i = 1;
+      // Required component path argument
+      if (args.length > 1 && !args[1].startsWith("-")) {
+        options.componentPath = args[1];
+        i = 2;
+      }
+    }
+  }
+
+  for (; i < args.length; i++) {
     const arg = args[i];
     switch (arg) {
       case "-u":
@@ -68,6 +109,9 @@ function parseArgs(args: string[]): CliOptions {
       case "--ci":
         options.ci = true;
         break;
+      case "--a11y":
+        options.a11y = true;
+        break;
       case "-b":
       case "--base-url":
         options.baseUrl = args[++i] || "http://localhost:5173";
@@ -87,7 +131,14 @@ function printHelp(): void {
 Musea VRT - Visual Regression Testing for Component Gallery
 
 Usage:
-  musea-vrt [options]
+  musea-vrt [command] [options]
+
+Commands:
+  (default)             Run VRT tests
+  approve [pattern]     Approve failed snapshots and update baselines
+                        Optional pattern filters which snapshots to approve
+  clean                 Remove orphaned snapshots (no matching art/variant)
+  generate <component>  Auto-generate .art.vue from a Vue component
 
 Options:
   -u, --update         Update baseline snapshots with current screenshots
@@ -97,6 +148,7 @@ Options:
   -b, --base-url <url> Base URL for dev server (default: http://localhost:5173)
   --json               Output JSON report instead of HTML
   --ci                 CI mode - exit with non-zero code on failures
+  --a11y               Run accessibility audits alongside VRT
   -h, --help           Show this help message
 
 Examples:
@@ -111,6 +163,21 @@ Examples:
 
   # CI mode with JSON output
   musea-vrt --ci --json
+
+  # Run with accessibility audits
+  musea-vrt --a11y
+
+  # Approve all failed snapshots
+  musea-vrt approve
+
+  # Approve specific snapshots by pattern
+  musea-vrt approve "Button/*"
+
+  # Clean orphaned snapshots
+  musea-vrt clean
+
+  # Auto-generate .art.vue from component
+  musea-vrt generate src/components/Button.vue
 
   # Custom base URL
   musea-vrt -b http://localhost:3000
@@ -194,6 +261,208 @@ async function parseArtFile(filePath: string): Promise<ArtFileInfo | null> {
   }
 }
 
+async function runVrt(options: CliOptions, artFiles: ArtFileInfo[]): Promise<void> {
+  const totalVariants = artFiles.reduce(
+    (sum, art) => sum + art.variants.filter((v) => !v.skipVrt).length,
+    0,
+  );
+
+  console.log(`  Testing ${totalVariants} variant(s) across ${artFiles.length} art file(s)\n`);
+
+  // Initialize VRT runner
+  const vrtOptions: VrtOptions = {
+    snapshotDir: path.join(options.output, "snapshots"),
+    threshold: options.threshold,
+  };
+
+  const runner = new MuseaVrtRunner({
+    ...vrtOptions,
+    ci: options.ci ? { failOnDiff: true, jsonReport: options.json } : undefined,
+  });
+
+  try {
+    console.log("  Launching browser...");
+    await runner.init();
+
+    console.log("  Running visual regression tests...\n");
+
+    // Run tests
+    const results = await runner.runAllTests(artFiles, options.baseUrl);
+    const summary = runner.getSummary(results);
+
+    // Print results
+    console.log("  Results:");
+    console.log("  ---------");
+    console.log(`    Passed:  ${summary.passed}`);
+    console.log(`    Failed:  ${summary.failed}`);
+    console.log(`    New:     ${summary.new}`);
+    console.log(`    Skipped: ${summary.skipped}`);
+    console.log(`    Total:   ${summary.total}`);
+    console.log(`    Duration: ${(summary.duration / 1000).toFixed(2)}s\n`);
+
+    // Run a11y audits if requested
+    if (options.a11y) {
+      console.log("  Running accessibility audits...\n");
+      try {
+        const { MuseaA11yRunner } = await import("./a11y.js");
+        const a11yRunner = new MuseaA11yRunner();
+        const a11yResults = await a11yRunner.runAudits(artFiles, options.baseUrl, runner);
+        const a11ySummary = a11yRunner.getSummary(a11yResults);
+
+        console.log("  A11y Results:");
+        console.log("  -------------");
+        console.log(`    Components: ${a11ySummary.totalComponents}`);
+        console.log(`    Variants:   ${a11ySummary.totalVariants}`);
+        console.log(`    Violations: ${a11ySummary.totalViolations}`);
+        console.log(`    Critical:   ${a11ySummary.criticalCount}`);
+        console.log(`    Serious:    ${a11ySummary.seriousCount}\n`);
+
+        // Generate a11y report
+        const reportDir = options.output;
+        await fs.promises.mkdir(reportDir, { recursive: true });
+
+        if (options.json) {
+          const a11yJson = a11yRunner.generateJsonReport(a11yResults);
+          const a11yPath = path.join(reportDir, "a11y-report.json");
+          await fs.promises.writeFile(a11yPath, a11yJson);
+          console.log(`  A11y JSON report: ${a11yPath}\n`);
+        } else {
+          const a11yHtml = a11yRunner.generateHtmlReport(a11yResults);
+          const a11yPath = path.join(reportDir, "a11y-report.html");
+          await fs.promises.writeFile(a11yPath, a11yHtml);
+          console.log(`  A11y HTML report: ${a11yPath}\n`);
+        }
+
+        // CI mode - exit with error on critical/serious violations
+        if (options.ci && (a11ySummary.criticalCount > 0 || a11ySummary.seriousCount > 0)) {
+          console.log("  CI mode: Accessibility violations found\n");
+          process.exit(1);
+        }
+      } catch (e) {
+        console.warn("  A11y audits skipped:", e instanceof Error ? e.message : String(e));
+        console.warn("  Make sure axe-core is installed: npm install axe-core\n");
+      }
+    }
+
+    // Update baselines if requested
+    if (options.update) {
+      console.log("  Updating baselines...");
+      const updated = await runner.updateBaselines(results);
+      console.log(`  Updated ${updated} baseline(s)\n`);
+    }
+
+    // Generate VRT report
+    const reportDir = options.output;
+    await fs.promises.mkdir(reportDir, { recursive: true });
+
+    if (options.json) {
+      const jsonReport = generateVrtJsonReport(results, summary);
+      const jsonPath = path.join(reportDir, "vrt-report.json");
+      await fs.promises.writeFile(jsonPath, jsonReport);
+      console.log(`  JSON report: ${jsonPath}\n`);
+    } else {
+      const htmlReport = generateVrtReport(results, summary);
+      const htmlPath = path.join(reportDir, "vrt-report.html");
+      await fs.promises.writeFile(htmlPath, htmlReport);
+      console.log(`  HTML report: ${htmlPath}\n`);
+    }
+
+    // CI mode - exit with error if failures
+    if (options.ci && summary.failed > 0) {
+      console.log("  CI mode: Exiting with error due to failures\n");
+      process.exit(1);
+    }
+  } finally {
+    await runner.close();
+  }
+}
+
+async function runApprove(options: CliOptions, artFiles: ArtFileInfo[]): Promise<void> {
+  const vrtOptions: VrtOptions = {
+    snapshotDir: path.join(options.output, "snapshots"),
+    threshold: options.threshold,
+  };
+
+  const runner = new MuseaVrtRunner(vrtOptions);
+
+  try {
+    console.log("  Launching browser...");
+    await runner.init();
+
+    console.log("  Running tests to find diffs...\n");
+
+    const results = await runner.runAllTests(artFiles, options.baseUrl);
+    const failed = results.filter((r) => !r.passed && !r.error);
+
+    if (failed.length === 0) {
+      console.log("  No failed tests to approve.\n");
+      return;
+    }
+
+    const pattern = options.pattern;
+    if (pattern) {
+      console.log(`  Approving snapshots matching: ${pattern}\n`);
+    } else {
+      console.log(`  Approving all ${failed.length} failed snapshot(s)...\n`);
+    }
+
+    const approved = await runner.approveResults(results, pattern);
+    console.log(`  Approved ${approved} snapshot(s)\n`);
+  } finally {
+    await runner.close();
+  }
+}
+
+async function runClean(options: CliOptions, artFiles: ArtFileInfo[]): Promise<void> {
+  const vrtOptions: VrtOptions = {
+    snapshotDir: path.join(options.output, "snapshots"),
+    threshold: options.threshold,
+  };
+
+  const runner = new MuseaVrtRunner(vrtOptions);
+
+  console.log("  Scanning for orphaned snapshots...\n");
+
+  const cleaned = await runner.cleanOrphans(artFiles);
+
+  if (cleaned === 0) {
+    console.log("  No orphaned snapshots found.\n");
+  } else {
+    console.log(`\n  Cleaned ${cleaned} orphaned snapshot(s)\n`);
+  }
+}
+
+async function runGenerate(options: CliOptions): Promise<void> {
+  if (!options.componentPath) {
+    console.error("  Error: Missing component path.");
+    console.error("  Usage: musea-vrt generate <component.vue>\n");
+    process.exit(1);
+  }
+
+  const componentPath = path.resolve(options.componentPath);
+
+  // Check file exists
+  try {
+    await fs.promises.access(componentPath);
+  } catch {
+    console.error(`  Error: File not found: ${componentPath}\n`);
+    process.exit(1);
+  }
+
+  console.log(`  Generating art file for: ${path.relative(process.cwd(), componentPath)}\n`);
+
+  try {
+    const { writeArtFile } = await import("./autogen.js");
+    const outputPath = await writeArtFile(componentPath);
+    const relOutput = path.relative(process.cwd(), outputPath);
+
+    console.log(`  Generated: ${relOutput}\n`);
+  } catch (e) {
+    console.error("  Generation failed:", e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
@@ -207,6 +476,17 @@ async function main(): Promise<void> {
 
   console.log("\n  Musea VRT");
   console.log("  =========\n");
+
+  // Handle generate command early (doesn't need art file scanning)
+  if (options.command === "generate") {
+    try {
+      await runGenerate(options);
+    } catch (error) {
+      console.error("\n  Error:", error);
+      process.exit(1);
+    }
+    return;
+  }
 
   // Scan for art files
   console.log("  Scanning for art files...");
@@ -228,75 +508,24 @@ async function main(): Promise<void> {
     }
   }
 
-  // Count total variants
-  const totalVariants = artFiles.reduce(
-    (sum, art) => sum + art.variants.filter((v) => !v.skipVrt).length,
-    0,
-  );
-
-  console.log(`  Testing ${totalVariants} variant(s) across ${artFiles.length} art file(s)\n`);
-
-  // Initialize VRT runner
-  const vrtOptions: VrtOptions = {
-    snapshotDir: path.join(options.output, "snapshots"),
-    threshold: options.threshold,
-  };
-
-  const runner = new MuseaVrtRunner(vrtOptions);
-
   try {
-    console.log("  Launching browser...");
-    await runner.init();
-
-    console.log("  Running visual regression tests...\n");
-
-    // Run tests
-    const results = await runner.runAllTests(artFiles, options.baseUrl);
-    const summary = runner.getSummary(results);
-
-    // Print results
-    console.log("  Results:");
-    console.log(`  ---------`);
-    console.log(`    Passed:  ${summary.passed}`);
-    console.log(`    Failed:  ${summary.failed}`);
-    console.log(`    New:     ${summary.new}`);
-    console.log(`    Skipped: ${summary.skipped}`);
-    console.log(`    Total:   ${summary.total}`);
-    console.log(`    Duration: ${(summary.duration / 1000).toFixed(2)}s\n`);
-
-    // Update baselines if requested
-    if (options.update) {
-      console.log("  Updating baselines...");
-      const updated = await runner.updateBaselines(results);
-      console.log(`  Updated ${updated} baseline(s)\n`);
-    }
-
-    // Generate report
-    const reportDir = options.output;
-    await fs.promises.mkdir(reportDir, { recursive: true });
-
-    if (options.json) {
-      const jsonReport = generateVrtJsonReport(results, summary);
-      const jsonPath = path.join(reportDir, "vrt-report.json");
-      await fs.promises.writeFile(jsonPath, jsonReport);
-      console.log(`  JSON report: ${jsonPath}\n`);
-    } else {
-      const htmlReport = generateVrtReport(results, summary);
-      const htmlPath = path.join(reportDir, "vrt-report.html");
-      await fs.promises.writeFile(htmlPath, htmlReport);
-      console.log(`  HTML report: ${htmlPath}\n`);
-    }
-
-    // CI mode - exit with error if failures
-    if (options.ci && summary.failed > 0) {
-      console.log("  CI mode: Exiting with error due to failures\n");
-      process.exit(1);
+    switch (options.command) {
+      case "run":
+        await runVrt(options, artFiles);
+        break;
+      case "approve":
+        await runApprove(options, artFiles);
+        break;
+      case "clean":
+        await runClean(options, artFiles);
+        break;
+      case "generate":
+        // Handled above before art file scanning
+        break;
     }
   } catch (error) {
     console.error("\n  Error:", error);
     process.exit(1);
-  } finally {
-    await runner.close();
   }
 }
 

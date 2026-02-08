@@ -17,8 +17,22 @@ import type { Plugin, ViteDevServer, ResolvedConfig } from "vite";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
+import { vizeConfigStore } from "@vizejs/vite-plugin";
 
-import type { MuseaOptions, ArtFileInfo, ArtMetadata, ArtVariant, CsfOutput } from "./types.js";
+import type {
+  MuseaOptions,
+  ArtFileInfo,
+  ArtMetadata,
+  ArtVariant,
+  CsfOutput,
+  PaletteApiResponse,
+  AnalysisApiResponse,
+  A11yOptions,
+  A11yResult,
+  CaptureConfig,
+  ComparisonConfig,
+  CiConfig,
+} from "./types.js";
 
 export type {
   MuseaOptions,
@@ -28,6 +42,13 @@ export type {
   CsfOutput,
   VrtOptions,
   ViewportConfig,
+  PaletteApiResponse,
+  AnalysisApiResponse,
+  A11yOptions,
+  A11yResult,
+  CaptureConfig,
+  ComparisonConfig,
+  CiConfig,
 } from "./types.js";
 
 export {
@@ -48,6 +69,17 @@ export {
   type StyleDictionaryConfig,
   type StyleDictionaryOutput,
 } from "./style-dictionary.js";
+
+export { MuseaA11yRunner, type A11ySummary } from "./a11y.js";
+
+export {
+  generateArtFile,
+  writeArtFile,
+  type AutogenOptions,
+  type AutogenOutput,
+  type PropDefinition,
+  type GeneratedVariant,
+} from "./autogen.js";
 
 // Virtual module prefixes
 const VIRTUAL_MUSEA_PREFIX = "\0musea:";
@@ -87,6 +119,48 @@ interface NativeBinding {
     code: string;
     filename: string;
   };
+  generateArtPalette?: (
+    source: string,
+    artOptions?: { filename?: string },
+    paletteOptions?: { infer_options?: boolean; group_by_type?: boolean },
+  ) => {
+    title: string;
+    controls: Array<{
+      name: string;
+      control: string;
+      default_value?: unknown;
+      description?: string;
+      required: boolean;
+      options: Array<{ label: string; value: unknown }>;
+      range?: { min: number; max: number; step?: number };
+      group?: string;
+    }>;
+    groups: string[];
+    json: string;
+    typescript: string;
+  };
+  generateArtDoc?: (
+    source: string,
+    artOptions?: { filename?: string },
+    docOptions?: {
+      include_source?: boolean;
+      include_templates?: boolean;
+      include_metadata?: boolean;
+    },
+  ) => {
+    markdown: string;
+    filename: string;
+    title: string;
+    category?: string;
+    variant_count: number;
+  };
+  analyzeSfc?: (
+    source: string,
+    options?: { filename?: string },
+  ) => {
+    props: Array<{ name: string; type: string; required: boolean; default_value?: unknown }>;
+    emits: string[];
+  };
 }
 
 // Lazy-load native binding
@@ -110,11 +184,12 @@ function loadNative(): NativeBinding {
  * Create Musea Vite plugin.
  */
 export function musea(options: MuseaOptions = {}): Plugin[] {
-  const include = options.include ?? ["**/*.art.vue"];
-  const exclude = options.exclude ?? ["node_modules/**", "dist/**"];
-  const basePath = options.basePath ?? "/__musea__";
-  const storybookCompat = options.storybookCompat ?? false;
+  let include = options.include ?? ["**/*.art.vue"];
+  let exclude = options.exclude ?? ["node_modules/**", "dist/**"];
+  let basePath = options.basePath ?? "/__musea__";
+  let storybookCompat = options.storybookCompat ?? false;
   const storybookOutDir = options.storybookOutDir ?? ".storybook/stories";
+  let inlineArt = options.inlineArt ?? false;
 
   let config: ResolvedConfig;
   let server: ViteDevServer | null = null;
@@ -139,19 +214,94 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
     configResolved(resolvedConfig) {
       config = resolvedConfig;
+
+      // Merge musea config from vize.config.ts (plugin args > config file > defaults)
+      const vizeConfig = vizeConfigStore.get(resolvedConfig.root);
+      if (vizeConfig?.musea) {
+        const mc = vizeConfig.musea;
+        // Only apply config file values when plugin options were not explicitly set
+        if (!options.include && mc.include) include = mc.include;
+        if (!options.exclude && mc.exclude) exclude = mc.exclude;
+        if (!options.basePath && mc.basePath) basePath = mc.basePath;
+        if (options.storybookCompat === undefined && mc.storybookCompat !== undefined)
+          storybookCompat = mc.storybookCompat;
+        if (options.inlineArt === undefined && mc.inlineArt !== undefined) inlineArt = mc.inlineArt;
+      }
     },
 
     configureServer(devServer) {
       server = devServer;
 
-      // Gallery UI route
+      // Gallery SPA route - serves built SPA or falls back to inline HTML
       devServer.middlewares.use(basePath, async (req, res, next) => {
-        if (req.url === "/" || req.url === "/index.html") {
-          const html = generateGalleryHtml(basePath);
-          res.setHeader("Content-Type", "text/html");
-          res.end(html);
-          return;
+        const url = req.url || "/";
+
+        // Serve SPA for gallery routes (not /api/, /preview, /preview-module, /art)
+        if (
+          url === "/" ||
+          url === "/index.html" ||
+          url.startsWith("/tokens") ||
+          url.startsWith("/component/")
+        ) {
+          // Try serving built SPA first
+          const galleryDistDir = path.resolve(
+            path.dirname(new URL(import.meta.url).pathname),
+            "gallery",
+          );
+          const indexHtmlPath = path.join(galleryDistDir, "index.html");
+
+          try {
+            await fs.promises.access(indexHtmlPath);
+            let html = await fs.promises.readFile(indexHtmlPath, "utf-8");
+            // Inject basePath for runtime use
+            html = html.replace(
+              "</head>",
+              `<script>window.__MUSEA_BASE_PATH__='${basePath}';</script></head>`,
+            );
+            // Transform through Vite for HMR
+            html = await devServer.transformIndexHtml(basePath + url, html);
+            res.setHeader("Content-Type", "text/html");
+            res.end(html);
+            return;
+          } catch {
+            // Fall back to inline gallery HTML
+            const html = generateGalleryHtml(basePath);
+            res.setHeader("Content-Type", "text/html");
+            res.end(html);
+            return;
+          }
         }
+        // Serve gallery static assets (JS, CSS) from built SPA
+        if (url.startsWith("/assets/")) {
+          const galleryDistDir = path.resolve(
+            path.dirname(new URL(import.meta.url).pathname),
+            "gallery",
+          );
+          const filePath = path.join(galleryDistDir, url);
+          try {
+            const stat = await fs.promises.stat(filePath);
+            if (stat.isFile()) {
+              const content = await fs.promises.readFile(filePath);
+              const ext = path.extname(filePath);
+              const mimeTypes: Record<string, string> = {
+                ".js": "application/javascript",
+                ".css": "text/css",
+                ".svg": "image/svg+xml",
+                ".png": "image/png",
+                ".ico": "image/x-icon",
+                ".woff2": "font/woff2",
+                ".woff": "font/woff",
+              };
+              res.setHeader("Content-Type", mimeTypes[ext] || "application/octet-stream");
+              res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+              res.end(content);
+              return;
+            }
+          } catch {
+            // File not found, fall through
+          }
+        }
+
         next();
       });
 
@@ -283,24 +433,219 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
       // API endpoints
       devServer.middlewares.use(`${basePath}/api`, async (req, res, next) => {
+        const sendJson = (data: unknown, status = 200) => {
+          res.statusCode = status;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(data));
+        };
+
+        const sendError = (message: string, status = 500) => {
+          sendJson({ error: message }, status);
+        };
+
         // GET /api/arts - List all arts
         if (req.url === "/arts" && req.method === "GET") {
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(Array.from(artFiles.values())));
+          sendJson(Array.from(artFiles.values()));
           return;
         }
 
-        // GET /api/arts/:path - Get single art
+        // GET /api/tokens - Get design tokens
+        if (req.url === "/tokens" && req.method === "GET") {
+          sendJson({ categories: [] });
+          return;
+        }
+
+        // Arts sub-routes: /api/arts/:encodedPath/...
         if (req.url?.startsWith("/arts/") && req.method === "GET") {
-          const artPath = decodeURIComponent(req.url.slice(6));
+          const rest = req.url.slice(6); // after "/arts/"
+
+          // Check for sub-resource patterns
+          const paletteMatch = rest.match(/^(.+)\/palette$/);
+          const analysisMatch = rest.match(/^(.+)\/analysis$/);
+          const docsMatch = rest.match(/^(.+)\/docs$/);
+          const a11yMatch = rest.match(/^(.+)\/variants\/([^/]+)\/a11y$/);
+
+          if (paletteMatch) {
+            // GET /api/arts/:path/palette
+            const artPath = decodeURIComponent(paletteMatch[1]);
+            const art = artFiles.get(artPath);
+            if (!art) {
+              sendError("Art not found", 404);
+              return;
+            }
+
+            try {
+              const source = await fs.promises.readFile(artPath, "utf-8");
+              const binding = loadNative();
+              if (binding.generateArtPalette) {
+                const palette = binding.generateArtPalette(source, { filename: artPath });
+                sendJson(palette);
+              } else {
+                sendJson({
+                  title: art.metadata.title,
+                  controls: [],
+                  groups: [],
+                  json: "{}",
+                  typescript: "",
+                });
+              }
+            } catch (e) {
+              sendError(e instanceof Error ? e.message : String(e));
+            }
+            return;
+          }
+
+          if (analysisMatch) {
+            // GET /api/arts/:path/analysis
+            const artPath = decodeURIComponent(analysisMatch[1]);
+            const art = artFiles.get(artPath);
+            if (!art) {
+              sendError("Art not found", 404);
+              return;
+            }
+
+            try {
+              // Determine the component file path: inline art uses the file itself, .art.vue uses the component attribute
+              const resolvedComponentPath =
+                art.isInline && art.componentPath
+                  ? art.componentPath
+                  : art.metadata.component
+                    ? path.isAbsolute(art.metadata.component)
+                      ? art.metadata.component
+                      : path.resolve(path.dirname(artPath), art.metadata.component)
+                    : null;
+
+              if (resolvedComponentPath) {
+                const source = await fs.promises.readFile(resolvedComponentPath, "utf-8");
+                const binding = loadNative();
+                if (binding.analyzeSfc) {
+                  const analysis = binding.analyzeSfc(source, { filename: resolvedComponentPath });
+                  sendJson(analysis);
+                } else {
+                  sendJson({ props: [], emits: [] });
+                }
+              } else {
+                sendJson({ props: [], emits: [] });
+              }
+            } catch (e) {
+              sendError(e instanceof Error ? e.message : String(e));
+            }
+            return;
+          }
+
+          if (docsMatch) {
+            // GET /api/arts/:path/docs
+            const artPath = decodeURIComponent(docsMatch[1]);
+            const art = artFiles.get(artPath);
+            if (!art) {
+              sendError("Art not found", 404);
+              return;
+            }
+
+            try {
+              const source = await fs.promises.readFile(artPath, "utf-8");
+              const binding = loadNative();
+              if (binding.generateArtDoc) {
+                const doc = binding.generateArtDoc(source, { filename: artPath });
+                sendJson(doc);
+              } else {
+                sendJson({
+                  markdown: "",
+                  title: art.metadata.title,
+                  variant_count: art.variants.length,
+                });
+              }
+            } catch (e) {
+              sendError(e instanceof Error ? e.message : String(e));
+            }
+            return;
+          }
+
+          if (a11yMatch) {
+            // GET /api/arts/:path/variants/:name/a11y
+            const artPath = decodeURIComponent(a11yMatch[1]);
+            const _variantName = decodeURIComponent(a11yMatch[2]);
+            const art = artFiles.get(artPath);
+            if (!art) {
+              sendError("Art not found", 404);
+              return;
+            }
+
+            // Return empty a11y results (populated after VRT --a11y run)
+            sendJson({ violations: [], passes: 0, incomplete: 0 });
+            return;
+          }
+
+          // GET /api/arts/:path - Get single art (no sub-resource)
+          const artPath = decodeURIComponent(rest);
           const art = artFiles.get(artPath);
           if (art) {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(art));
+            sendJson(art);
           } else {
-            res.statusCode = 404;
-            res.end(JSON.stringify({ error: "Art not found" }));
+            sendError("Art not found", 404);
           }
+          return;
+        }
+
+        // POST /api/preview-with-props
+        if (req.url === "/preview-with-props" && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => {
+            body += chunk;
+          });
+          req.on("end", () => {
+            try {
+              const { artPath: reqArtPath, variantName, props: propsOverride } = JSON.parse(body);
+              const art = artFiles.get(reqArtPath);
+              if (!art) {
+                sendError("Art not found", 404);
+                return;
+              }
+
+              const variant = art.variants.find((v) => v.name === variantName);
+              if (!variant) {
+                sendError("Variant not found", 404);
+                return;
+              }
+
+              // Generate preview module with props override
+              const variantComponentName = toPascalCase(variant.name);
+              const moduleCode = generatePreviewModuleWithProps(
+                art,
+                variantComponentName,
+                variant.name,
+                propsOverride,
+              );
+              res.setHeader("Content-Type", "application/javascript");
+              res.end(moduleCode);
+            } catch (e) {
+              sendError(e instanceof Error ? e.message : String(e));
+            }
+          });
+          return;
+        }
+
+        // POST /api/generate
+        if (req.url === "/generate" && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => {
+            body += chunk;
+          });
+          req.on("end", async () => {
+            try {
+              const { componentPath: reqComponentPath, options: autogenOptions } = JSON.parse(body);
+              const { generateArtFile: genArt } = await import("./autogen.js");
+              const result = await genArt(reqComponentPath, autogenOptions);
+              sendJson({
+                generated: true,
+                componentName: result.componentName,
+                variants: result.variants,
+                artFileContent: result.artFileContent,
+              });
+            } catch (e) {
+              sendError(e instanceof Error ? e.message : String(e));
+            }
+          });
           return;
         }
 
@@ -313,12 +658,32 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
           await processArtFile(file);
           console.log(`[musea] Reloaded: ${path.relative(config.root, file)}`);
         }
+        // Inline art: re-check .vue files on change
+        if (inlineArt && file.endsWith(".vue") && !file.endsWith(".art.vue")) {
+          const hadArt = artFiles.has(file);
+          const source = await fs.promises.readFile(file, "utf-8");
+          if (source.includes("<art")) {
+            await processArtFile(file);
+            console.log(`[musea] Reloaded inline art: ${path.relative(config.root, file)}`);
+          } else if (hadArt) {
+            artFiles.delete(file);
+            console.log(`[musea] Removed inline art: ${path.relative(config.root, file)}`);
+          }
+        }
       });
 
       devServer.watcher.on("add", async (file) => {
         if (file.endsWith(".art.vue") && shouldProcess(file, include, exclude, config.root)) {
           await processArtFile(file);
           console.log(`[musea] Added: ${path.relative(config.root, file)}`);
+        }
+        // Inline art: check new .vue files
+        if (inlineArt && file.endsWith(".vue") && !file.endsWith(".art.vue")) {
+          const source = await fs.promises.readFile(file, "utf-8");
+          if (source.includes("<art")) {
+            await processArtFile(file);
+            console.log(`[musea] Added inline art: ${path.relative(config.root, file)}`);
+          }
         }
       });
 
@@ -332,7 +697,7 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
 
     async buildStart() {
       // Scan for Art files
-      const files = await scanArtFiles(config.root, include, exclude);
+      const files = await scanArtFiles(config.root, include, exclude, inlineArt);
 
       console.log(`[musea] Found ${files.length} art files`);
 
@@ -365,6 +730,13 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         }
       }
       if (id.endsWith(".art.vue")) {
+        const resolved = path.resolve(config.root, id);
+        if (artFiles.has(resolved)) {
+          return VIRTUAL_MUSEA_PREFIX + resolved;
+        }
+      }
+      // Inline art: resolve .vue files that have <art> blocks
+      if (inlineArt && id.endsWith(".vue") && !id.endsWith(".art.vue")) {
         const resolved = path.resolve(config.root, id);
         if (artFiles.has(resolved)) {
           return VIRTUAL_MUSEA_PREFIX + resolved;
@@ -424,6 +796,18 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
           return [...modules];
         }
       }
+
+      // Inline art: HMR for .vue files with <art> blocks
+      if (inlineArt && file.endsWith(".vue") && !file.endsWith(".art.vue") && artFiles.has(file)) {
+        await processArtFile(file);
+
+        const virtualId = VIRTUAL_MUSEA_PREFIX + file;
+        const modules = server?.moduleGraph.getModulesByFile(virtualId);
+        if (modules) {
+          return [...modules];
+        }
+      }
+
       return undefined;
     },
   };
@@ -436,12 +820,17 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
       const binding = loadNative();
       const parsed = binding.parseArt(source, { filename: filePath });
 
+      // Skip files with no variants (e.g. .vue files without <art> block)
+      if (!parsed.variants || parsed.variants.length === 0) return;
+
+      const isInline = !filePath.endsWith(".art.vue");
+
       const info: ArtFileInfo = {
         path: filePath,
         metadata: {
-          title: parsed.metadata.title,
+          title: parsed.metadata.title || (isInline ? path.basename(filePath, ".vue") : ""),
           description: parsed.metadata.description,
-          component: parsed.metadata.component,
+          component: isInline ? undefined : parsed.metadata.component,
           category: parsed.metadata.category,
           tags: parsed.metadata.tags,
           status: parsed.metadata.status as "draft" | "ready" | "deprecated",
@@ -456,6 +845,8 @@ export function musea(options: MuseaOptions = {}): Plugin[] {
         hasScriptSetup: parsed.has_script_setup,
         hasScript: parsed.has_script,
         styleCount: parsed.style_count,
+        isInline,
+        componentPath: isInline ? filePath : undefined,
       };
 
       artFiles.set(filePath, info);
@@ -500,7 +891,12 @@ function matchGlob(filepath: string, pattern: string): boolean {
   return new RegExp(`^${regex}$`).test(filepath);
 }
 
-async function scanArtFiles(root: string, include: string[], exclude: string[]): Promise<string[]> {
+async function scanArtFiles(
+  root: string,
+  include: string[],
+  exclude: string[],
+  scanInlineArt = false,
+): Promise<string[]> {
   const files: string[] = [];
 
   async function scan(dir: string): Promise<void> {
@@ -530,6 +926,17 @@ async function scanArtFiles(root: string, include: string[], exclude: string[]):
             files.push(fullPath);
             break;
           }
+        }
+      } else if (
+        scanInlineArt &&
+        entry.isFile() &&
+        entry.name.endsWith(".vue") &&
+        !entry.name.endsWith(".art.vue")
+      ) {
+        // Inline art: check if .vue file contains <art block
+        const content = await fs.promises.readFile(fullPath, "utf-8");
+        if (content.includes("<art")) {
+          files.push(fullPath);
         }
       }
     }
@@ -1280,6 +1687,191 @@ export async function loadArts() {
 `;
 }
 
+// Addon initialization code injected into preview iframe modules.
+// Shared between generatePreviewModule and generatePreviewModuleWithProps.
+const MUSEA_ADDONS_INIT_CODE = `
+function __museaInitAddons(container) {
+  // === DOM event capture ===
+  const CAPTURE_EVENTS = ['click','dblclick','input','change','submit','focus','blur','keydown','keyup'];
+  for (const evt of CAPTURE_EVENTS) {
+    container.addEventListener(evt, (e) => {
+      const payload = {
+        name: evt,
+        target: e.target?.tagName,
+        timestamp: Date.now(),
+        source: 'dom'
+      };
+      if (e.target && 'value' in e.target) {
+        payload.value = e.target.value;
+      }
+      window.parent.postMessage({ type: 'musea:event', payload }, '*');
+    }, true);
+  }
+
+  // === Message handler for parent commands ===
+  let measureActive = false;
+  let measureOverlay = null;
+  let measureLabel = null;
+
+  function toggleStyleById(id, enabled, css) {
+    let el = document.getElementById(id);
+    if (enabled) {
+      if (!el) {
+        el = document.createElement('style');
+        el.id = id;
+        el.textContent = css;
+        document.head.appendChild(el);
+      }
+    } else {
+      if (el) el.remove();
+    }
+  }
+
+  function createMeasureOverlay() {
+    if (measureOverlay) return;
+    measureOverlay = document.createElement('div');
+    measureOverlay.id = 'musea-measure-overlay';
+    measureOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:99999;';
+    document.body.appendChild(measureOverlay);
+
+    measureLabel = document.createElement('div');
+    measureLabel.className = 'musea-measure-label';
+    measureLabel.style.cssText = 'position:fixed;background:#333;color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;pointer-events:none;z-index:100000;display:none;';
+    document.body.appendChild(measureLabel);
+  }
+
+  function removeMeasureOverlay() {
+    if (measureOverlay) { measureOverlay.remove(); measureOverlay = null; }
+    if (measureLabel) { measureLabel.remove(); measureLabel = null; }
+  }
+
+  function onMeasureMouseMove(e) {
+    if (!measureActive || !measureOverlay) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === measureOverlay || el === measureLabel) return;
+
+    const rect = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const mt = parseFloat(cs.marginTop) || 0;
+    const mr = parseFloat(cs.marginRight) || 0;
+    const mb = parseFloat(cs.marginBottom) || 0;
+    const ml = parseFloat(cs.marginLeft) || 0;
+    const bt = parseFloat(cs.borderTopWidth) || 0;
+    const br = parseFloat(cs.borderRightWidth) || 0;
+    const bb = parseFloat(cs.borderBottomWidth) || 0;
+    const blw = parseFloat(cs.borderLeftWidth) || 0;
+    const pt = parseFloat(cs.paddingTop) || 0;
+    const pr = parseFloat(cs.paddingRight) || 0;
+    const pb = parseFloat(cs.paddingBottom) || 0;
+    const pl = parseFloat(cs.paddingLeft) || 0;
+
+    const cw = rect.width - blw - br - pl - pr;
+    const ch = rect.height - bt - bb - pt - pb;
+
+    measureOverlay.innerHTML = ''
+      // Margin
+      + '<div style="position:fixed;background:rgba(255,165,0,0.3);'
+      + 'left:' + (rect.left - ml) + 'px;top:' + (rect.top - mt) + 'px;'
+      + 'width:' + (rect.width + ml + mr) + 'px;height:' + mt + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(255,165,0,0.3);'
+      + 'left:' + (rect.left - ml) + 'px;top:' + (rect.bottom) + 'px;'
+      + 'width:' + (rect.width + ml + mr) + 'px;height:' + mb + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(255,165,0,0.3);'
+      + 'left:' + (rect.left - ml) + 'px;top:' + rect.top + 'px;'
+      + 'width:' + ml + 'px;height:' + rect.height + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(255,165,0,0.3);'
+      + 'left:' + rect.right + 'px;top:' + rect.top + 'px;'
+      + 'width:' + mr + 'px;height:' + rect.height + 'px;"></div>'
+      // Border
+      + '<div style="position:fixed;background:rgba(255,255,0,0.3);'
+      + 'left:' + rect.left + 'px;top:' + rect.top + 'px;'
+      + 'width:' + rect.width + 'px;height:' + bt + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(255,255,0,0.3);'
+      + 'left:' + rect.left + 'px;top:' + (rect.bottom - bb) + 'px;'
+      + 'width:' + rect.width + 'px;height:' + bb + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(255,255,0,0.3);'
+      + 'left:' + rect.left + 'px;top:' + (rect.top + bt) + 'px;'
+      + 'width:' + blw + 'px;height:' + (rect.height - bt - bb) + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(255,255,0,0.3);'
+      + 'left:' + (rect.right - br) + 'px;top:' + (rect.top + bt) + 'px;'
+      + 'width:' + br + 'px;height:' + (rect.height - bt - bb) + 'px;"></div>'
+      // Padding
+      + '<div style="position:fixed;background:rgba(144,238,144,0.3);'
+      + 'left:' + (rect.left + blw) + 'px;top:' + (rect.top + bt) + 'px;'
+      + 'width:' + (rect.width - blw - br) + 'px;height:' + pt + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(144,238,144,0.3);'
+      + 'left:' + (rect.left + blw) + 'px;top:' + (rect.bottom - bb - pb) + 'px;'
+      + 'width:' + (rect.width - blw - br) + 'px;height:' + pb + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(144,238,144,0.3);'
+      + 'left:' + (rect.left + blw) + 'px;top:' + (rect.top + bt + pt) + 'px;'
+      + 'width:' + pl + 'px;height:' + (rect.height - bt - bb - pt - pb) + 'px;"></div>'
+      + '<div style="position:fixed;background:rgba(144,238,144,0.3);'
+      + 'left:' + (rect.right - br - pr) + 'px;top:' + (rect.top + bt + pt) + 'px;'
+      + 'width:' + pr + 'px;height:' + (rect.height - bt - bb - pt - pb) + 'px;"></div>'
+      // Content
+      + '<div style="position:fixed;background:rgba(100,149,237,0.3);'
+      + 'left:' + (rect.left + blw + pl) + 'px;top:' + (rect.top + bt + pt) + 'px;'
+      + 'width:' + cw + 'px;height:' + ch + 'px;"></div>';
+
+    // Label
+    measureLabel.textContent = Math.round(rect.width) + ' x ' + Math.round(rect.height);
+    measureLabel.style.display = 'block';
+    measureLabel.style.left = (rect.right + 8) + 'px';
+    measureLabel.style.top = rect.top + 'px';
+  }
+
+  window.addEventListener('message', (e) => {
+    if (!e.data?.type?.startsWith('musea:')) return;
+    const { type, payload } = e.data;
+    switch (type) {
+      case 'musea:set-background': {
+        if (payload.pattern === 'checkerboard') {
+          document.body.style.background = '';
+          document.body.classList.add('musea-bg-checkerboard');
+        } else {
+          document.body.classList.remove('musea-bg-checkerboard');
+          document.body.style.background = payload.color || '';
+        }
+        break;
+      }
+      case 'musea:toggle-outline': {
+        toggleStyleById('musea-outline', payload.enabled,
+          '* { outline: 1px solid rgba(255, 0, 0, 0.3) !important; }');
+        break;
+      }
+      case 'musea:toggle-measure': {
+        measureActive = payload.enabled;
+        if (measureActive) {
+          createMeasureOverlay();
+          document.addEventListener('mousemove', onMeasureMouseMove);
+        } else {
+          document.removeEventListener('mousemove', onMeasureMouseMove);
+          removeMeasureOverlay();
+        }
+        break;
+      }
+      case 'musea:set-props': {
+        // Store props for remount - handled by preview module
+        if (window.__museaSetProps) {
+          window.__museaSetProps(payload.props || {});
+        }
+        break;
+      }
+      case 'musea:set-slots': {
+        // Store slots for remount - handled by preview module
+        if (window.__museaSetSlots) {
+          window.__museaSetSlots(payload.slots || {});
+        }
+        break;
+      }
+    }
+  });
+
+  // Notify parent that iframe is ready
+  window.parent.postMessage({ type: 'musea:ready', payload: {} }, '*');
+}
+`;
+
 function generatePreviewModule(
   art: ArtFileInfo,
   variantComponentName: string,
@@ -1289,15 +1881,34 @@ function generatePreviewModule(
   const escapedVariantName = escapeTemplate(variantName);
 
   return `
-import { createApp } from 'vue';
+import { createApp, reactive, h } from 'vue';
 import * as artModule from '${artModuleId}';
 
 const container = document.getElementById('app');
+
+${MUSEA_ADDONS_INIT_CODE}
+
+let currentApp = null;
+const propsOverride = reactive({});
+const slotsOverride = reactive({ default: '' });
+
+window.__museaSetProps = (props) => {
+  // Clear old keys
+  for (const key of Object.keys(propsOverride)) {
+    delete propsOverride[key];
+  }
+  Object.assign(propsOverride, props);
+};
+
+window.__museaSetSlots = (slots) => {
+  Object.assign(slotsOverride, slots);
+};
 
 async function mount() {
   try {
     // Get the specific variant component
     const VariantComponent = artModule['${variantComponentName}'];
+    const RawComponent = artModule.__component__;
 
     if (!VariantComponent) {
       throw new Error('Variant component "${variantComponentName}" not found in art module');
@@ -1308,8 +1919,25 @@ async function mount() {
     container.innerHTML = '';
     container.className = 'musea-variant';
     app.mount(container);
+    currentApp = app;
 
     console.log('[musea-preview] Mounted variant: ${escapedVariantName}');
+    __museaInitAddons(container);
+
+    // Override set-props to remount with raw component + props
+    if (RawComponent) {
+      window.__museaSetProps = (props) => {
+        for (const key of Object.keys(propsOverride)) {
+          delete propsOverride[key];
+        }
+        Object.assign(propsOverride, props);
+        remountWithProps(RawComponent);
+      };
+      window.__museaSetSlots = (slots) => {
+        Object.assign(slotsOverride, slots);
+        remountWithProps(RawComponent);
+      };
+    }
   } catch (error) {
     console.error('[musea-preview] Failed to mount:', error);
     container.innerHTML = \`
@@ -1322,6 +1950,28 @@ async function mount() {
   }
 }
 
+function remountWithProps(Component) {
+  if (currentApp) {
+    currentApp.unmount();
+  }
+  const app = createApp({
+    setup() {
+      return () => {
+        const slotFns = {};
+        if (slotsOverride.default) {
+          slotFns.default = () => h('span', { innerHTML: slotsOverride.default });
+        }
+        return h('div', { class: 'musea-variant' }, [
+          h(Component, { ...propsOverride }, slotFns)
+        ]);
+      };
+    }
+  });
+  container.innerHTML = '';
+  app.mount(container);
+  currentApp = app;
+}
+
 mount();
 `;
 }
@@ -1332,25 +1982,28 @@ function generateManifestModule(artFiles: Map<string, ArtFileInfo>): string {
 }
 
 function generateArtModule(art: ArtFileInfo, filePath: string): string {
-  const componentPath = art.metadata.component;
+  let componentImportPath: string | undefined;
+  let componentName: string | undefined;
 
-  // Resolve component path relative to art file location
-  let resolvedComponentPath = componentPath;
-  if (componentPath && !path.isAbsolute(componentPath)) {
-    const artDir = path.dirname(filePath);
-    resolvedComponentPath = path.resolve(artDir, componentPath);
+  if (art.isInline && art.componentPath) {
+    // Inline art: import the host .vue file itself as the component
+    componentImportPath = art.componentPath;
+    componentName = path.basename(art.componentPath, ".vue");
+  } else if (art.metadata.component) {
+    // Traditional .art.vue: resolve component from the component attribute
+    const comp = art.metadata.component;
+    componentImportPath = path.isAbsolute(comp) ? comp : path.resolve(path.dirname(filePath), comp);
+    componentName = path.basename(comp, ".vue");
   }
-
-  // Extract component name from path (e.g., './Button.vue' -> 'Button')
-  const componentName = componentPath ? path.basename(componentPath, ".vue") : null;
 
   let code = `
 // Auto-generated module for: ${path.basename(filePath)}
 import { defineComponent, h } from 'vue';
 `;
 
-  if (resolvedComponentPath && componentName) {
-    code += `import ${componentName} from '${resolvedComponentPath}';\n`;
+  if (componentImportPath && componentName) {
+    code += `import ${componentName} from '${componentImportPath}';\n`;
+    code += `export const __component__ = ${componentName};\n`;
   }
 
   code += `
@@ -1361,8 +2014,18 @@ export const variants = ${JSON.stringify(art.variants)};
   // Generate variant components
   for (const variant of art.variants) {
     const variantComponentName = toPascalCase(variant.name);
+
+    let template = variant.template;
+
+    // Replace <Self> with the actual component name (for inline art)
+    if (componentName) {
+      template = template
+        .replace(/<Self/g, `<${componentName}`)
+        .replace(/<\/Self>/g, `</${componentName}>`);
+    }
+
     // Escape the template for use in a JS string
-    const escapedTemplate = variant.template
+    const escapedTemplate = template
       .replace(/\\/g, "\\\\")
       .replace(/`/g, "\\`")
       .replace(/\$/g, "\\$");
@@ -1437,6 +2100,54 @@ function escapeTemplate(str: string): string {
   return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
 }
 
+function generatePreviewModuleWithProps(
+  art: ArtFileInfo,
+  variantComponentName: string,
+  variantName: string,
+  propsOverride: Record<string, unknown>,
+): string {
+  const artModuleId = `virtual:musea-art:${art.path}`;
+  const escapedVariantName = escapeTemplate(variantName);
+  const propsJson = JSON.stringify(propsOverride);
+
+  return `
+import { createApp, h } from 'vue';
+import * as artModule from '${artModuleId}';
+
+const container = document.getElementById('app');
+const propsOverride = ${propsJson};
+
+${MUSEA_ADDONS_INIT_CODE}
+
+async function mount() {
+  try {
+    const VariantComponent = artModule['${variantComponentName}'];
+    if (!VariantComponent) {
+      throw new Error('Variant component "${variantComponentName}" not found');
+    }
+
+    const WrappedComponent = {
+      render() {
+        return h(VariantComponent, propsOverride);
+      }
+    };
+
+    const app = createApp(WrappedComponent);
+    container.innerHTML = '';
+    container.className = 'musea-variant';
+    app.mount(container);
+    console.log('[musea-preview] Mounted variant: ${escapedVariantName} with props override');
+    __museaInitAddons(container);
+  } catch (error) {
+    console.error('[musea-preview] Failed to mount:', error);
+    container.innerHTML = '<div class="musea-error"><div class="musea-error-title">Failed to render</div><div>' + error.message + '</div></div>';
+  }
+}
+
+mount();
+`;
+}
+
 function generatePreviewHtml(art: ArtFileInfo, variant: ArtVariant, basePath: string): string {
   // Create a unique module URL for each variant to avoid caching issues
   const previewModuleUrl = `${basePath}/preview-module?art=${encodeURIComponent(art.path)}&variant=${encodeURIComponent(variant.name)}`;
@@ -1503,6 +2214,29 @@ function generatePreviewHtml(art: ArtFileInfo, variant: ArtVariant, basePath: st
       animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Musea Addons: Checkerboard background for transparent mode */
+    .musea-bg-checkerboard {
+      background-image:
+        linear-gradient(45deg, #ccc 25%, transparent 25%),
+        linear-gradient(-45deg, #ccc 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #ccc 75%),
+        linear-gradient(-45deg, transparent 75%, #ccc 75%) !important;
+      background-size: 20px 20px !important;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0 !important;
+    }
+
+    /* Musea Addons: Measure label */
+    .musea-measure-label {
+      position: fixed;
+      background: #333;
+      color: #fff;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      pointer-events: none;
+      z-index: 100000;
+    }
   </style>
 </head>
 <body>

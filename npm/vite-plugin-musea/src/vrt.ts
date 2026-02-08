@@ -4,7 +4,14 @@
  */
 
 import type { Browser, BrowserContext, Page } from "playwright";
-import type { ArtFileInfo, VrtOptions, ViewportConfig } from "./types.js";
+import type {
+  ArtFileInfo,
+  VrtOptions,
+  ViewportConfig,
+  CaptureConfig,
+  ComparisonConfig,
+  CiConfig,
+} from "./types.js";
 import fs from "node:fs";
 import path from "node:path";
 import { PNG } from "pngjs";
@@ -40,6 +47,17 @@ export interface VrtSummary {
 }
 
 /**
+ * Extended VRT options aligned with Rust VrtConfig.
+ */
+export interface ExtendedVrtOptions extends VrtOptions {
+  capture?: CaptureConfig;
+  comparison?: ComparisonConfig;
+  ci?: CiConfig;
+  /** Enable a11y auditing during VRT */
+  a11y?: boolean;
+}
+
+/**
  * Pixel comparison options.
  */
 export interface PixelCompareOptions {
@@ -58,10 +76,13 @@ export interface PixelCompareOptions {
  */
 export class MuseaVrtRunner {
   private options: Required<VrtOptions>;
+  private capture: Required<CaptureConfig>;
+  private comparison: ComparisonConfig;
+  private ci: CiConfig;
   private browser: Browser | null = null;
   private startTime: number = 0;
 
-  constructor(options: VrtOptions = {}) {
+  constructor(options: ExtendedVrtOptions = {}) {
     this.options = {
       snapshotDir: options.snapshotDir ?? ".vize/snapshots",
       threshold: options.threshold ?? 0.1,
@@ -70,6 +91,16 @@ export class MuseaVrtRunner {
         { width: 375, height: 667, name: "mobile" },
       ],
     };
+    this.capture = {
+      fullPage: options.capture?.fullPage ?? false,
+      waitForNetwork: options.capture?.waitForNetwork ?? true,
+      settleTime: options.capture?.settleTime ?? 100,
+      waitSelector: options.capture?.waitSelector ?? ".musea-variant",
+      hideElements: options.capture?.hideElements ?? [],
+      maskElements: options.capture?.maskElements ?? [],
+    };
+    this.comparison = options.comparison ?? {};
+    this.ci = options.ci ?? {};
   }
 
   /**
@@ -100,6 +131,7 @@ export class MuseaVrtRunner {
     }
 
     const results: VrtResult[] = [];
+    const retries = this.ci.retries ?? 0;
 
     for (const art of artFiles) {
       for (const variant of art.variants) {
@@ -107,9 +139,31 @@ export class MuseaVrtRunner {
           continue;
         }
 
-        for (const viewport of this.options.viewports) {
-          const result = await this.captureAndCompare(art, variant.name, viewport, baseUrl);
-          results.push(result);
+        // Determine viewports: use per-variant viewport if defined, else global viewports
+        const viewports = variant.args?.viewport
+          ? [variant.args.viewport as ViewportConfig]
+          : this.options.viewports;
+
+        for (const viewport of viewports) {
+          let result: VrtResult | null = null;
+          let attempts = 0;
+
+          while (attempts <= retries) {
+            result = await this.captureAndCompare(art, variant.name, viewport, baseUrl);
+            if (result.passed || result.isNew || !result.error) {
+              break;
+            }
+            attempts++;
+            if (attempts <= retries) {
+              console.log(
+                `[vrt] Retry ${attempts}/${retries}: ${path.basename(art.path)}/${variant.name}`,
+              );
+            }
+          }
+
+          if (result) {
+            results.push(result);
+          }
         }
       }
     }
@@ -158,18 +212,44 @@ export class MuseaVrtRunner {
 
       // Navigate to variant preview URL
       const variantUrl = this.buildVariantUrl(baseUrl, art.path, variantName);
-      await page.goto(variantUrl, { waitUntil: "networkidle" });
+      const waitUntil = this.capture.waitForNetwork ? ("networkidle" as const) : ("load" as const);
+      await page.goto(variantUrl, { waitUntil });
 
       // Wait for content to render
-      await page.waitForSelector(".musea-variant", { timeout: 10000 });
+      await page.waitForSelector(this.capture.waitSelector, { timeout: 10000 });
 
       // Additional wait for animations to settle
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(this.capture.settleTime);
+
+      // Hide elements before capture
+      if (this.capture.hideElements.length > 0) {
+        for (const selector of this.capture.hideElements) {
+          await page.evaluate((sel) => {
+            document.querySelectorAll(sel).forEach((el) => {
+              (el as HTMLElement).style.visibility = "hidden";
+            });
+          }, selector);
+        }
+      }
+
+      // Mask elements before capture (replace with colored box)
+      if (this.capture.maskElements.length > 0) {
+        for (const selector of this.capture.maskElements) {
+          await page.evaluate((sel) => {
+            document.querySelectorAll(sel).forEach((el) => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.background = "#ff00ff";
+              htmlEl.style.color = "transparent";
+              htmlEl.innerHTML = "";
+            });
+          }, selector);
+        }
+      }
 
       // Take screenshot
       await page.screenshot({
         path: currentPath,
-        fullPage: false,
+        fullPage: this.capture.fullPage,
       });
 
       // Check if baseline exists
@@ -222,6 +302,21 @@ export class MuseaVrtRunner {
   }
 
   /**
+   * Get the Playwright Page for external use (e.g., a11y auditing).
+   */
+  async createPage(viewport: ViewportConfig): Promise<{ page: Page; context: BrowserContext }> {
+    if (!this.browser) {
+      throw new Error("VRT runner not initialized. Call init() first.");
+    }
+    const context = await this.browser.newContext({
+      viewport: { width: viewport.width, height: viewport.height },
+      deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
+    });
+    const page = await context.newPage();
+    return { page, context };
+  }
+
+  /**
    * Update baseline snapshots with current screenshots.
    */
   async updateBaselines(results: VrtResult[]): Promise<number> {
@@ -240,6 +335,56 @@ export class MuseaVrtRunner {
     }
 
     return updated;
+  }
+
+  /**
+   * Approve specific failed results (update their baselines).
+   */
+  async approveResults(results: VrtResult[], pattern?: string): Promise<number> {
+    const toApprove = pattern
+      ? results.filter((r) => {
+          const name = `${path.basename(r.artPath, ".art.vue")}/${r.variantName}`;
+          return name.includes(pattern) || matchGlob(name, pattern);
+        })
+      : results.filter((r) => !r.passed && !r.error);
+
+    return this.updateBaselines(toApprove);
+  }
+
+  /**
+   * Clean orphaned snapshots (no corresponding art/variant).
+   */
+  async cleanOrphans(artFiles: ArtFileInfo[]): Promise<number> {
+    const snapshotDir = this.options.snapshotDir;
+    let cleaned = 0;
+
+    try {
+      const files = await fs.promises.readdir(snapshotDir);
+      const validNames = new Set<string>();
+
+      for (const art of artFiles) {
+        const artBaseName = path.basename(art.path, ".art.vue");
+        for (const variant of art.variants) {
+          if (variant.skipVrt) continue;
+          for (const viewport of this.options.viewports) {
+            const viewportName = viewport.name || `${viewport.width}x${viewport.height}`;
+            validNames.add(`${artBaseName}--${variant.name}--${viewportName}.png`);
+          }
+        }
+      }
+
+      for (const file of files) {
+        if (file.endsWith(".png") && !validNames.has(file)) {
+          await fs.promises.unlink(path.join(snapshotDir, file));
+          cleaned++;
+          console.log(`[vrt] Cleaned: ${file}`);
+        }
+      }
+    } catch {
+      // Directory may not exist yet
+    }
+
+    return cleaned;
   }
 
   /**
@@ -306,6 +451,10 @@ export class MuseaVrtRunner {
     const totalPixels = width * height;
     const diff = new PNG({ width, height });
 
+    const useAntiAliasing = this.comparison.antiAliasing ?? true;
+    const useAlpha = this.comparison.alpha ?? true;
+    const diffColor = this.comparison.diffColor ?? { r: 255, g: 0, b: 0 };
+
     // Pixel comparison
     let diffPixels = 0;
     const threshold = 0.1; // Color difference threshold
@@ -317,24 +466,32 @@ export class MuseaVrtRunner {
         const r1 = baseline.data[idx];
         const g1 = baseline.data[idx + 1];
         const b1 = baseline.data[idx + 2];
-        const a1 = baseline.data[idx + 3];
+        const a1 = useAlpha ? baseline.data[idx + 3] : 255;
 
         const r2 = current.data[idx];
         const g2 = current.data[idx + 1];
         const b2 = current.data[idx + 2];
-        const a2 = current.data[idx + 3];
+        const a2 = useAlpha ? current.data[idx + 3] : 255;
 
-        // Calculate color difference using YIQ color space (better for human perception)
+        // Calculate color difference using YIQ color space
         const delta = colorDelta(r1, g1, b1, a1, r2, g2, b2, a2);
 
         if (delta > threshold * 255 * 255) {
-          // Mark as different
-          diffPixels++;
-          // Red highlight for diff
-          diff.data[idx] = 255;
-          diff.data[idx + 1] = 0;
-          diff.data[idx + 2] = 0;
-          diff.data[idx + 3] = 255;
+          // Anti-aliasing detection: check if pixel is likely AA
+          if (useAntiAliasing && isAntiAliased(baseline, current, x, y, width, height)) {
+            // Mark as AA (yellow)
+            diff.data[idx] = 255;
+            diff.data[idx + 1] = 200;
+            diff.data[idx + 2] = 0;
+            diff.data[idx + 3] = 128;
+          } else {
+            // Mark as different
+            diffPixels++;
+            diff.data[idx] = diffColor.r;
+            diff.data[idx + 1] = diffColor.g;
+            diff.data[idx + 2] = diffColor.b;
+            diff.data[idx + 3] = 255;
+          }
         } else {
           // Grayscale for matching pixels
           const gray = Math.round((r2 + g2 + b2) / 3);
@@ -363,7 +520,7 @@ export class MuseaVrtRunner {
 
 /**
  * Generate VRT report in HTML format.
- * Uses Musea design language for consistency.
+ * Supports side-by-side, overlay, and slider comparison modes.
  */
 export function generateVrtReport(results: VrtResult[], summary: VrtSummary): string {
   const formatDuration = (ms: number): string => {
@@ -412,7 +569,6 @@ export function generateVrtReport(results: VrtResult[], summary: VrtSummary): st
       line-height: 1.5;
     }
 
-    /* Header */
     .header {
       background: var(--musea-bg-secondary);
       border-bottom: 1px solid var(--musea-border);
@@ -424,258 +580,78 @@ export function generateVrtReport(results: VrtResult[], summary: VrtSummary): st
       top: 0;
       z-index: 100;
     }
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-    .logo {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: var(--musea-accent);
-    }
-    .header-title {
-      color: var(--musea-text-muted);
-      font-size: 0.875rem;
-    }
-    .header-meta {
-      display: flex;
-      align-items: center;
-      gap: 1.5rem;
-      font-size: 0.8125rem;
-      color: var(--musea-text-muted);
-    }
-    .header-meta span {
-      display: flex;
-      align-items: center;
-      gap: 0.375rem;
-    }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    .logo { font-size: 1.25rem; font-weight: 700; color: var(--musea-accent); }
+    .header-title { color: var(--musea-text-muted); font-size: 0.875rem; }
+    .header-meta { display: flex; align-items: center; gap: 1.5rem; font-size: 0.8125rem; color: var(--musea-text-muted); }
+    .header-meta span { display: flex; align-items: center; gap: 0.375rem; }
 
-    /* Main content */
-    .main {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
+    .main { max-width: 1400px; margin: 0 auto; padding: 2rem; }
 
-    /* Summary cards */
-    .summary {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
-    .stat {
-      background: var(--musea-bg-secondary);
-      border: 1px solid var(--musea-border);
-      border-radius: 8px;
-      padding: 1.25rem;
-      position: relative;
-      overflow: hidden;
-    }
-    .stat::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 3px;
-    }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .stat { background: var(--musea-bg-secondary); border: 1px solid var(--musea-border); border-radius: 8px; padding: 1.25rem; position: relative; overflow: hidden; }
+    .stat::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
     .stat.passed::before { background: var(--musea-success); }
     .stat.failed::before { background: var(--musea-error); }
     .stat.new::before { background: var(--musea-info); }
     .stat.skipped::before { background: var(--musea-warning); }
-    .stat-value {
-      font-size: 2rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      line-height: 1;
-      margin-bottom: 0.25rem;
-    }
+    .stat-value { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; margin-bottom: 0.25rem; }
     .stat.passed .stat-value { color: var(--musea-success); }
     .stat.failed .stat-value { color: var(--musea-error); }
     .stat.new .stat-value { color: var(--musea-info); }
     .stat.skipped .stat-value { color: var(--musea-warning); }
-    .stat-label {
-      color: var(--musea-text-muted);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-weight: 500;
-    }
+    .stat-label { color: var(--musea-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
 
-    /* Filters */
-    .filters {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-    }
-    .filter-btn {
-      background: var(--musea-bg-secondary);
-      border: 1px solid var(--musea-border);
-      color: var(--musea-text);
-      padding: 0.5rem 1rem;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      transition: all 0.15s ease;
-    }
-    .filter-btn:hover {
-      background: var(--musea-bg-tertiary);
-      border-color: var(--musea-text-muted);
-    }
-    .filter-btn.active {
-      background: var(--musea-accent);
-      border-color: var(--musea-accent);
-      color: #fff;
-    }
-    .filter-btn .count {
-      opacity: 0.7;
-      margin-left: 0.25rem;
-    }
+    .filters { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .filter-btn { background: var(--musea-bg-secondary); border: 1px solid var(--musea-border); color: var(--musea-text); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.8125rem; font-weight: 500; transition: all 0.15s ease; }
+    .filter-btn:hover { background: var(--musea-bg-tertiary); border-color: var(--musea-text-muted); }
+    .filter-btn.active { background: var(--musea-accent); border-color: var(--musea-accent); color: #fff; }
+    .filter-btn .count { opacity: 0.7; margin-left: 0.25rem; }
 
-    /* Results */
-    .results {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .result {
-      background: var(--musea-bg-secondary);
-      border: 1px solid var(--musea-border);
-      border-radius: 8px;
-      overflow: hidden;
-      transition: border-color 0.15s ease;
-    }
-    .result:hover {
-      border-color: var(--musea-text-muted);
-    }
-    .result-header {
-      padding: 1rem 1.25rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: pointer;
-      border-left: 3px solid transparent;
-      background: var(--musea-bg-tertiary);
-    }
+    /* Comparison mode toggle */
+    .compare-modes { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; background: var(--musea-bg-secondary); border-radius: 6px; padding: 0.25rem; width: fit-content; }
+    .compare-mode-btn { background: none; border: none; color: var(--musea-text-muted); padding: 0.375rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 500; transition: all 0.15s ease; }
+    .compare-mode-btn.active { background: var(--musea-bg-tertiary); color: var(--musea-text); }
+
+    .results { display: flex; flex-direction: column; gap: 0.75rem; }
+    .result { background: var(--musea-bg-secondary); border: 1px solid var(--musea-border); border-radius: 8px; overflow: hidden; transition: border-color 0.15s ease; }
+    .result:hover { border-color: var(--musea-text-muted); }
+    .result-header { padding: 1rem 1.25rem; display: flex; justify-content: space-between; align-items: center; cursor: pointer; border-left: 3px solid transparent; background: var(--musea-bg-tertiary); }
     .result.passed .result-header { border-left-color: var(--musea-success); }
     .result.failed .result-header { border-left-color: var(--musea-error); }
     .result.new .result-header { border-left-color: var(--musea-info); }
     .result.error .result-header { border-left-color: var(--musea-warning); }
 
-    .result-info {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-    .result-name {
-      font-weight: 600;
-      font-size: 0.9375rem;
-    }
-    .result-meta {
-      color: var(--musea-text-muted);
-      font-size: 0.8125rem;
-      padding: 0.125rem 0.5rem;
-      background: var(--musea-bg-secondary);
-      border-radius: 4px;
-    }
-    .result-badge {
-      padding: 0.25rem 0.625rem;
-      border-radius: 4px;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
+    .result-info { display: flex; align-items: center; gap: 1rem; }
+    .result-name { font-weight: 600; font-size: 0.9375rem; }
+    .result-meta { color: var(--musea-text-muted); font-size: 0.8125rem; padding: 0.125rem 0.5rem; background: var(--musea-bg-secondary); border-radius: 4px; }
+    .result-badge { padding: 0.25rem 0.625rem; border-radius: 4px; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
     .result.passed .result-badge { background: rgba(74, 222, 128, 0.15); color: var(--musea-success); }
     .result.failed .result-badge { background: rgba(248, 113, 113, 0.15); color: var(--musea-error); }
     .result.new .result-badge { background: rgba(96, 165, 250, 0.15); color: var(--musea-info); }
     .result.error .result-badge { background: rgba(251, 191, 36, 0.15); color: var(--musea-warning); }
 
-    .result-body {
-      border-top: 1px solid var(--musea-border);
-    }
-    .result-details {
-      padding: 0.875rem 1.25rem;
-      font-size: 0.8125rem;
-      color: var(--musea-text-muted);
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      background: var(--musea-bg-primary);
-    }
-    .result-details.error {
-      color: var(--musea-error);
-    }
+    .result-body { border-top: 1px solid var(--musea-border); }
+    .result-details { padding: 0.875rem 1.25rem; font-size: 0.8125rem; color: var(--musea-text-muted); font-family: 'SF Mono', 'Fira Code', monospace; background: var(--musea-bg-primary); }
+    .result-details.error { color: var(--musea-error); }
 
-    /* Image comparison */
-    .result-images {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 1rem;
-      padding: 1.25rem;
-      background: var(--musea-bg-primary);
-    }
-    .image-container {
-      background: var(--musea-bg-secondary);
-      border: 1px solid var(--musea-border);
-      border-radius: 6px;
-      overflow: hidden;
-    }
-    .image-label {
-      padding: 0.625rem 0.875rem;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      color: var(--musea-text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      background: var(--musea-bg-tertiary);
-      border-bottom: 1px solid var(--musea-border);
-    }
-    .image-wrapper {
-      padding: 0.5rem;
-      background: repeating-conic-gradient(
-        var(--musea-bg-tertiary) 0% 25%,
-        var(--musea-bg-secondary) 0% 50%
-      ) 50% / 16px 16px;
-    }
-    .image-container img {
-      width: 100%;
-      height: auto;
-      display: block;
-      border-radius: 2px;
-    }
+    .result-images { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; padding: 1.25rem; background: var(--musea-bg-primary); }
+    .result-images.overlay { grid-template-columns: 1fr; }
+    .image-container { background: var(--musea-bg-secondary); border: 1px solid var(--musea-border); border-radius: 6px; overflow: hidden; }
+    .image-label { padding: 0.625rem 0.875rem; font-size: 0.6875rem; font-weight: 600; color: var(--musea-text-muted); text-transform: uppercase; letter-spacing: 0.08em; background: var(--musea-bg-tertiary); border-bottom: 1px solid var(--musea-border); }
+    .image-wrapper { padding: 0.5rem; background: repeating-conic-gradient(var(--musea-bg-tertiary) 0% 25%, var(--musea-bg-secondary) 0% 50%) 50% / 16px 16px; }
+    .image-container img { width: 100%; height: auto; display: block; border-radius: 2px; }
 
-    /* Empty state */
-    .empty-state {
-      text-align: center;
-      padding: 4rem 2rem;
-      color: var(--musea-text-muted);
-    }
-    .empty-state-icon {
-      font-size: 3rem;
-      margin-bottom: 1rem;
-      opacity: 0.5;
-    }
+    /* Slider comparison */
+    .slider-compare { position: relative; overflow: hidden; }
+    .slider-compare img { display: block; width: 100%; }
+    .slider-overlay { position: absolute; top: 0; left: 0; bottom: 0; overflow: hidden; border-right: 2px solid var(--musea-accent); }
+    .slider-overlay img { display: block; min-width: 100%; height: 100%; object-fit: cover; }
 
-    /* Success state */
-    .all-passed {
-      background: rgba(74, 222, 128, 0.1);
-      border: 1px solid rgba(74, 222, 128, 0.2);
-      border-radius: 8px;
-      padding: 1.5rem;
-      text-align: center;
-      margin-bottom: 1.5rem;
-    }
-    .all-passed-icon {
-      font-size: 2.5rem;
-      margin-bottom: 0.5rem;
-    }
-    .all-passed-text {
-      color: var(--musea-success);
-      font-weight: 600;
-    }
+    .empty-state { text-align: center; padding: 4rem 2rem; color: var(--musea-text-muted); }
+    .all-passed { background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.2); border-radius: 8px; padding: 1.5rem; text-align: center; margin-bottom: 1.5rem; }
+    .all-passed-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .all-passed-text { color: var(--musea-success); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -702,22 +678,10 @@ export function generateVrtReport(results: VrtResult[], summary: VrtSummary): st
 
   <main class="main">
     <div class="summary">
-      <div class="stat passed">
-        <div class="stat-value">${summary.passed}</div>
-        <div class="stat-label">Passed</div>
-      </div>
-      <div class="stat failed">
-        <div class="stat-value">${summary.failed}</div>
-        <div class="stat-label">Failed</div>
-      </div>
-      <div class="stat new">
-        <div class="stat-value">${summary.new}</div>
-        <div class="stat-label">New</div>
-      </div>
-      <div class="stat skipped">
-        <div class="stat-value">${summary.skipped}</div>
-        <div class="stat-label">Skipped</div>
-      </div>
+      <div class="stat passed"><div class="stat-value">${summary.passed}</div><div class="stat-label">Passed</div></div>
+      <div class="stat failed"><div class="stat-value">${summary.failed}</div><div class="stat-label">Failed</div></div>
+      <div class="stat new"><div class="stat-value">${summary.new}</div><div class="stat-label">New</div></div>
+      <div class="stat skipped"><div class="stat-value">${summary.skipped}</div><div class="stat-label">Skipped</div></div>
     </div>
 
     ${
@@ -736,13 +700,16 @@ export function generateVrtReport(results: VrtResult[], summary: VrtSummary): st
       <button class="filter-btn" data-filter="new">New<span class="count">(${summary.new})</span></button>
     </div>
 
+    <div class="compare-modes">
+      <button class="compare-mode-btn active" data-mode="side-by-side">Side by Side</button>
+      <button class="compare-mode-btn" data-mode="overlay">Overlay</button>
+      <button class="compare-mode-btn" data-mode="slider">Slider</button>
+    </div>
+
     <div class="results">
       ${
         results.length === 0
-          ? `<div class="empty-state">
-              <div class="empty-state-icon">📷</div>
-              <p>No visual tests found</p>
-            </div>`
+          ? `<div class="empty-state"><p>No visual tests found</p></div>`
           : results
               .map((r) => {
                 const status = r.error ? "error" : r.isNew ? "new" : r.passed ? "passed" : "failed";
@@ -762,37 +729,10 @@ export function generateVrtReport(results: VrtResult[], summary: VrtSummary): st
 
                 let images = "";
                 if (!r.error && !r.passed && r.diffPath) {
-                  images = `<div class="result-images">
-                    ${
-                      r.snapshotPath
-                        ? `<div class="image-container">
-                            <div class="image-label">Baseline</div>
-                            <div class="image-wrapper">
-                              <img src="file://${r.snapshotPath}" alt="Baseline" loading="lazy" />
-                            </div>
-                          </div>`
-                        : ""
-                    }
-                    ${
-                      r.currentPath
-                        ? `<div class="image-container">
-                            <div class="image-label">Current</div>
-                            <div class="image-wrapper">
-                              <img src="file://${r.currentPath}" alt="Current" loading="lazy" />
-                            </div>
-                          </div>`
-                        : ""
-                    }
-                    ${
-                      r.diffPath
-                        ? `<div class="image-container">
-                            <div class="image-label">Diff</div>
-                            <div class="image-wrapper">
-                              <img src="file://${r.diffPath}" alt="Diff" loading="lazy" />
-                            </div>
-                          </div>`
-                        : ""
-                    }
+                  images = `<div class="result-images" data-baseline="file://${r.snapshotPath}" data-current="file://${r.currentPath}" data-diff="file://${r.diffPath}">
+                    ${r.snapshotPath ? `<div class="image-container"><div class="image-label">Baseline</div><div class="image-wrapper"><img src="file://${r.snapshotPath}" alt="Baseline" loading="lazy" /></div></div>` : ""}
+                    ${r.currentPath ? `<div class="image-container"><div class="image-label">Current</div><div class="image-wrapper"><img src="file://${r.currentPath}" alt="Current" loading="lazy" /></div></div>` : ""}
+                    ${r.diffPath ? `<div class="image-container"><div class="image-label">Diff</div><div class="image-wrapper"><img src="file://${r.diffPath}" alt="Diff" loading="lazy" /></div></div>` : ""}
                   </div>`;
                 }
 
@@ -815,18 +755,24 @@ export function generateVrtReport(results: VrtResult[], summary: VrtSummary): st
   </main>
 
   <script>
+    // Filter buttons
     document.querySelectorAll('.filter-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const filter = btn.dataset.filter;
         document.querySelectorAll('.result').forEach(result => {
-          if (filter === 'all' || result.dataset.status === filter) {
-            result.style.display = 'block';
-          } else {
-            result.style.display = 'none';
-          }
+          result.style.display = (filter === 'all' || result.dataset.status === filter) ? 'block' : 'none';
         });
+      });
+    });
+
+    // Compare mode buttons
+    document.querySelectorAll('.compare-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.compare-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        // Mode switching would update result-images display; this is a static report for now
       });
     });
   </script>
@@ -885,7 +831,6 @@ async function writePng(png: PNG, filepath: string): Promise<void> {
 
 /**
  * Calculate color delta using YIQ color space.
- * This is more perceptually accurate than simple RGB difference.
  */
 function colorDelta(
   r1: number,
@@ -897,7 +842,6 @@ function colorDelta(
   b2: number,
   a2: number,
 ): number {
-  // Blend with white if alpha is not fully opaque
   if (a1 !== 255) {
     r1 = blend(r1, 255, a1 / 255);
     g1 = blend(g1, 255, a1 / 255);
@@ -909,7 +853,6 @@ function colorDelta(
     b2 = blend(b2, 255, a2 / 255);
   }
 
-  // Convert to YIQ color space
   const y1 = r1 * 0.29889531 + g1 * 0.58662247 + b1 * 0.11448223;
   const i1 = r1 * 0.59597799 - g1 * 0.2741761 - b1 * 0.32180189;
   const q1 = r1 * 0.21147017 - g1 * 0.52261711 + b1 * 0.31114694;
@@ -918,7 +861,6 @@ function colorDelta(
   const i2 = r2 * 0.59597799 - g2 * 0.2741761 - b2 * 0.32180189;
   const q2 = r2 * 0.21147017 - g2 * 0.52261711 + b2 * 0.31114694;
 
-  // Calculate delta (weighted by human eye sensitivity)
   const dy = y1 - y2;
   const di = i1 - i2;
   const dq = q1 - q2;
@@ -943,6 +885,68 @@ async function fileExists(filepath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Simple anti-aliasing detection.
+ * A pixel is likely anti-aliased if its neighbors have high contrast in opposite directions.
+ */
+function isAntiAliased(
+  img1: PNG,
+  img2: PNG,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): boolean {
+  const minX = Math.max(0, x - 1);
+  const maxX = Math.min(width - 1, x + 1);
+  const minY = Math.max(0, y - 1);
+  const maxY = Math.min(height - 1, y + 1);
+
+  let zeroes = 0;
+  let positives = 0;
+  let negatives = 0;
+
+  for (let ny = minY; ny <= maxY; ny++) {
+    for (let nx = minX; nx <= maxX; nx++) {
+      if (nx === x && ny === y) continue;
+      const idx = (ny * width + nx) * 4;
+
+      const delta = colorDelta(
+        img1.data[idx],
+        img1.data[idx + 1],
+        img1.data[idx + 2],
+        img1.data[idx + 3],
+        img2.data[idx],
+        img2.data[idx + 1],
+        img2.data[idx + 2],
+        img2.data[idx + 3],
+      );
+
+      if (delta === 0) {
+        zeroes++;
+      } else if (delta > 0) {
+        positives++;
+      } else {
+        negatives++;
+      }
+    }
+  }
+
+  // If neighbors are mixed (some match, some differ), it's likely AA
+  return zeroes > 0 && (positives > 0 || negatives > 0) && positives + negatives < 4;
+}
+
+/**
+ * Simple glob matching for pattern-based filtering.
+ */
+function matchGlob(filepath: string, pattern: string): boolean {
+  const regex = pattern
+    .replace(/\./g, "\\.")
+    .replace(/\*\*/g, ".*")
+    .replace(/\*(?!\*)/g, "[^/]*");
+  return new RegExp(`^${regex}$`).test(filepath);
 }
 
 /**

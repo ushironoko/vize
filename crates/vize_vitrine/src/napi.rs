@@ -1159,6 +1159,93 @@ pub fn generate_art_palette(
     })
 }
 
+// ============================================================================
+// Autogen NAPI types
+// ============================================================================
+
+#[napi(object)]
+#[derive(Default)]
+pub struct AutogenConfigNapi {
+    pub max_variants: Option<u32>,
+    pub include_default: Option<bool>,
+    pub include_boolean_toggles: Option<bool>,
+    pub include_enum_variants: Option<bool>,
+    pub include_boundary_values: Option<bool>,
+    pub include_empty_strings: Option<bool>,
+}
+
+#[napi(object)]
+pub struct PropDefinitionNapi {
+    pub name: String,
+    pub prop_type: String,
+    pub required: bool,
+    pub default_value: Option<serde_json::Value>,
+}
+
+#[napi(object)]
+pub struct GeneratedVariantNapi {
+    pub name: String,
+    pub is_default: bool,
+    pub props: serde_json::Value,
+    pub description: Option<String>,
+}
+
+#[napi(object)]
+pub struct AutogenOutputNapi {
+    pub variants: Vec<GeneratedVariantNapi>,
+    pub art_file_content: String,
+    pub component_name: String,
+}
+
+/// Generate .art.vue variants from component prop definitions
+#[napi(js_name = "generateVariants")]
+pub fn generate_variants(
+    component_path: String,
+    props: Vec<PropDefinitionNapi>,
+    config: Option<AutogenConfigNapi>,
+) -> Result<AutogenOutputNapi> {
+    use vize_musea::autogen::{generate_art_file, AutogenConfig, PropDefinition};
+
+    let cfg = config.unwrap_or_default();
+    let autogen_config = AutogenConfig {
+        max_variants: cfg.max_variants.unwrap_or(20) as usize,
+        include_default: cfg.include_default.unwrap_or(true),
+        include_boolean_toggles: cfg.include_boolean_toggles.unwrap_or(true),
+        include_enum_variants: cfg.include_enum_variants.unwrap_or(true),
+        include_boundary_values: cfg.include_boundary_values.unwrap_or(false),
+        include_empty_strings: cfg.include_empty_strings.unwrap_or(false),
+    };
+
+    let prop_defs: Vec<PropDefinition> = props
+        .into_iter()
+        .map(|p| PropDefinition {
+            name: p.name,
+            prop_type: p.prop_type,
+            required: p.required,
+            default_value: p.default_value,
+        })
+        .collect();
+
+    let output = generate_art_file(&component_path, &prop_defs, &autogen_config);
+
+    let variants_napi: Vec<GeneratedVariantNapi> = output
+        .variants
+        .into_iter()
+        .map(|v| GeneratedVariantNapi {
+            name: v.name,
+            is_default: v.is_default,
+            props: serde_json::Value::Object(v.props),
+            description: v.description,
+        })
+        .collect();
+
+    Ok(AutogenOutputNapi {
+        variants: variants_napi,
+        art_file_content: output.art_file_content,
+        component_name: output.component_name,
+    })
+}
+
 /// Build AST JSON from root node
 fn build_ast_json(root: &vize_atelier_core::RootNode<'_>) -> serde_json::Value {
     use vize_atelier_core::TemplateChildNode;

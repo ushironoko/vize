@@ -85,7 +85,8 @@ pub const VIZE_CONFIG_SCHEMA: &str = r#"{
           "type": "array",
           "description": "Template global variables to declare. Each entry is \"$name\" (typed as any) or \"$name:TypeAnnotation\" (with explicit type).",
           "items": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^\\$?[a-zA-Z_][a-zA-Z0-9_]*(:.+)?$"
           },
           "examples": [
             ["$t", "$d", "$n", "$route", "$router"],

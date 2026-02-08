@@ -63,6 +63,7 @@
 //! - Visual Regression Testing (VRT) support
 //! - Interactive props palette
 
+pub mod autogen;
 pub mod docs;
 pub mod palette;
 pub mod parse;

@@ -1,0 +1,181 @@
+//! Variant auto-generation module.
+//!
+//! Generates `.art.vue` variant definitions from component prop analysis.
+//! Uses intelligent strategies instead of cartesian product to produce
+//! meaningful, manageable variant sets.
+
+pub mod strategy;
+pub mod types;
+
+pub use strategy::generate_variants;
+pub use types::{AutogenConfig, AutogenOutput, GeneratedVariant, PropDefinition};
+
+use std::path::Path;
+
+/// Generate an `.art.vue` file from prop definitions.
+pub fn generate_art_file(
+    component_path: &str,
+    props: &[PropDefinition],
+    config: &AutogenConfig,
+) -> AutogenOutput {
+    let component_name = extract_component_name(component_path);
+    let variants = generate_variants(props, &component_name, config);
+    let art_file_content = render_art_file(&component_name, component_path, &variants);
+
+    AutogenOutput {
+        variants,
+        art_file_content,
+        component_name,
+    }
+}
+
+/// Extract component name from file path.
+/// e.g., "./components/MyButton.vue" -> "MyButton"
+fn extract_component_name(component_path: &str) -> String {
+    Path::new(component_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Component")
+        .to_string()
+}
+
+/// Render the `.art.vue` file content from generated variants.
+fn render_art_file(
+    component_name: &str,
+    component_path: &str,
+    variants: &[GeneratedVariant],
+) -> String {
+    let mut output = String::new();
+
+    // <art> block
+    output.push_str(&format!(
+        "<art title=\"{component_name}\" component=\"{component_path}\">\n"
+    ));
+
+    // Variants
+    for variant in variants {
+        let attrs = if variant.is_default {
+            format!("name=\"{}\" default", variant.name)
+        } else {
+            format!("name=\"{}\"", variant.name)
+        };
+
+        output.push_str(&format!("  <variant {attrs}>\n"));
+
+        // Build component tag with props
+        let props_str = render_props(&variant.props);
+        if props_str.is_empty() {
+            output.push_str(&format!("    <{component_name} />\n"));
+        } else {
+            output.push_str(&format!("    <{component_name}\n"));
+            output.push_str(&props_str);
+            output.push_str("    />\n");
+        }
+
+        output.push_str("  </variant>\n\n");
+    }
+
+    output.push_str("</art>\n\n");
+
+    // Script setup
+    output.push_str("<script setup lang=\"ts\">\n");
+    output.push_str(&format!(
+        "import {component_name} from '{component_path}'\n"
+    ));
+    output.push_str("</script>\n");
+
+    output
+}
+
+/// Render props as Vue template attributes.
+fn render_props(props: &serde_json::Map<String, serde_json::Value>) -> String {
+    let mut lines = Vec::new();
+
+    for (name, value) in props {
+        let attr = match value {
+            serde_json::Value::String(s) => format!("      {name}=\"{s}\""),
+            serde_json::Value::Bool(true) => format!("      {name}"),
+            serde_json::Value::Bool(false) => format!("      :{name}=\"false\""),
+            serde_json::Value::Number(n) => format!("      :{name}=\"{n}\""),
+            serde_json::Value::Null => continue,
+            other => {
+                let json_str = serde_json::to_string(other).unwrap_or_default();
+                let escaped = json_str.replace('"', "'");
+                format!("      :{name}=\"{escaped}\"")
+            }
+        };
+        lines.push(attr);
+    }
+
+    if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join("\n") + "\n"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_component_name() {
+        assert_eq!(extract_component_name("./Button.vue"), "Button");
+        assert_eq!(
+            extract_component_name("../components/MyButton.vue"),
+            "MyButton"
+        );
+        assert_eq!(extract_component_name("Input.vue"), "Input");
+    }
+
+    #[test]
+    fn test_generate_art_file() {
+        let props = vec![
+            PropDefinition {
+                name: "variant".to_string(),
+                prop_type: "'primary' | 'secondary'".to_string(),
+                required: true,
+                default_value: Some(json!("primary")),
+            },
+            PropDefinition {
+                name: "label".to_string(),
+                prop_type: "string".to_string(),
+                required: true,
+                default_value: Some(json!("Click me")),
+            },
+            PropDefinition {
+                name: "disabled".to_string(),
+                prop_type: "boolean".to_string(),
+                required: false,
+                default_value: Some(json!(false)),
+            },
+        ];
+
+        let config = AutogenConfig::default();
+        let output = generate_art_file("./Button.vue", &props, &config);
+
+        assert_eq!(output.component_name, "Button");
+        assert!(!output.variants.is_empty());
+        assert!(output.art_file_content.contains("<art title=\"Button\""));
+        assert!(output
+            .art_file_content
+            .contains("import Button from './Button.vue'"));
+        assert!(output
+            .art_file_content
+            .contains("<variant name=\"Default\" default>"));
+    }
+
+    #[test]
+    fn test_render_props() {
+        let mut props = serde_json::Map::new();
+        props.insert("label".to_string(), json!("Hello"));
+        props.insert("disabled".to_string(), json!(true));
+        props.insert("count".to_string(), json!(42));
+
+        let rendered = render_props(&props);
+        assert!(rendered.contains("label=\"Hello\""));
+        assert!(rendered.contains("disabled"));
+        assert!(rendered.contains(":count=\"42\""));
+    }
+}
