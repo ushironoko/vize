@@ -77,6 +77,7 @@
 //! - `musea/valid-variant` - Require name attribute in `<variant>` blocks
 //! - `musea/no-empty-variant` - Disallow empty variant blocks
 //! - `musea/unique-variant-names` - Require unique variant names
+//! - `musea/prefer-design-tokens` - Prefer design token CSS variables over hardcoded primitive values
 //!
 //! ### Script Rules (opt-in, default off)
 //! - `script/prefer-import-from-vue` - Prefer importing from 'vue' instead of internal packages

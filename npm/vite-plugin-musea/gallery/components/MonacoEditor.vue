@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import type * as Monaco from 'monaco-editor'
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
+import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
+import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 
 const props = defineProps<{
   modelValue: string
@@ -8,6 +13,7 @@ const props = defineProps<{
   theme?: string
   height?: string
   readOnly?: boolean
+  completionItems?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -17,41 +23,36 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLDivElement | null>(null)
 let editor: Monaco.editor.IStandaloneCodeEditor | null = null
 let monaco: typeof Monaco | null = null
+let completionDisposable: Monaco.IDisposable | null = null
 
 onMounted(async () => {
   if (!containerRef.value) return
 
-  // Dynamic import monaco-editor
-  monaco = await import('monaco-editor')
-
-  // Configure monaco environment for workers
+  // Configure monaco environment for workers using Vite ?worker imports
   self.MonacoEnvironment = {
     getWorker(_workerId: string, label: string) {
-      const getWorkerModule = (moduleUrl: string, label: string) => {
-        return new Worker(
-          new URL(moduleUrl, import.meta.url),
-          { type: 'module', name: label }
-        )
-      }
       switch (label) {
         case 'json':
-          return getWorkerModule('monaco-editor/esm/vs/language/json/json.worker?worker', label)
+          return new JsonWorker()
         case 'css':
         case 'scss':
         case 'less':
-          return getWorkerModule('monaco-editor/esm/vs/language/css/css.worker?worker', label)
+          return new CssWorker()
         case 'html':
         case 'handlebars':
         case 'razor':
-          return getWorkerModule('monaco-editor/esm/vs/language/html/html.worker?worker', label)
+          return new HtmlWorker()
         case 'typescript':
         case 'javascript':
-          return getWorkerModule('monaco-editor/esm/vs/language/typescript/ts.worker?worker', label)
+          return new TsWorker()
         default:
-          return getWorkerModule('monaco-editor/esm/vs/editor/editor.worker?worker', label)
+          return new EditorWorker()
       }
     }
   }
+
+  // Dynamic import monaco-editor
+  monaco = await import('monaco-editor')
 
   // Define custom dark theme matching musea
   monaco.editor.defineTheme('musea-dark', {
@@ -66,6 +67,11 @@ onMounted(async () => {
       'editor.selectionBackground': '#3d3d3d',
     }
   })
+
+  // Register design token completion provider
+  if (props.completionItems && props.completionItems.length > 0) {
+    registerCompletions(monaco, props.completionItems)
+  }
 
   editor = monaco.editor.create(containerRef.value, {
     value: props.modelValue,
@@ -100,7 +106,81 @@ onMounted(async () => {
   })
 })
 
+function registerCompletions(m: typeof Monaco, items: string[]) {
+  completionDisposable?.dispose()
+  completionDisposable = m.languages.registerCompletionItemProvider('css', {
+    triggerCharacters: ['-', '('],
+    provideCompletionItems(model, position) {
+      const lineContent = model.getLineContent(position.lineNumber)
+      const textUntilPos = lineContent.substring(0, position.column - 1)
+
+      // Only suggest inside var() or after a colon (CSS value context)
+      const inVar = /var\(\s*-*$/.test(textUntilPos)
+      const afterColon = /:\s*[^;]*$/.test(textUntilPos)
+      if (!inVar && !afterColon) return { suggestions: [] }
+
+      const word = model.getWordUntilPosition(position)
+      const range = {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn,
+      }
+
+      const suggestions: Monaco.languages.CompletionItem[] = items.map(tokenPath => {
+        const varName = `--${tokenPath.replace(/\./g, '-')}`
+        return {
+          label: varName,
+          kind: m.languages.CompletionItemKind.Variable,
+          detail: `Design token: ${tokenPath}`,
+          insertText: inVar ? varName : `var(${varName})`,
+          range,
+          sortText: '0' + tokenPath,
+        }
+      })
+
+      return { suggestions }
+    }
+  })
+
+  // Also register for HTML (since SFC source is HTML language)
+  completionDisposable = m.languages.registerCompletionItemProvider('html', {
+    triggerCharacters: ['-', '('],
+    provideCompletionItems(model, position) {
+      const lineContent = model.getLineContent(position.lineNumber)
+      const textUntilPos = lineContent.substring(0, position.column - 1)
+
+      const inVar = /var\(\s*-*$/.test(textUntilPos)
+      const afterColon = /:\s*[^;]*$/.test(textUntilPos)
+      if (!inVar && !afterColon) return { suggestions: [] }
+
+      const word = model.getWordUntilPosition(position)
+      const range = {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn,
+      }
+
+      const suggestions: Monaco.languages.CompletionItem[] = items.map(tokenPath => {
+        const varName = `--${tokenPath.replace(/\./g, '-')}`
+        return {
+          label: varName,
+          kind: m.languages.CompletionItemKind.Variable,
+          detail: `Design token: ${tokenPath}`,
+          insertText: inVar ? varName : `var(${varName})`,
+          range,
+          sortText: '0' + tokenPath,
+        }
+      })
+
+      return { suggestions }
+    }
+  })
+}
+
 onBeforeUnmount(() => {
+  completionDisposable?.dispose()
   editor?.dispose()
 })
 
@@ -116,6 +196,12 @@ watch(() => props.language, (newLang) => {
     if (model) {
       monaco.editor.setModelLanguage(model, newLang)
     }
+  }
+})
+
+watch(() => props.completionItems, (newItems) => {
+  if (monaco && newItems && newItems.length > 0) {
+    registerCompletions(monaco, newItems)
   }
 })
 </script>

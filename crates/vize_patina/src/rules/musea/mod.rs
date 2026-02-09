@@ -14,12 +14,14 @@
 //! pattern matching (memchr) for optimal performance.
 
 mod no_empty_variant;
+pub mod prefer_design_tokens;
 mod require_component;
 mod require_title;
 mod unique_variant_names;
 mod valid_variant;
 
 pub use no_empty_variant::NoEmptyVariant;
+pub use prefer_design_tokens::{PreferDesignTokens, PreferDesignTokensConfig};
 pub use require_component::RequireComponent;
 pub use require_title::RequireTitle;
 pub use unique_variant_names::UniqueVariantNames;
@@ -96,6 +98,8 @@ pub struct MuseaLinter {
     pub check_no_empty_variant: bool,
     /// Whether to check unique-variant-names rule
     pub check_unique_variant_names: bool,
+    /// Optional design token checker for prefer-design-tokens rule
+    prefer_design_tokens: Option<PreferDesignTokens>,
 }
 
 impl MuseaLinter {
@@ -108,7 +112,15 @@ impl MuseaLinter {
             check_valid_variant: true,
             check_no_empty_variant: true,
             check_unique_variant_names: true,
+            prefer_design_tokens: None,
         }
+    }
+
+    /// Set design token configuration for prefer-design-tokens rule
+    #[inline]
+    pub fn with_design_tokens(mut self, config: PreferDesignTokensConfig) -> Self {
+        self.prefer_design_tokens = Some(PreferDesignTokens::new(config));
+        self
     }
 
     /// Lint an Art file source using optimized single-pass scanning
@@ -121,6 +133,11 @@ impl MuseaLinter {
 
         // Phase 2: Check <variant> blocks (single scan for all variant rules)
         self.check_variant_blocks(bytes, &mut result);
+
+        // Phase 3: Check <style> blocks for hardcoded token values
+        if let Some(ref token_rule) = self.prefer_design_tokens {
+            token_rule.check(source, &mut result);
+        }
 
         result
     }
@@ -264,6 +281,7 @@ impl MuseaLinter {
 }
 
 impl Default for MuseaLinter {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }

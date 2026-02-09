@@ -50,7 +50,7 @@ defineEmits<{
 }
 
 .input--error {
-  border-color: #ef4444;
+  border-color: var(--color-error);
 }
 
 .input--error:focus {
@@ -64,7 +64,7 @@ defineEmits<{
 }
 
 .input-error {
-  color: #ef4444;
+  color: var(--color-error);
   font-size: 0.75rem;
 }
 </style>
