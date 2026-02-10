@@ -2670,9 +2670,11 @@ mount();
 `;
 }
 
-function generatePreviewHtml(art: ArtFileInfo, variant: ArtVariant, basePath: string): string {
-  // Create a unique module URL for each variant to avoid caching issues
-  const previewModuleUrl = `${basePath}/preview-module?art=${encodeURIComponent(art.path)}&variant=${encodeURIComponent(variant.name)}`;
+function generatePreviewHtml(art: ArtFileInfo, variant: ArtVariant, _basePath: string): string {
+  // Use virtual module import instead of HTTP endpoint.
+  // This is more robust in Nuxt/framework contexts where Vite's Connect
+  // middleware may not be directly accessible for custom endpoints.
+  const importSpecifier = JSON.stringify(`virtual:musea-preview:${art.path}:${variant.name}`);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -2768,7 +2770,13 @@ function generatePreviewHtml(art: ArtFileInfo, variant: ArtVariant, basePath: st
       Loading component...
     </div>
   </div>
-  <script type="module" src="${previewModuleUrl}"></script>
+  <script type="module">
+  import(${importSpecifier}).catch(function(e) {
+    console.error('[musea-preview] Failed to load module:', e);
+    var c = document.getElementById('app');
+    if (c) c.innerHTML = '<div class="musea-error"><div class="musea-error-title">Failed to load preview module</div><div>' + e.message + '</div></div>';
+  });
+  </script>
 </body>
 </html>`;
 }

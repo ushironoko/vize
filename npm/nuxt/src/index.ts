@@ -11,7 +11,6 @@
 import { defineNuxtModule } from "@nuxt/kit";
 import vize from "@vizejs/vite-plugin";
 import { musea } from "@vizejs/vite-plugin-musea";
-import { nuxtMusea } from "@vizejs/musea-nuxt";
 import type { MuseaOptions } from "@vizejs/vite-plugin-musea";
 import type { NuxtMuseaOptions } from "@vizejs/musea-nuxt";
 
@@ -24,6 +23,9 @@ export interface VizeNuxtOptions {
 
   /**
    * Nuxt mock options for musea gallery.
+   * NOTE: In Nuxt context, nuxtMusea mocks are NOT added as a global Vite plugin
+   * because they would intercept `#imports` resolution and break Nuxt's internals.
+   * Real Nuxt composables are available via Nuxt's own plugin pipeline.
    */
   nuxtMusea?: NuxtMuseaOptions;
 }
@@ -48,10 +50,12 @@ export default defineNuxtModule<VizeNuxtOptions>({
     // Compiler
     nuxt.options.vite.plugins.push(vize());
 
-    // Musea gallery
+    // Musea gallery (without nuxtMusea mock layer)
+    // In Nuxt context, real composables/components are already available
+    // via Nuxt's own Vite plugins. Adding nuxtMusea globally would shadow
+    // Nuxt's #imports resolution and break the app.
     if (options.musea !== false) {
       nuxt.options.vite.plugins.push(...musea(options.musea || {}));
-      nuxt.options.vite.plugins.push(nuxtMusea(options.nuxtMusea || {}));
     }
   },
 });
