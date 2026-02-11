@@ -18,7 +18,10 @@ const buttonProps = computed(() => ({ disabled: false, type: 'primary' }))
 
 return (_ctx: any,_cache: any) => {
   return (isActive.value)
-      ? (_openBlock(), _createBlock(Button, _mergeProps(buttonProps.value, { key: 0, onClick: _cache[0] || (_cache[0] = (...args) => (_ctx.handleClick && _ctx.handleClick(...args))) })))
+      ? (_openBlock(), _createBlock(Button, _mergeProps(buttonProps.value, {
+        key: 0,
+        onClick: _cache[0] || (_cache[0] = (...args) => (_ctx.handleClick && _ctx.handleClick(...args)))
+      })))
       : _createCommentVNode("v-if", true)
 }
 }

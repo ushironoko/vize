@@ -10,7 +10,7 @@ import { ref } from 'vue'
 
 export default /*@__PURE__*/_defineComponent({
   __name: 'test',
-  setup(__props) {
+  async setup(__props) {
 
 const count = ref(0)
 await new Promise(r => setTimeout(r, 100))

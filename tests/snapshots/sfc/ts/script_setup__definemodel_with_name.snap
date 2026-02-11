@@ -20,7 +20,9 @@ export default /*@__PURE__*/_defineComponent({
 const title = _useModel(__props, "title")
 
 return (_ctx: any,_cache: any) => {
-  return _withDirectives((_openBlock(), _createElementBlock("input", { "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((title).value = $event)) }, null, 512 /* NEED_PATCH */)), [ [_vModelText, title.value] ])
+  return _withDirectives((_openBlock(), _createElementBlock("input", {
+      "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((title).value = $event))
+    }, null, 512 /* NEED_PATCH */)), [ [_vModelText, title.value] ])
 }
 }
 

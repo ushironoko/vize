@@ -15,7 +15,9 @@ export default /*@__PURE__*/_defineComponent({
 const inputValue = ref('')
 
 return (_ctx: any,_cache: any) => {
-  return _withDirectives((_openBlock(), _createElementBlock("input", { "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((inputValue).value = $event)) }, null, 512 /* NEED_PATCH */)), [ [_vModelText, inputValue.value] ])
+  return _withDirectives((_openBlock(), _createElementBlock("input", {
+      "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((inputValue).value = $event))
+    }, null, 512 /* NEED_PATCH */)), [ [_vModelText, inputValue.value] ])
 }
 }
 

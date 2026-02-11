@@ -244,6 +244,14 @@ pub fn compile_script_setup(
         let outside_template_literal = template_literal_depth % 2 == 0;
 
         if outside_template_literal && trimmed.starts_with("import ") {
+            // Handle side-effect imports without semicolons (e.g., import '@/css/reset.scss')
+            // These have no 'from' clause and are always single-line
+            if !trimmed.contains(" from ")
+                && (trimmed.contains('\'') || trimmed.contains('"'))
+            {
+                imports.push(format!("{}\n", line));
+                continue;
+            }
             in_import = true;
             import_buffer.clear();
         }
@@ -922,7 +930,7 @@ fn is_typescript_type_alias(line: &str) -> bool {
 }
 
 /// Detect top-level await in setup code (ignores awaits inside nested functions).
-fn contains_top_level_await(code: &str, is_ts: bool) -> bool {
+pub fn contains_top_level_await(code: &str, is_ts: bool) -> bool {
     let allocator = Allocator::default();
     let source_type = if is_ts {
         SourceType::ts()
@@ -1037,7 +1045,7 @@ fn is_reserved_word(name: &str) -> bool {
 
 /// Deduplicate imports by removing duplicate specifiers from the same source.
 /// This avoids "Identifier has already been declared" errors.
-fn dedupe_imports(imports: &[String]) -> Vec<String> {
+pub fn dedupe_imports(imports: &[String]) -> Vec<String> {
     let mut result: Vec<String> = Vec::new();
     let mut seen_specifiers: HashSet<String> = HashSet::new();
 

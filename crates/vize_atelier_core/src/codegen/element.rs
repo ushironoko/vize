@@ -17,6 +17,16 @@ use super::slots::{generate_slots, has_dynamic_slots_flag, has_slot_children};
 use super::v_for::generate_for;
 use super::v_if::generate_if;
 
+/// Check if a template child node is whitespace-only text or a comment.
+/// Used to skip generating empty default slots for components.
+fn is_whitespace_or_comment(child: &TemplateChildNode<'_>) -> bool {
+    match child {
+        TemplateChildNode::Text(t) => t.content.trim().is_empty(),
+        TemplateChildNode::Comment(_) => true,
+        _ => false,
+    }
+}
+
 /// Check if element has v-once directive
 pub fn has_v_once(el: &ElementNode<'_>) -> bool {
     el.props.iter().any(|prop| {
@@ -343,10 +353,60 @@ pub fn generate_v_once_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
     // Generate the element content
     if el.tag_type == ElementType::Component {
         ctx.use_helper(RuntimeHelper::CreateVNode);
-        ctx.use_helper(RuntimeHelper::ResolveComponent);
         ctx.push(ctx.helper(RuntimeHelper::CreateVNode));
-        ctx.push("(_component_");
-        ctx.push(&el.tag.replace('-', "_"));
+        ctx.push("(");
+
+        // Handle dynamic component (<component :is="...">)
+        if el.tag == "component" {
+            let dynamic_is = el.props.iter().find_map(|p| {
+                if let PropNode::Directive(dir) = p {
+                    if dir.name == "bind" {
+                        if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                            if arg.content == "is" {
+                                return dir.exp.as_ref();
+                            }
+                        }
+                    }
+                }
+                None
+            });
+            let static_is = el.props.iter().find_map(|p| {
+                if let PropNode::Attribute(attr) = p {
+                    if attr.name == "is" {
+                        return attr.value.as_ref().map(|v| v.content.as_str());
+                    }
+                }
+                None
+            });
+            if let Some(is_exp) = dynamic_is {
+                ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+                ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+                ctx.push("(");
+                generate_expression(ctx, is_exp);
+                ctx.push(")");
+            } else if let Some(name) = static_is {
+                ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+                ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+                ctx.push("(\"");
+                ctx.push(name);
+                ctx.push("\")");
+            } else {
+                ctx.push("_component_component");
+            }
+        } else if let Some(builtin) = is_builtin_component(&el.tag) {
+            ctx.use_helper(builtin);
+            ctx.push(ctx.helper(builtin));
+        } else if ctx.is_component_in_bindings(&el.tag) {
+            if !ctx.options.inline {
+                ctx.push("$setup.");
+            }
+            ctx.push(&el.tag);
+        } else {
+            ctx.use_helper(RuntimeHelper::ResolveComponent);
+            ctx.push("_component_");
+            ctx.push(&el.tag.replace('-', "_"));
+        }
+
         ctx.push(")");
     } else {
         ctx.use_helper(RuntimeHelper::CreateElementVNode);
@@ -810,7 +870,11 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                 if is_dynamic_component {
                     ctx.skip_is_prop = true;
                 }
+                // Components: skip scope_id in props — Vue runtime applies it via __scopeId
+                let prev_skip_scope_id = ctx.skip_scope_id;
+                ctx.skip_scope_id = true;
                 generate_props(ctx, &el.props);
+                ctx.skip_scope_id = prev_skip_scope_id;
                 ctx.skip_is_prop = false;
             } else if !el.children.is_empty() || has_patch_info {
                 ctx.push(", null");
@@ -820,8 +884,9 @@ pub fn generate_element_block(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             if has_slot_children(el) {
                 ctx.push(", ");
                 generate_slots(ctx, el);
-            } else if !el.children.is_empty() {
+            } else if el.children.iter().any(|c| !is_whitespace_or_comment(c)) {
                 // Teleport, KeepAlive: pass children as array, not slot object
+                // (whitespace-only children are skipped to match Vue's behavior)
                 ctx.push(", [");
                 ctx.indent();
                 for (i, child) in el.children.iter().enumerate() {
@@ -1027,9 +1092,50 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             ctx.push(helper);
             ctx.push("(");
 
-            // In inline mode, components are directly in scope (imported at module level)
-            // In function mode, use $setup.ComponentName to access setup bindings
-            if ctx.is_component_in_bindings(&el.tag) {
+            // Check for dynamic component (<component :is="..."> or <component is="...">)
+            let is_dynamic_component = el.tag == "component";
+            let (dynamic_is, static_is) = if is_dynamic_component {
+                let dynamic = el.props.iter().find_map(|p| {
+                    if let PropNode::Directive(dir) = p {
+                        if dir.name == "bind" {
+                            if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                                if arg.content == "is" {
+                                    return dir.exp.as_ref();
+                                }
+                            }
+                        }
+                    }
+                    None
+                });
+                let static_val = el.props.iter().find_map(|p| {
+                    if let PropNode::Attribute(attr) = p {
+                        if attr.name == "is" {
+                            return attr.value.as_ref().map(|v| v.content.as_str());
+                        }
+                    }
+                    None
+                });
+                (dynamic, static_val)
+            } else {
+                (None, None)
+            };
+
+            if let Some(is_exp) = dynamic_is {
+                ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+                ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+                ctx.push("(");
+                generate_expression(ctx, is_exp);
+                ctx.push(")");
+            } else if let Some(component_name) = static_is {
+                ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+                ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+                ctx.push("(\"");
+                ctx.push(component_name);
+                ctx.push("\")");
+            } else if let Some(builtin) = is_builtin_component(&el.tag) {
+                ctx.use_helper(builtin);
+                ctx.push(ctx.helper(builtin));
+            } else if ctx.is_component_in_bindings(&el.tag) {
                 if !ctx.options.inline {
                     ctx.push("$setup.");
                 }
@@ -1039,10 +1145,25 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                 ctx.push(&el.tag.replace('-', "_"));
             }
 
-            // Generate props
-            if !el.props.is_empty() {
+            // Generate props — for dynamic components, filter out the `is` prop
+            let effective_has_props = if is_dynamic_component {
+                el.props
+                    .iter()
+                    .any(|p| !is_is_prop(p) && is_renderable_prop(p))
+            } else {
+                !el.props.is_empty()
+            };
+            if effective_has_props {
                 ctx.push(", ");
+                if is_dynamic_component {
+                    ctx.skip_is_prop = true;
+                }
+                // Components: skip scope_id in props — Vue runtime applies it via __scopeId
+                let prev_skip_scope_id = ctx.skip_scope_id;
+                ctx.skip_scope_id = true;
                 generate_props(ctx, &el.props);
+                ctx.skip_scope_id = prev_skip_scope_id;
+                ctx.skip_is_prop = false;
             } else if !el.children.is_empty() {
                 ctx.push(", null");
             }
@@ -1086,6 +1207,9 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                 .collect();
 
             // Generate fallback content if present
+            // Slots: skip scope_id in props — not a real rendered element
+            let prev_skip_scope_id = ctx.skip_scope_id;
+            ctx.skip_scope_id = true;
             if !el.children.is_empty() {
                 // If we have children but no props, pass empty object
                 if slot_props.is_empty() {
@@ -1095,6 +1219,7 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
                     generate_props(ctx, &el.props);
                 }
                 ctx.push(", () => [");
+                ctx.skip_scope_id = prev_skip_scope_id;
                 ctx.indent();
                 for (i, child) in el.children.iter().enumerate() {
                     if i > 0 {
@@ -1109,8 +1234,10 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             } else if !slot_props.is_empty() {
                 ctx.push(", ");
                 generate_props(ctx, &el.props);
+                ctx.skip_scope_id = prev_skip_scope_id;
                 ctx.push(")");
             } else {
+                ctx.skip_scope_id = prev_skip_scope_id;
                 ctx.push(")");
             }
         }

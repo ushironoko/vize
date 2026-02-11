@@ -14,7 +14,8 @@ interface Props {
 export default /*@__PURE__*/_defineComponent({
   __name: 'test',
   props: {
-    onSubmit: { type: Object as PropType<(data: FormData) => Promise<void>; onError?: (error: Error) => void;>, required: true }
+    onSubmit: { type: Object as PropType<(data: FormData) => Promise<void>>, required: true },
+    onError: { type: Object as PropType<(error: Error) => void>, required: false }
   },
   setup(__props) {
 

@@ -691,3 +691,114 @@ const items = ref([{ id: 1, value: 0 }])
   </div>
 </template>
 """
+
+# =============================================================================
+# Dynamic component (<component :is="...">) codegen
+# Issue: <component :is="Component"> generated _component_component
+#        instead of _resolveDynamicComponent(Component)
+# Fix: Add dynamic component handling to non-block generate_element()
+# =============================================================================
+
+[[cases]]
+name = "dynamic component with v-slot destructure"
+input = """
+<script setup>
+import { RouterView } from 'vue-router'
+</script>
+
+<template>
+  <RouterView v-slot="{ Component }">
+    <component :is="Component" />
+  </RouterView>
+</template>
+"""
+
+# =============================================================================
+# Built-in component in v-if/v-for (Bug-28)
+# Issue: Built-in components inside v-if/v-for were sent to resolveComponent()
+# Fix: Add is_builtin_component check in v_if.rs and v_for.rs
+# =============================================================================
+
+[[cases]]
+name = "transition inside v-if should use builtin"
+input = """
+<script setup>
+import { ref } from 'vue'
+const show = ref(true)
+</script>
+
+<template>
+  <transition v-if="show" name="fade">
+    <div>content</div>
+  </transition>
+</template>
+"""
+
+[[cases]]
+name = "keep-alive inside v-for should use builtin"
+input = """
+<script setup>
+import { ref } from 'vue'
+const tabs = ref([{ id: 1, component: 'TabA' }])
+</script>
+
+<template>
+  <keep-alive v-for="tab in tabs" :key="tab.id">
+    <component :is="tab.component" />
+  </keep-alive>
+</template>
+"""
+
+# =============================================================================
+# Hyphenated component names in v-if (Bug-29)
+# Issue: <router-link v-if="cond"> generated _component_router-link
+#        which JS interprets as subtraction: _component_router - link
+# Fix: Replace hyphens with underscores in component variable names
+# =============================================================================
+
+[[cases]]
+name = "hyphenated component name in v-if"
+input = """
+<script setup>
+import { ref } from 'vue'
+const show = ref(true)
+</script>
+
+<template>
+  <router-link v-if="show" to="/">Home</router-link>
+</template>
+"""
+
+[[cases]]
+name = "hyphenated component in v-if v-else chain"
+input = """
+<script setup>
+import { ref } from 'vue'
+const mode = ref('link')
+</script>
+
+<template>
+  <router-link v-if="mode === 'link'" to="/">Link</router-link>
+  <router-view v-else />
+</template>
+"""
+
+# =============================================================================
+# scope_id should not be added to component VNode props (Bug-32)
+# Issue: <MyComponent class="foo" /> got data-v-xxx in its props
+# Fix: skip_scope_id flag for component/slot element props generation
+# =============================================================================
+
+[[cases]]
+name = "component should not receive scope_id in props"
+input = """
+<script setup>
+import MyComponent from './MyComponent.vue'
+</script>
+
+<template>
+  <div class="wrapper">
+    <MyComponent class="child" />
+  </div>
+</template>
+"""

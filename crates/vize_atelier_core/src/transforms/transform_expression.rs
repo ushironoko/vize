@@ -329,9 +329,10 @@ pub fn strip_typescript_from_expression(content: &str) -> std::string::String {
         // Find the semicolon at the end
         if let Some(end) = js_code[expr_start..].rfind(';') {
             let expr = &js_code[expr_start..expr_start + end];
-            // Remove surrounding parentheses if present
+            // Remove surrounding parentheses if they are a matching pair
+            // (the ones we added in the wrapping step)
             let expr = expr.trim();
-            if expr.starts_with('(') && expr.ends_with(')') {
+            if expr.starts_with('(') && expr.ends_with(')') && has_matching_outer_parens(expr) {
                 return expr[1..expr.len() - 1].to_string();
             }
             return expr.to_string();
@@ -340,6 +341,46 @@ pub fn strip_typescript_from_expression(content: &str) -> std::string::String {
 
     // Fallback: return original content
     content.to_string()
+}
+
+/// Check if the outer parentheses of a string are a matching pair.
+/// Returns false if the opening '(' is closed before the final ')'.
+/// e.g. "(isOpen) => foo(x)" → false (the first '(' matches the ')' after isOpen)
+/// e.g. "((isOpen) => foo(x))" → true (the first '(' matches the last ')')
+fn has_matching_outer_parens(s: &str) -> bool {
+    if !s.starts_with('(') || !s.ends_with(')') {
+        return false;
+    }
+    let inner = &s[1..s.len() - 1];
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut prev_char = ' ';
+    for ch in inner.chars() {
+        if in_string {
+            if ch == string_char && prev_char != '\\' {
+                in_string = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        match ch {
+            '\'' | '"' | '`' => {
+                in_string = true;
+                string_char = ch;
+            }
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        prev_char = ch;
+    }
+    depth == 0
 }
 
 /// Prefix identifiers in expression with _ctx. for codegen
@@ -746,15 +787,44 @@ impl<'a, 'ctx> Visit<'_> for IdentifierCollector<'a, 'ctx> {
                     return;
                 }
 
-                if let Some(prefix) = get_identifier_prefix(name, self.ctx) {
-                    if !prefix.is_empty() {
-                        let mut suffix = StdString::with_capacity(2 + prefix.len() + name.len());
-                        suffix.push_str(": ");
-                        suffix.push_str(prefix);
-                        suffix.push_str(name);
-                        self.suffix_rewrites.push((ident.span.end as usize, suffix));
-                        return;
+                let prefix = get_identifier_prefix(name, self.ctx);
+                let is_ref = self.is_ref_binding(name);
+                let needs_unref = self.needs_unref(name);
+
+                // Expand shorthand if identifier needs a prefix, is a ref binding,
+                // or needs _unref() wrapping.
+                // In inline mode, refs have no prefix but need .value, so shorthand
+                // { hasForm } must become { hasForm: hasForm.value } (not { hasForm.value }).
+                // Similarly, SetupLet/SetupMaybeRef bindings need _unref():
+                // { paddingBottom } must become { paddingBottom: _unref(paddingBottom) }
+                if prefix.is_some_and(|p| !p.is_empty()) || is_ref || needs_unref {
+                    let p = prefix.unwrap_or("");
+                    let (value_prefix, value_suffix) = if needs_unref && p.is_empty() {
+                        // Inline mode: wrap with _unref()
+                        ("_unref(", ")")
+                    } else if needs_unref && p == "$setup." {
+                        // Function mode: wrap with _unref($setup.)
+                        ("_unref($setup.", ")")
+                    } else if is_ref {
+                        ("", ".value")
+                    } else {
+                        ("", "")
+                    };
+                    let mut suffix = StdString::with_capacity(
+                        2 + value_prefix.len() + p.len() + name.len() + value_suffix.len(),
+                    );
+                    suffix.push_str(": ");
+                    suffix.push_str(value_prefix);
+                    if !needs_unref {
+                        suffix.push_str(p);
                     }
+                    suffix.push_str(name);
+                    suffix.push_str(value_suffix);
+                    self.suffix_rewrites.push((ident.span.end as usize, suffix));
+                    if needs_unref {
+                        self.used_unref = true;
+                    }
+                    return;
                 }
             }
         }

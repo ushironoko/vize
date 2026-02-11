@@ -18,7 +18,11 @@ const value = ref('')
 
 return (_ctx: any,_cache: any) => {
   return (visible.value)
-      ? (_openBlock(), _createBlock(MyInput, { key: 0, modelValue: value.value, "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((value).value = $event)) }))
+      ? (_openBlock(), _createBlock(MyInput, {
+        key: 0,
+        modelValue: value.value,
+        "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((value).value = $event))
+      }))
       : _createCommentVNode("v-if", true)
 }
 }

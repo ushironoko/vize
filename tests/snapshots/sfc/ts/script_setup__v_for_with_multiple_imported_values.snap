@@ -14,7 +14,16 @@ export default /*@__PURE__*/_defineComponent({
 
 
 return (_ctx: any,_cache: any) => {
-  return (_openBlock(), _createElementBlock("div", null, [ (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_unref(CATEGORIES), (category) => { return (_openBlock(), _createElementBlock("section", { key: category.id }, [ _createElementVNode("h2", null, _toDisplayString(category.name), 1 /* TEXT */), _createElementVNode("ul", null, [ (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_unref(ITEMS), (item) => { return (_openBlock(), _createElementBlock("li", { key: item.id }, _toDisplayString(item.name), 1 /* TEXT */)) }), 128 /* KEYED_FRAGMENT */)) ]) ])) }), 128 /* KEYED_FRAGMENT */)) ]))
+  return (_openBlock(), _createElementBlock("div", null, [ (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_unref(CATEGORIES), (category) => {
+        return (_openBlock(), _createElementBlock("section", { key: category.id }, [
+          _createElementVNode("h2", null, _toDisplayString(category.name), 1 /* TEXT */),
+          _createElementVNode("ul", null, [
+            (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_unref(ITEMS), (item) => {
+              return (_openBlock(), _createElementBlock("li", { key: item.id }, _toDisplayString(item.name), 1 /* TEXT */))
+            }), 128 /* KEYED_FRAGMENT */))
+          ])
+        ]))
+      }), 128 /* KEYED_FRAGMENT */)) ]))
 }
 }
 

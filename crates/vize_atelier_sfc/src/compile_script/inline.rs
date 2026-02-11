@@ -6,7 +6,7 @@
 use crate::script::{transform_destructured_props, ScriptCompileContext};
 use crate::types::SfcError;
 
-use super::import_utils::process_import_for_types;
+use super::function_mode::dedupe_imports;
 use super::macros::{
     is_macro_call_line, is_multiline_macro_start, is_paren_macro_start, is_props_destructure_line,
 };
@@ -14,6 +14,7 @@ use super::props::{
     extract_emit_names_from_type, extract_prop_types_from_type, extract_with_defaults_defaults,
 };
 use super::typescript::transform_typescript_to_js;
+use super::function_mode::contains_top_level_await;
 use super::{ScriptCompileResult, TemplateParts};
 
 /// Compile script setup with inline template (Vue's inline template mode)
@@ -105,6 +106,9 @@ pub fn compile_script_setup_inline(
     let mut in_paren_macro_call = false;
     let mut paren_macro_depth: i32 = 0;
     let mut waiting_for_macro_close = false;
+    // Track remaining parentheses after destructure's function call: `const { x } = func(\n...\n)`
+    let mut in_destructure_call = false;
+    let mut destructure_call_paren_depth: i32 = 0;
     // Track multiline object literals: const xxx = { ... }
     let mut in_object_literal = false;
     let mut object_literal_buffer = String::new();
@@ -128,6 +132,17 @@ pub fn compile_script_setup_inline(
             macro_angle_depth -= line_no_arrow.matches('>').count() as i32;
             if macro_angle_depth <= 0 && (trimmed.contains("()") || trimmed.ends_with(')')) {
                 in_macro_call = false;
+            }
+            continue;
+        }
+
+        // Handle remaining parentheses from destructure's function call
+        // e.g., `const { x } = someFunc(\n  arg1,\n  arg2\n)`
+        if in_destructure_call {
+            destructure_call_paren_depth += trimmed.matches('(').count() as i32;
+            destructure_call_paren_depth -= trimmed.matches(')').count() as i32;
+            if destructure_call_paren_depth <= 0 {
+                in_destructure_call = false;
             }
             continue;
         }
@@ -174,6 +189,20 @@ pub fn compile_script_setup_inline(
                     continue;
                 }
                 in_destructure = false;
+                if !is_props_macro {
+                    // Not a props destructure - add to setup lines
+                    for buf_line in destructure_buffer.lines() {
+                        setup_lines.push(buf_line.to_string());
+                    }
+                }
+                // Check if the destructure's RHS has an unclosed function call:
+                // `} = someFunc(\n  arg1,\n)` — paren opens on this line, closes later
+                let paren_balance = destructure_buffer.matches('(').count() as i32
+                    - destructure_buffer.matches(')').count() as i32;
+                if paren_balance > 0 {
+                    in_destructure_call = true;
+                    destructure_call_paren_depth = paren_balance;
+                }
                 destructure_buffer.clear();
             }
             continue;
@@ -312,6 +341,14 @@ pub fn compile_script_setup_inline(
 
         // Handle imports (only when NOT inside template literal)
         if trimmed.starts_with("import ") {
+            // Handle side-effect imports without semicolons (e.g., import '@/css/reset.scss')
+            // These have no 'from' clause and are always single-line
+            if !trimmed.contains(" from ")
+                && (trimmed.contains('\'') || trimmed.contains('"'))
+            {
+                user_imports.push(format!("{}\n", line));
+                continue;
+            }
             in_import = true;
             import_buffer.clear();
         }
@@ -356,6 +393,30 @@ pub fn compile_script_setup_inline(
             continue;
         }
 
+        // Detect TypeScript `declare` statements (e.g., `declare global { }`, `declare module '...' { }`)
+        // These are TypeScript-only and should be stripped from JS output or placed at module level.
+        if trimmed.starts_with("declare ") {
+            let has_brace = trimmed.contains('{');
+            if has_brace {
+                let depth =
+                    trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+                if depth > 0 {
+                    // Multi-line declare block: reuse the interface brace tracking
+                    in_ts_interface = true;
+                    ts_interface_brace_depth = depth;
+                }
+                if is_ts {
+                    ts_declarations.push(line.to_string());
+                }
+            } else {
+                // Single-line declare (e.g., `declare const x: number`)
+                if is_ts {
+                    ts_declarations.push(line.to_string());
+                }
+            }
+            continue;
+        }
+
         // Handle TypeScript type declarations (collect for TS output, skip for JS)
         if in_ts_type {
             if is_ts {
@@ -392,7 +453,20 @@ pub fn compile_script_setup_inline(
         }
 
         // Detect TypeScript type alias start
-        if trimmed.starts_with("type ") || trimmed.starts_with("export type ") {
+        // Guard: ensure the word after `type ` is a valid identifier start (letter, _, {),
+        // not an operator like `===`. This avoids misdetecting `type === 'foo'` as a TS type.
+        // `{` is also valid: `export type { Foo }` (re-export syntax).
+        if (trimmed.starts_with("type ")
+            && trimmed[5..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '{'))
+            || (trimmed.starts_with("export type ")
+                && trimmed[12..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '{'))
+        {
             // Check if it's a single-line type
             let has_equals = trimmed.contains('=');
             if has_equals {
@@ -448,13 +522,10 @@ pub fn compile_script_setup_inline(
         output.extend_from_slice(template.hoisted.as_bytes());
     }
 
-    // User imports (after hoisted consts)
-    for import in &user_imports {
-        if let Some(processed) = process_import_for_types(import) {
-            if !processed.is_empty() {
-                output.extend_from_slice(processed.as_bytes());
-            }
-        }
+    // User imports (after hoisted consts) - deduplicate to avoid "already declared" errors
+    let deduped_imports = dedupe_imports(&user_imports);
+    for import in &deduped_imports {
+        output.extend_from_slice(import.as_bytes());
     }
 
     // Output TypeScript declarations (interfaces, types) after user imports, before export default
@@ -855,12 +926,17 @@ pub fn compile_script_setup_inline(
         "__props"
     };
 
+    // Detect top-level await to generate async setup()
+    let setup_code_for_await_check: String = setup_lines.join("\n");
+    let is_async = contains_top_level_await(&setup_code_for_await_check, source_is_ts);
+
+    let async_prefix = if is_async { "  async setup(" } else { "  setup(" };
     if setup_args.is_empty() {
-        output.extend_from_slice(b"  setup(");
+        output.extend_from_slice(async_prefix.as_bytes());
         output.extend_from_slice(props_param.as_bytes());
         output.extend_from_slice(b") {\n");
     } else {
-        output.extend_from_slice(b"  setup(");
+        output.extend_from_slice(async_prefix.as_bytes());
         output.extend_from_slice(props_param.as_bytes());
         output.extend_from_slice(b", { ");
         output.extend_from_slice(setup_args.join(", ").as_bytes());
@@ -1082,4 +1158,236 @@ fn resolve_single_type_ref(
         return Some(body.clone());
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to compile a minimal script setup and return the output code
+    fn compile_setup(script_content: &str) -> String {
+        let empty_template = TemplateParts {
+            imports: "",
+            hoisted: "",
+            preamble: "",
+            render_body: "null",
+        };
+        let result = compile_script_setup_inline(
+            script_content,
+            "TestComponent",
+            false, // is_ts = false (JS output, strip TS)
+            true,  // source_is_ts = true
+            empty_template,
+            None,
+        )
+        .expect("compilation should succeed");
+        result.code
+    }
+
+    /// Helper to compile with is_ts=true (TypeScript output, like the actual build)
+    fn compile_setup_ts(script_content: &str) -> String {
+        let empty_template = TemplateParts {
+            imports: "",
+            hoisted: "",
+            preamble: "",
+            render_body: "null",
+        };
+        let result = compile_script_setup_inline(
+            script_content,
+            "TestComponent",
+            true,  // is_ts = true (TS output)
+            true,  // source_is_ts = true
+            empty_template,
+            None,
+        )
+        .expect("compilation should succeed");
+        result.code
+    }
+
+    // --- Bug 1: `declare global {}` should be stripped from setup body ---
+    // In TypeScript output mode, `declare global {}` should either be at module level
+    // or stripped entirely — never inside the setup function body.
+
+    #[test]
+    fn test_declare_global_not_in_setup_body_ts() {
+        let content = r#"
+import { ref } from 'vue'
+
+const handleClick = () => {
+  console.log('click')
+}
+
+declare global {
+  interface Window {
+    EyeDropper: any
+  }
+}
+
+const x = ref(0)
+"#;
+        let output = compile_setup_ts(content);
+        // Find the setup function body
+        let setup_start = output.find("setup(").expect("should have setup function");
+        let setup_body = &output[setup_start..];
+        assert!(
+            !setup_body.contains("declare global"),
+            "declare global should NOT be inside setup function body. Got:\n{}",
+            output
+        );
+    }
+
+    // --- Bug: `export type { X }` re-export should be stripped from setup body ---
+
+    #[test]
+    fn test_export_type_reexport_stripped() {
+        let content = r#"
+import { ref } from 'vue'
+import type { FilterType } from './types'
+
+export type { FilterType }
+
+const x = ref(0)
+"#;
+        let output = compile_setup(content);
+        // Find setup body
+        let setup_start = output.find("setup(").expect("should have setup");
+        let setup_body = &output[setup_start..];
+        assert!(
+            !setup_body.contains("export type"),
+            "export type re-export should not be inside setup body. Got:\n{}",
+            output
+        );
+    }
+
+    // --- Bug 2: `type` as variable name at start of continuation line ---
+    // When `type` is at the start of a line (continuation of previous assignment),
+    // it should NOT be treated as a TypeScript type declaration.
+
+    #[test]
+    fn test_type_as_variable_at_line_start() {
+        // This reproduces the IconsPanel bug:
+        // const identifier =
+        //   type === 'material-symbols' ? 'name' : 'ligature'
+        let content = r#"
+import { ref } from 'vue'
+
+const type = ref('material-symbols')
+const identifier =
+  type === 'material-symbols' ? 'name' : 'ligature'
+"#;
+        let output = compile_setup(content);
+        // The line `type === 'material-symbols'` should NOT be stripped
+        assert!(
+            output.contains("type ==="),
+            "`type ===` continuation line should be preserved. Got:\n{}",
+            output
+        );
+    }
+
+    // --- Bug 3: destructure with multi-line function call args ---
+
+    #[test]
+    fn test_destructure_with_multiline_function_call() {
+        let content = r#"
+import { ref, toRef } from 'vue'
+import { useSomething } from './useSomething'
+
+const fileInputRef = ref()
+
+const {
+  handleSelect,
+  handleChange,
+} = useSomething(
+  fileInputRef,
+  {
+    onError: (e) => console.log(e),
+    onSuccess: () => console.log('ok'),
+  },
+  toRef(() => 'test'),
+)
+
+const other = ref(1)
+"#;
+        let output = compile_setup(content);
+        // The function call args should NOT leak into the output as bare statements
+        assert!(
+            !output.contains("fileInputRef,"),
+            "Function call args should not leak as bare statements. Got:\n{}",
+            output
+        );
+        // The `other` variable should still be present
+        assert!(
+            output.contains("const other = ref(1)"),
+            "Code after destructure should be present. Got:\n{}",
+            output
+        );
+    }
+
+    // --- Bug: `let` variable in setup should be preserved ---
+    // `let switchCounter = 0` is a plain variable declaration that should
+    // be included in the setup body, not stripped.
+
+    #[test]
+    fn test_let_variable_preserved_in_setup() {
+        let content = r#"
+import { computed } from 'vue'
+let switchCounter = 0
+
+const switchName = `base-switch-${switchCounter++}`
+"#;
+        let output = compile_setup_ts(content);
+        assert!(
+            output.contains("let switchCounter = 0"),
+            "let variable should be preserved in setup body. Got:\n{}",
+            output
+        );
+        assert!(
+            output.contains("switchCounter++"),
+            "switchCounter usage should be preserved. Got:\n{}",
+            output
+        );
+        // `const switchName` uses a template literal with expressions (${...}),
+        // so it must NOT be hoisted outside setup — it depends on `switchCounter` in setup scope.
+        let setup_start = output.find("setup(").expect("should have setup");
+        let before_setup = &output[..setup_start];
+        assert!(
+            !before_setup.contains("switchName"),
+            "const switchName should NOT be hoisted before setup (it has expressions in template literal). Got:\n{}",
+            output
+        );
+    }
+
+    // --- Bug: side-effect import without semicolons breaks setup body ---
+    // `import '@/css/reset.scss'` (no `from`, no `;`) caused the import state machine
+    // to never close, consuming all subsequent lines as part of the import.
+
+    #[test]
+    fn test_side_effect_import_without_semicolons() {
+        let content = r#"
+import { watch } from 'vue'
+import '@/css/oldReset.scss'
+
+const { dialogRef } = provideDialog()
+
+watch(
+  dialogRef,
+  (val) => {
+    console.log(val)
+  },
+  { immediate: true },
+)
+"#;
+        let output = compile_setup_ts(content);
+        // Setup body should contain the composable call and watch
+        assert!(
+            output.contains("const { dialogRef } = provideDialog()"),
+            "provideDialog() call should be in setup body. Got:\n{}",
+            output
+        );
+        assert!(
+            output.contains("watch("),
+            "watch() call should be in setup body. Got:\n{}",
+            output
+        );
+    }
 }

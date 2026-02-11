@@ -5,9 +5,11 @@ use crate::ast::*;
 use super::children::generate_children;
 use super::context::CodegenContext;
 use super::expression::generate_expression;
-use super::helpers::{camelize, capitalize_first, escape_js_string, is_valid_js_identifier};
+use super::helpers::{
+    camelize, capitalize_first, escape_js_string, is_builtin_component, is_valid_js_identifier,
+};
 use super::node::generate_node;
-use super::props::generate_directive_prop_with_static;
+use super::props::{generate_directive_prop_with_static, is_supported_directive};
 use vize_carton::FxHashSet;
 
 /// Generate if node
@@ -114,6 +116,9 @@ pub fn generate_if_branch_component(
     branch: &IfBranchNode<'_>,
     branch_index: usize,
 ) {
+    // Components: skip scope_id in props — Vue runtime applies it via __scopeId
+    let prev_skip_scope_id = ctx.skip_scope_id;
+    ctx.skip_scope_id = true;
     ctx.use_helper(RuntimeHelper::CreateBlock);
     ctx.push("(");
     ctx.push(ctx.helper(RuntimeHelper::OpenBlock));
@@ -121,18 +126,56 @@ pub fn generate_if_branch_component(
     ctx.push(ctx.helper(RuntimeHelper::CreateBlock));
     ctx.push("(");
     // Generate component name
-    // In inline mode, components are directly in scope (imported at module level)
-    // In function mode, use $setup.ComponentName to access setup bindings
-    if ctx.is_component_in_bindings(&el.tag) {
+    // Handle dynamic component (<component :is="...">)
+    if el.tag == "component" {
+        let dynamic_is = el.props.iter().find_map(|p| {
+            if let PropNode::Directive(dir) = p {
+                if dir.name == "bind" {
+                    if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                        if arg.content == "is" {
+                            return dir.exp.as_ref();
+                        }
+                    }
+                }
+            }
+            None
+        });
+        let static_is = el.props.iter().find_map(|p| {
+            if let PropNode::Attribute(attr) = p {
+                if attr.name == "is" {
+                    return attr.value.as_ref().map(|v| v.content.as_str());
+                }
+            }
+            None
+        });
+        if let Some(is_exp) = dynamic_is {
+            ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+            ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+            ctx.push("(");
+            generate_expression(ctx, is_exp);
+            ctx.push(")");
+        } else if let Some(name) = static_is {
+            ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+            ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+            ctx.push("(\"");
+            ctx.push(name);
+            ctx.push("\")");
+        } else {
+            ctx.push("_component_component");
+        }
+    } else if let Some(builtin) = is_builtin_component(&el.tag) {
+        ctx.use_helper(builtin);
+        ctx.push(ctx.helper(builtin));
+    } else if ctx.is_component_in_bindings(&el.tag) {
+        // In inline mode, components are directly in scope (imported at module level)
+        // In function mode, use $setup.ComponentName to access setup bindings
         if !ctx.options.inline {
             ctx.push("$setup.");
         }
         ctx.push(el.tag.as_str());
     } else {
-        let mut component_name = String::with_capacity(11 + el.tag.len());
-        component_name.push_str("_component_");
-        component_name.push_str(el.tag.as_str());
-        ctx.push(&component_name);
+        ctx.push("_component_");
+        ctx.push(&el.tag.replace('-', "_"));
     }
 
     // Extract static class/style for merging with dynamic bindings
@@ -191,6 +234,7 @@ pub fn generate_if_branch_component(
         );
     }
 
+    ctx.skip_scope_id = prev_skip_scope_id;
     ctx.push("))")
 }
 
@@ -415,10 +459,21 @@ fn generate_if_branch_props_object(
 ) {
     // Check if there are other props besides key (skip excluded ones)
     let has_other_props = el.props.iter().any(|p| {
+        // Skip unsupported directives (v-slot, v-tooltip, custom directives, etc.)
+        if let PropNode::Directive(dir) = p {
+            if !is_supported_directive(dir) {
+                return false;
+            }
+        }
         !should_skip_prop_for_if(p, has_dynamic_class, has_dynamic_style)
             && !is_vbind_spread_prop(p)
     });
-    let scope_id = ctx.options.scope_id.clone();
+    // For component elements, skip_scope_id suppresses the attribute.
+    let scope_id = if ctx.skip_scope_id {
+        None
+    } else {
+        ctx.options.scope_id.clone()
+    };
     let has_scope = scope_id.is_some();
 
     if !has_other_props && !has_scope {
@@ -439,6 +494,12 @@ fn generate_if_branch_props_object(
     let mut seen_events: FxHashSet<String> = FxHashSet::default();
 
     for prop in el.props.iter() {
+        // Skip unsupported directives (v-slot, v-tooltip, custom directives, etc.)
+        if let PropNode::Directive(dir) = prop {
+            if !is_supported_directive(dir) {
+                continue;
+            }
+        }
         if should_skip_prop_for_if(prop, has_dynamic_class, has_dynamic_style) {
             continue;
         }

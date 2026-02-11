@@ -9,7 +9,7 @@ import { openBlock as _openBlock, createElementBlock as _createElementBlock, toD
 export default /*@__PURE__*/_defineComponent({
   __name: 'test',
   props: {
-    config: { type: Object as PropType<{ state: string disabled: boolean onSuccess?: () => void>, required: true }
+    config: { type: Object as PropType<{ state: string disabled: boolean onSuccess?: () => void }>, required: true }
   },
   setup(__props) {
 

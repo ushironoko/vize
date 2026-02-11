@@ -9,7 +9,9 @@ import { openBlock as _openBlock, createElementBlock as _createElementBlock } fr
 export default /*@__PURE__*/_defineComponent({
   __name: 'test',
   props: {
-    onSuccess: { type: Object as PropType<() => void onError: (error: Error) => void transform: (value: string) => number>, required: true }
+    onSuccess: { type: Function as PropType<() => void>, required: true },
+    onError: { type: Object as PropType<(error: Error) => void>, required: true },
+    transform: { type: Object as PropType<(value: string) => number>, required: true }
   },
   setup(__props) {
 

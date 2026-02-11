@@ -99,6 +99,18 @@ pub fn has_slot_children(el: &ElementNode<'_>) -> bool {
         }
     }
 
+    // If children consist only of whitespace text and/or comments, skip slot generation.
+    // This matches Vue's official compiler behavior where `<Comp> </Comp>` does not
+    // produce a default slot (important for <router-view>, <transition>, etc.).
+    let has_meaningful_child = el.children.iter().any(|child| match child {
+        TemplateChildNode::Text(t) => !t.content.trim().is_empty(),
+        TemplateChildNode::Comment(_) => false,
+        _ => true,
+    });
+    if !has_meaningful_child {
+        return false;
+    }
+
     // Check for any children (default slot) or template slots
     true
 }

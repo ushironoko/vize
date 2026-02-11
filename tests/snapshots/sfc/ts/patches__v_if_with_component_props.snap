@@ -17,7 +17,10 @@ const compiler = {}
 
 return (_ctx: any,_cache: any) => {
   return (show)
-      ? (_openBlock(), _createBlock(PatinaPlayground, { key: 0, compiler: _unref(compiler) }))
+      ? (_openBlock(), _createBlock(PatinaPlayground, {
+        key: 0,
+        compiler: _unref(compiler)
+      }))
       : _createCommentVNode("v-if", true)
 }
 }
