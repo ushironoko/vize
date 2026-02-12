@@ -42,7 +42,7 @@ pub fn has_v_once(el: &ElementNode<'_>) -> bool {
 pub fn has_vshow_directive(el: &ElementNode<'_>) -> bool {
     el.props.iter().any(|prop| {
         if let PropNode::Directive(dir) = prop {
-            dir.name.as_str() == "show"
+            dir.name.as_str() == "show" && dir.exp.is_some()
         } else {
             false
         }
@@ -1086,6 +1086,16 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             }
         }
         ElementType::Component => {
+            // Support v-show on non-block components:
+            // _withDirectives(_createVNode(...), [[_vShow, expr]])
+            let has_vshow = has_vshow_directive(el);
+            if has_vshow {
+                ctx.use_helper(RuntimeHelper::WithDirectives);
+                ctx.use_helper(RuntimeHelper::VShow);
+                ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
+                ctx.push("(");
+            }
+
             ctx.push_pure();
             let helper = ctx.helper(RuntimeHelper::CreateVNode);
             ctx.use_helper(RuntimeHelper::CreateVNode);
@@ -1175,6 +1185,11 @@ pub fn generate_element(ctx: &mut CodegenContext, el: &ElementNode<'_>) {
             }
 
             ctx.push(")");
+
+            // Close withDirectives for v-show on component
+            if has_vshow {
+                generate_vshow_closing(ctx, el);
+            }
         }
         ElementType::Slot => {
             let helper = ctx.helper(RuntimeHelper::RenderSlot);

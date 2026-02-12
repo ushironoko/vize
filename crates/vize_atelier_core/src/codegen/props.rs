@@ -853,10 +853,12 @@ pub fn generate_directive_prop_with_static(
                 }
             }
             if let Some(exp) = &dir.exp {
-                if is_class && !ctx.skip_normalize {
-                    ctx.use_helper(RuntimeHelper::NormalizeClass);
-                    ctx.push("_normalizeClass(");
-                    // Merge static class if present
+                if is_class {
+                    if !ctx.skip_normalize {
+                        ctx.use_helper(RuntimeHelper::NormalizeClass);
+                        ctx.push("_normalizeClass(");
+                    }
+                    // Merge static class if present (needed even inside mergeProps)
                     if let Some(static_val) = static_class {
                         ctx.push("[\"");
                         ctx.push(static_val);
@@ -866,11 +868,15 @@ pub fn generate_directive_prop_with_static(
                     } else {
                         generate_expression(ctx, exp);
                     }
-                    ctx.push(")");
-                } else if is_style && !ctx.skip_normalize {
-                    ctx.use_helper(RuntimeHelper::NormalizeStyle);
-                    ctx.push("_normalizeStyle(");
-                    // Merge static style if present
+                    if !ctx.skip_normalize {
+                        ctx.push(")");
+                    }
+                } else if is_style {
+                    if !ctx.skip_normalize {
+                        ctx.use_helper(RuntimeHelper::NormalizeStyle);
+                        ctx.push("_normalizeStyle(");
+                    }
+                    // Merge static style if present (needed even inside mergeProps)
                     if let Some(static_val) = static_style {
                         ctx.push("[{");
                         // Parse static style and convert to object
@@ -899,7 +905,9 @@ pub fn generate_directive_prop_with_static(
                     } else {
                         generate_expression(ctx, exp);
                     }
-                    ctx.push(")");
+                    if !ctx.skip_normalize {
+                        ctx.push(")");
+                    }
                 } else {
                     generate_expression(ctx, exp);
                 }

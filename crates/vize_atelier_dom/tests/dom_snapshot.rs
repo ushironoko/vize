@@ -109,6 +109,20 @@ mod v_bind {
     fn dynamic_class() {
         insta::assert_snapshot!(get_compiled(r#"<div :class="cls"></div>"#));
     }
+
+    #[test]
+    fn merge_static_and_dynamic_class_with_vbind_object() {
+        insta::assert_snapshot!(get_compiled(
+            r#"<input v-bind="attrs" class="base" :class="stateClass" />"#
+        ));
+    }
+
+    #[test]
+    fn merge_static_and_dynamic_style_with_vbind_object() {
+        insta::assert_snapshot!(get_compiled(
+            r#"<input v-bind="attrs" style="color: red" :style="dynamicStyle" />"#
+        ));
+    }
 }
 
 // =============================================================================
@@ -147,6 +161,16 @@ mod v_show {
     #[test]
     fn simple_v_show() {
         insta::assert_snapshot!(get_compiled(r#"<div v-show="visible">content</div>"#));
+    }
+
+    #[test]
+    fn v_show_on_child_component() {
+        insta::assert_snapshot!(get_compiled(r#"<div><MyComponent v-show="visible" /></div>"#));
+    }
+
+    #[test]
+    fn v_show_on_root_component() {
+        insta::assert_snapshot!(get_compiled(r#"<MyComponent v-show="visible" />"#));
     }
 }
 
