@@ -2,7 +2,7 @@
 source: crates/vize_atelier_sfc/src/snapshot_tests.rs
 expression: js_output
 ---
-import { Transition as _Transition, openBlock as _openBlock, createBlock as _createBlock, createElementVNode as _createElementVNode, createCommentVNode as _createCommentVNode } from "vue"
+import { Transition as _Transition, openBlock as _openBlock, createBlock as _createBlock, createElementVNode as _createElementVNode, createCommentVNode as _createCommentVNode, withCtx as _withCtx } from "vue"
 
 
 const _hoisted_1 = /*#__PURE__*/ _createElementVNode("div", null, "content")
@@ -19,6 +19,11 @@ return (_ctx, _cache) => {
       ? (_openBlock(), _createBlock(_Transition, {
         key: 0,
         name: "fade"
+      }, {
+        default: _withCtx(() => [
+          _hoisted_1
+        ]),
+        _: 1 /* STABLE */
       }))
       : _createCommentVNode("v-if", true)
 }

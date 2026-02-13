@@ -426,10 +426,13 @@ pub fn compile_script_setup_inline(
                 }
             }
             // Track balanced brackets for complex types like: type X = { a: string } | { b: number }
+            // Strip `=>` before counting angle brackets to avoid misinterpreting arrow functions
+            // e.g., `onClick: () => void` — the `>` in `=>` is NOT a closing angle bracket
+            let line_no_arrow = trimmed.replace("=>", "__");
             ts_type_depth += trimmed.matches('{').count() as i32;
             ts_type_depth -= trimmed.matches('}').count() as i32;
-            ts_type_depth += trimmed.matches('<').count() as i32;
-            ts_type_depth -= trimmed.matches('>').count() as i32;
+            ts_type_depth += line_no_arrow.matches('<').count() as i32;
+            ts_type_depth -= line_no_arrow.matches('>').count() as i32;
             ts_type_depth += trimmed.matches('(').count() as i32;
             ts_type_depth -= trimmed.matches(')').count() as i32;
             // Type declaration ends when balanced and NOT a continuation line
@@ -470,10 +473,12 @@ pub fn compile_script_setup_inline(
             // Check if it's a single-line type
             let has_equals = trimmed.contains('=');
             if has_equals {
+                // Strip `=>` before counting angle brackets (arrow functions are not type delimiters)
+                let line_no_arrow = trimmed.replace("=>", "__");
                 ts_type_depth = trimmed.matches('{').count() as i32
                     - trimmed.matches('}').count() as i32
-                    + trimmed.matches('<').count() as i32
-                    - trimmed.matches('>').count() as i32
+                    + line_no_arrow.matches('<').count() as i32
+                    - line_no_arrow.matches('>').count() as i32
                     + trimmed.matches('(').count() as i32
                     - trimmed.matches(')').count() as i32;
                 // Check if complete on one line
@@ -1387,6 +1392,88 @@ watch(
         assert!(
             output.contains("watch("),
             "watch() call should be in setup body. Got:\n{}",
+            output
+        );
+    }
+
+    // --- Bug: `export type` with arrow function member causes premature type end ---
+    // The `>` in `() => void` was counted as a closing angle bracket,
+    // making ts_type_depth go to 0 prematurely. The closing `}` of the type
+    // then leaked into setup_lines, breaking the component output.
+
+    #[test]
+    fn test_export_type_with_arrow_function_member() {
+        let content = r#"
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+export type MenuSelectorOption = {
+  label: string
+  onClick: () => void
+}
+
+const route = useRoute()
+const heading = computed(() => route.name)
+"#;
+        let output = compile_setup_ts(content);
+        eprintln!("=== export type with arrow fn output ===\n{}", output);
+
+        // The type should be preserved at module level (before export default)
+        assert!(
+            output.contains("export type MenuSelectorOption"),
+            "export type should be at module level. Got:\n{}",
+            output
+        );
+
+        // The type's closing `}` must NOT leak into setup body
+        // Check that setup body contains `const route = useRoute()`
+        let setup_start = output.find("setup(").expect("should have setup");
+        let setup_body = &output[setup_start..];
+        assert!(
+            setup_body.contains("const route = useRoute()"),
+            "const route should be inside setup body. Got:\n{}",
+            output
+        );
+
+        // The closing `}` of the type should be part of the type declaration, not setup
+        assert!(
+            output.contains("onClick: () => void\n}"),
+            "Type should include closing brace after arrow function member. Got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_type_with_multiple_arrow_functions() {
+        let content = r#"
+type Callbacks = {
+  onSuccess: (data: string) => void
+  onError: (err: Error) => Promise<void>
+  transform: <T>(input: T) => T
+}
+
+const x = 1
+"#;
+        let output = compile_setup_ts(content);
+
+        // Type should be at module level with complete closing brace
+        assert!(
+            output.contains("type Callbacks"),
+            "type should be at module level. Got:\n{}",
+            output
+        );
+        // Closing `}` must be present (not lost due to arrow `=>` in members)
+        assert!(
+            output.contains("transform: <T>(input: T) => T\n}"),
+            "Type should include closing brace after complex arrow function members. Got:\n{}",
+            output
+        );
+
+        // `const x = 1` is a LiteralConst so it gets hoisted to module level,
+        // but must NOT be lost
+        assert!(
+            output.contains("const x = 1"),
+            "const x should be in the output. Got:\n{}",
             output
         );
     }

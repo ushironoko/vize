@@ -293,10 +293,13 @@ pub fn compile_script_setup(
         // Handle TypeScript type declarations (skip them)
         if in_ts_type {
             // Track balanced brackets for complex types like: type X = { a: string } | { b: number }
+            // Strip `=>` before counting angle brackets to avoid misinterpreting arrow functions
+            // e.g., `onClick: () => void` — the `>` in `=>` is NOT a closing angle bracket
+            let line_no_arrow = trimmed.replace("=>", "__");
             ts_type_depth += trimmed.matches('{').count() as i32;
             ts_type_depth -= trimmed.matches('}').count() as i32;
-            ts_type_depth += trimmed.matches('<').count() as i32;
-            ts_type_depth -= trimmed.matches('>').count() as i32;
+            ts_type_depth += line_no_arrow.matches('<').count() as i32;
+            ts_type_depth -= line_no_arrow.matches('>').count() as i32;
             ts_type_depth += trimmed.matches('(').count() as i32;
             ts_type_depth -= trimmed.matches(')').count() as i32;
             // Type declaration ends when balanced and NOT a continuation line
@@ -322,10 +325,12 @@ pub fn compile_script_setup(
             // Check if it's a single-line type
             let has_equals = trimmed.contains('=');
             if has_equals {
+                // Strip `=>` before counting angle brackets (arrow functions are not type delimiters)
+                let line_no_arrow = trimmed.replace("=>", "__");
                 ts_type_depth = trimmed.matches('{').count() as i32
                     - trimmed.matches('}').count() as i32
-                    + trimmed.matches('<').count() as i32
-                    - trimmed.matches('>').count() as i32
+                    + line_no_arrow.matches('<').count() as i32
+                    - line_no_arrow.matches('>').count() as i32
                     + trimmed.matches('(').count() as i32
                     - trimmed.matches(')').count() as i32;
                 if ts_type_depth <= 0

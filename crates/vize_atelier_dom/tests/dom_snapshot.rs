@@ -76,6 +76,20 @@ mod v_if {
             r#"<div v-if="ok">yes</div><div v-else>no</div>"#
         ));
     }
+
+    #[test]
+    fn v_if_component_with_slot() {
+        insta::assert_snapshot!(get_compiled(
+            r#"<MyComponent v-if="ok"><span>slot content</span></MyComponent>"#
+        ));
+    }
+
+    #[test]
+    fn v_if_component_with_named_slot() {
+        insta::assert_snapshot!(get_compiled(
+            r#"<MyComponent v-if="ok"><template #header><h1>title</h1></template></MyComponent>"#
+        ));
+    }
 }
 
 // =============================================================================

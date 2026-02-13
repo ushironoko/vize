@@ -349,6 +349,9 @@ fn apply_scoped_css<'a>(bump: &'a Bump, css: &str, scope_id: &str) -> &'a str {
     let mut last_selector_end = 0usize;
     let mut in_at_rule = false;
     let mut at_rule_depth = 0u32;
+    let mut pending_keyframes = false;
+    let mut keyframes_brace_depth: Option<u32> = None;
+    let mut saved_at_rule_depth: Option<u32> = None;
 
     while let Some((i, c)) = chars.next() {
         if in_comment {
@@ -393,13 +396,29 @@ fn apply_scoped_css<'a>(bump: &'a Bump, css: &str, scope_id: &str) -> &'a str {
             }
             '@' => {
                 in_at_rule = true;
+                // Look ahead to detect @keyframes (including vendor prefixes)
+                let remaining = &css[i + 1..];
+                pending_keyframes = remaining.starts_with("keyframes")
+                    || remaining.starts_with("-webkit-keyframes")
+                    || remaining.starts_with("-moz-keyframes")
+                    || remaining.starts_with("-o-keyframes");
                 output.push(b'@');
             }
             '{' => {
                 brace_depth += 1;
                 if in_at_rule {
-                    at_rule_depth = brace_depth;
                     in_at_rule = false;
+                    if pending_keyframes {
+                        saved_at_rule_depth = Some(at_rule_depth);
+                        keyframes_brace_depth = Some(brace_depth);
+                        pending_keyframes = false;
+                    }
+                    at_rule_depth = brace_depth;
+                    output.push(b'{');
+                } else if keyframes_brace_depth.is_some_and(|d| brace_depth > d) {
+                    // Inside @keyframes: stops (from/to/0%/100%) are not selectors
+                    in_selector = false;
+                    last_selector_end = i + 1;
                     output.push(b'{');
                 } else if in_selector && (brace_depth == 1 || brace_depth > at_rule_depth) {
                     // End of selector, apply scope
@@ -417,6 +436,13 @@ fn apply_scoped_css<'a>(bump: &'a Bump, css: &str, scope_id: &str) -> &'a str {
             '}' => {
                 brace_depth = brace_depth.saturating_sub(1);
                 output.push(b'}');
+                // Check @keyframes block end — restore parent at_rule_depth
+                if keyframes_brace_depth.is_some_and(|d| brace_depth < d) {
+                    keyframes_brace_depth = None;
+                    if let Some(saved) = saved_at_rule_depth.take() {
+                        at_rule_depth = saved;
+                    }
+                }
                 if brace_depth == 0 || (at_rule_depth > 0 && brace_depth == at_rule_depth - 1) {
                     in_selector = true;
                     last_selector_end = i + 1;

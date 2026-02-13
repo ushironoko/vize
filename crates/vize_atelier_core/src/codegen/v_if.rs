@@ -4,12 +4,14 @@ use crate::ast::*;
 
 use super::children::generate_children;
 use super::context::CodegenContext;
+use super::element::is_whitespace_or_comment;
 use super::expression::generate_expression;
 use super::helpers::{
     camelize, capitalize_first, escape_js_string, is_builtin_component, is_valid_js_identifier,
 };
 use super::node::generate_node;
 use super::props::{generate_directive_prop_with_static, is_supported_directive};
+use super::slots::{generate_slots, has_slot_children};
 use vize_carton::FxHashSet;
 
 /// Generate if node
@@ -235,6 +237,23 @@ pub fn generate_if_branch_component(
     }
 
     ctx.skip_scope_id = prev_skip_scope_id;
+
+    // Generate children/slots for v-if branch component (same pattern as element.rs)
+    if has_slot_children(el) {
+        ctx.push(", ");
+        generate_slots(ctx, el);
+    } else if el.children.iter().any(|c| !is_whitespace_or_comment(c)) {
+        // Teleport/KeepAlive: pass children as array, not slot object
+        ctx.push(", [");
+        for (i, child) in el.children.iter().enumerate() {
+            if i > 0 {
+                ctx.push(",");
+            }
+            generate_node(ctx, child);
+        }
+        ctx.push("]");
+    }
+
     ctx.push("))")
 }
 

@@ -3,6 +3,7 @@ import { transformWithOxc } from "vite";
 import path from "node:path";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { glob } from "tinyglobby";
 import type { VizeConfig, ConfigEnv, UserConfigExport, LoadConfigOptions } from "./types.js";
 import type { VizeOptions, CompiledModule } from "./types.js";
@@ -156,6 +157,15 @@ function toBrowserImportPrefix(replacement: string): string {
   return normalized;
 }
 
+function normalizeFsIdForBuild(id: string): string {
+  const [pathPart, queryPart] = id.split("?");
+  if (!pathPart.startsWith("/@fs/")) {
+    return id;
+  }
+  const normalizedPath = pathPart.slice(4); // strip '/@fs'
+  return queryPart ? `${normalizedPath}?${queryPart}` : normalizedPath;
+}
+
 function rewriteDynamicTemplateImports(code: string, aliasRules: DynamicImportAliasRule[]): string {
   let rewritten = code;
 
@@ -171,6 +181,51 @@ function rewriteDynamicTemplateImports(code: string, aliasRules: DynamicImportAl
 
   return rewritten;
 }
+
+/**
+ * Rewrite static asset URLs in compiled template output.
+ *
+ * Transforms property values like `src: "@/assets/logo.svg"` into import
+ * statements hoisted to the top of the module, so Vite's module resolution
+ * pipeline handles alias expansion and asset hashing in both dev and build.
+ */
+function rewriteStaticAssetUrls(
+  code: string,
+  aliasRules: DynamicImportAliasRule[],
+): string {
+  let rewritten = code;
+  const imports: string[] = [];
+  let counter = 0;
+
+  for (const rule of aliasRules) {
+    // Match patterns:
+    //   src: "@/..."  or  "src": "@/..."  (double quotes)
+    //   src: '@/...'  or  "src": '@/...'  (single quotes)
+    const pattern = new RegExp(
+      `("?src"?\\s*:\\s*)(?:"(${escapeRegExp(rule.fromPrefix)}[^"]+)"|'(${escapeRegExp(rule.fromPrefix)}[^']+)')`,
+      "g",
+    );
+    rewritten = rewritten.replace(
+      pattern,
+      (_match: string, prefix: string, dqPath?: string, sqPath?: string) => {
+        const fullPath = dqPath || sqPath;
+        const varName = `__vize_static_${counter++}`;
+        imports.push(`import ${varName} from ${JSON.stringify(fullPath)};`);
+        return `${prefix}${varName}`;
+      },
+    );
+  }
+
+  if (imports.length > 0) {
+    rewritten = imports.join("\n") + "\n" + rewritten;
+  }
+  return rewritten;
+}
+
+// Test-only export for snapshot coverage.
+export const __internal = {
+  rewriteStaticAssetUrls,
+};
 
 function createLogger(debug: boolean) {
   return {
@@ -399,6 +454,8 @@ export function vize(options: VizeOptions = {}): Plugin[] {
     },
 
     async resolveId(id: string, importer?: string) {
+      const isBuild = server === null;
+
       // Skip all virtual module IDs
       if (id.startsWith("\0")) {
         // This is one of our .vue.ts virtual modules — pass through
@@ -424,7 +481,8 @@ export function vize(options: VizeOptions = {}): Plugin[] {
           const [pathPart, queryPart] = cleanPath.split("?");
           const querySuffix = queryPart ? `?${queryPart}` : "";
           logger.log(`resolveId: redirecting \0-prefixed non-vue ID to ${pathPart}${querySuffix}`);
-          return pathPart + querySuffix;
+          const redirected = pathPart + querySuffix;
+          return isBuild ? normalizeFsIdForBuild(redirected) : redirected;
         }
         return null;
       }
@@ -436,12 +494,20 @@ export function vize(options: VizeOptions = {}): Plugin[] {
           realPath = realPath.slice(0, -3);
         }
         logger.log(`resolveId: redirecting stale vize: ID to ${realPath}`);
-        return this.resolve(realPath, importer, { skipSelf: true });
+        const resolved = await this.resolve(realPath, importer, { skipSelf: true });
+        if (resolved && isBuild && resolved.id.startsWith("/@fs/")) {
+          return { ...resolved, id: normalizeFsIdForBuild(resolved.id) };
+        }
+        return resolved;
       }
 
       // Handle virtual CSS module for production extraction
       if (id === VIRTUAL_CSS_MODULE) {
         return RESOLVED_CSS_MODULE;
+      }
+
+      if (isBuild && id.startsWith("/@fs/")) {
+        return normalizeFsIdForBuild(id);
       }
 
       if (id.includes("?vue&type=style")) {
@@ -474,6 +540,9 @@ export function vize(options: VizeOptions = {}): Plugin[] {
             const resolved = await this.resolve(id, cleanImporter, { skipSelf: true });
             if (resolved) {
               logger.log(`resolveId: resolved ${id} to ${resolved.id} via Vite resolver`);
+              if (isBuild && resolved.id.startsWith("/@fs/")) {
+                return { ...resolved, id: normalizeFsIdForBuild(resolved.id) };
+              }
               return resolved;
             }
           } catch {
@@ -602,12 +671,15 @@ export function vize(options: VizeOptions = {}): Plugin[] {
         }
 
         if (compiled) {
-          const output = rewriteDynamicTemplateImports(
-            generateOutput(compiled, {
-              isProduction,
-              isDev: server !== null,
-              extractCss,
-            }),
+          const output = rewriteStaticAssetUrls(
+            rewriteDynamicTemplateImports(
+              generateOutput(compiled, {
+                isProduction,
+                isDev: server !== null,
+                extractCss,
+              }),
+              dynamicImportAliasRules,
+            ),
             dynamicImportAliasRules,
           );
           return {
@@ -626,10 +698,18 @@ export function vize(options: VizeOptions = {}): Plugin[] {
         const afterPrefix = id.startsWith(LEGACY_VIZE_PREFIX)
           ? id.slice(LEGACY_VIZE_PREFIX.length)
           : id.slice(1);
+        // Let @rollup/plugin-commonjs handle its own virtual IDs.
+        if (afterPrefix.includes("?commonjs-")) {
+          return null;
+        }
         const [pathPart, queryPart] = afterPrefix.split("?");
         const querySuffix = queryPart ? `?${queryPart}` : "";
-        if (pathPart.startsWith("/") && fs.existsSync(pathPart) && fs.statSync(pathPart).isFile()) {
-          const importPath = "/@fs" + pathPart + querySuffix;
+        const fsPath = pathPart.startsWith("/@fs/") ? pathPart.slice(4) : pathPart;
+        if (fsPath.startsWith("/") && fs.existsSync(fsPath) && fs.statSync(fsPath).isFile()) {
+          const importPath =
+            server === null
+              ? `${pathToFileURL(fsPath).href}${querySuffix}`
+              : "/@fs" + fsPath + querySuffix;
           logger.log(`load: proxying \0-prefixed file ${id} → re-export from ${importPath}`);
           return `export { default } from ${JSON.stringify(importPath)};\nexport * from ${JSON.stringify(importPath)};`;
         }

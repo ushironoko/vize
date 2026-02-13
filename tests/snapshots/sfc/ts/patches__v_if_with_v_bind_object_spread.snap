@@ -1,10 +1,9 @@
 ---
 source: crates/vize_atelier_sfc/src/snapshot_tests.rs
-assertion_line: 196
 expression: ts_output
 ---
 import { defineComponent as _defineComponent } from 'vue'
-import { openBlock as _openBlock, createBlock as _createBlock, createCommentVNode as _createCommentVNode, mergeProps as _mergeProps } from "vue"
+import { openBlock as _openBlock, createBlock as _createBlock, createCommentVNode as _createCommentVNode, createTextVNode as _createTextVNode, mergeProps as _mergeProps, withCtx as _withCtx } from "vue"
 
 import { ref, computed } from 'vue'
 import Button from './Button.vue'
@@ -21,7 +20,12 @@ return (_ctx: any,_cache: any) => {
       ? (_openBlock(), _createBlock(Button, _mergeProps(buttonProps.value, {
         key: 0,
         onClick: _cache[0] || (_cache[0] = (...args) => (_ctx.handleClick && _ctx.handleClick(...args)))
-      })))
+      }), {
+        default: _withCtx(() => [
+          _createTextVNode("\n    Click me\n  ")
+        ]),
+        _: 1 /* STABLE */
+      }))
       : _createCommentVNode("v-if", true)
 }
 }

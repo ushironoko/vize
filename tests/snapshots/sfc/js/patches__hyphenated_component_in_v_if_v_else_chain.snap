@@ -2,7 +2,7 @@
 source: crates/vize_atelier_sfc/src/snapshot_tests.rs
 expression: js_output
 ---
-import { openBlock as _openBlock, createBlock as _createBlock, createCommentVNode as _createCommentVNode, resolveComponent as _resolveComponent } from "vue"
+import { openBlock as _openBlock, createBlock as _createBlock, createCommentVNode as _createCommentVNode, createTextVNode as _createTextVNode, resolveComponent as _resolveComponent, withCtx as _withCtx } from "vue"
 
 import { ref } from 'vue'
 
@@ -20,6 +20,11 @@ return (_ctx, _cache) => {
       ? (_openBlock(), _createBlock(_component_router_link, {
         key: 0,
         to: "/"
+      }, {
+        default: _withCtx(() => [
+          _createTextVNode("Link")
+        ]),
+        _: 1 /* STABLE */
       }))
       : (_openBlock(), _createBlock(_component_router_view, { key: 1 }))
 }

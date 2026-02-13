@@ -19,7 +19,7 @@ use super::v_if::generate_if;
 
 /// Check if a template child node is whitespace-only text or a comment.
 /// Used to skip generating empty default slots for components.
-fn is_whitespace_or_comment(child: &TemplateChildNode<'_>) -> bool {
+pub(super) fn is_whitespace_or_comment(child: &TemplateChildNode<'_>) -> bool {
     match child {
         TemplateChildNode::Text(t) => t.content.trim().is_empty(),
         TemplateChildNode::Comment(_) => true,
