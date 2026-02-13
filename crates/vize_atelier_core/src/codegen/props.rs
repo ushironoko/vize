@@ -79,8 +79,13 @@ fn generate_von_object_exp(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
 
 /// Generate props object
 pub fn generate_props(ctx: &mut CodegenContext, props: &[PropNode<'_>]) {
-    // Clone scope_id to avoid borrow checker issues
-    let scope_id = ctx.options.scope_id.clone();
+    // Clone scope_id to avoid borrow checker issues.
+    // For component/slot elements, skip_scope_id suppresses the attribute.
+    let scope_id = if ctx.skip_scope_id {
+        None
+    } else {
+        ctx.options.scope_id.clone()
+    };
 
     // If no props but we have scope_id, generate object with just scope_id
     if props.is_empty() {
@@ -236,8 +241,13 @@ fn generate_props_object_inner(
         ctx.skip_normalize = true;
     }
 
-    // Clone scope_id to avoid borrow checker issues
-    let scope_id = ctx.options.scope_id.clone();
+    // Clone scope_id to avoid borrow checker issues.
+    // For component/slot elements, skip_scope_id suppresses the attribute.
+    let scope_id = if ctx.skip_scope_id {
+        None
+    } else {
+        ctx.options.scope_id.clone()
+    };
 
     // Check for static class/style that need to be merged with dynamic
     let static_class = props.iter().find_map(|p| {
@@ -404,6 +414,13 @@ fn generate_props_object_inner(
     let mut emitted_events: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for prop in props {
+        // Skip v-slot directive (handled separately in slots codegen)
+        if let PropNode::Directive(dir) = prop {
+            if dir.name == "slot" {
+                continue;
+            }
+        }
+
         // Skip `is` prop when generating for dynamic components
         if ctx.skip_is_prop {
             match prop {
@@ -836,10 +853,12 @@ pub fn generate_directive_prop_with_static(
                 }
             }
             if let Some(exp) = &dir.exp {
-                if is_class && !ctx.skip_normalize {
-                    ctx.use_helper(RuntimeHelper::NormalizeClass);
-                    ctx.push("_normalizeClass(");
-                    // Merge static class if present
+                if is_class {
+                    if !ctx.skip_normalize {
+                        ctx.use_helper(RuntimeHelper::NormalizeClass);
+                        ctx.push("_normalizeClass(");
+                    }
+                    // Merge static class if present (needed even inside mergeProps)
                     if let Some(static_val) = static_class {
                         ctx.push("[\"");
                         ctx.push(static_val);
@@ -849,11 +868,15 @@ pub fn generate_directive_prop_with_static(
                     } else {
                         generate_expression(ctx, exp);
                     }
-                    ctx.push(")");
-                } else if is_style && !ctx.skip_normalize {
-                    ctx.use_helper(RuntimeHelper::NormalizeStyle);
-                    ctx.push("_normalizeStyle(");
-                    // Merge static style if present
+                    if !ctx.skip_normalize {
+                        ctx.push(")");
+                    }
+                } else if is_style {
+                    if !ctx.skip_normalize {
+                        ctx.use_helper(RuntimeHelper::NormalizeStyle);
+                        ctx.push("_normalizeStyle(");
+                    }
+                    // Merge static style if present (needed even inside mergeProps)
                     if let Some(static_val) = static_style {
                         ctx.push("[{");
                         // Parse static style and convert to object
@@ -882,7 +905,9 @@ pub fn generate_directive_prop_with_static(
                     } else {
                         generate_expression(ctx, exp);
                     }
-                    ctx.push(")");
+                    if !ctx.skip_normalize {
+                        ctx.push(")");
+                    }
                 } else {
                     generate_expression(ctx, exp);
                 }

@@ -20,7 +20,10 @@ export default /*@__PURE__*/_defineComponent({
 const count = _useModel(__props, "modelValue")
 
 return (_ctx: any,_cache: any) => {
-  return _withDirectives((_openBlock(), _createElementBlock("input", { "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((count).value = $event)), type: "number" }, null, 512 /* NEED_PATCH */)), [ [_vModelText, count.value] ])
+  return _withDirectives((_openBlock(), _createElementBlock("input", {
+      "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((count).value = $event)),
+      type: "number"
+    }, null, 512 /* NEED_PATCH */)), [ [_vModelText, count.value] ])
 }
 }
 

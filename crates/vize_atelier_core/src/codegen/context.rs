@@ -32,6 +32,8 @@ pub struct CodegenContext {
     pub(super) slot_params: std::collections::HashSet<String>,
     /// When true, skip `is` prop in generate_props (used for dynamic components)
     pub(super) skip_is_prop: bool,
+    /// When true, skip scope_id attribute in props (used for component/slot elements)
+    pub(super) skip_scope_id: bool,
     /// When true, skip normalizeClass/normalizeStyle wrappers (inside mergeProps)
     pub(super) skip_normalize: bool,
 }
@@ -62,6 +64,7 @@ impl CodegenContext {
             cache_index: 0,
             slot_params: std::collections::HashSet::new(),
             skip_is_prop: false,
+            skip_scope_id: false,
             skip_normalize: false,
         }
     }

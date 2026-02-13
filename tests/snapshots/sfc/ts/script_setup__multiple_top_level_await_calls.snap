@@ -9,7 +9,7 @@ import { openBlock as _openBlock, createElementBlock as _createElementBlock, toD
 
 export default /*@__PURE__*/_defineComponent({
   __name: 'test',
-  setup(__props) {
+  async setup(__props) {
 
 const user = await fetchUser()
 const posts = await fetchPosts(user.id)

@@ -15,7 +15,11 @@ const list = [1, 2, 3]
 return (_ctx, _cache) => {
   const _directive_focus = _resolveDirective("focus")
 
-  return (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_unref(list), (n) => { return (_openBlock(), _createElementBlock("span", { key: n }, _toDisplayString(n), 1 /* TEXT */)) }), 128 /* KEYED_FRAGMENT */))
+  return (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_unref(list), (n) => {
+      return (_openBlock(), _createElementBlock("span", {
+        key: n
+      }, _toDisplayString(n), 1 /* TEXT */))
+    }), 128 /* KEYED_FRAGMENT */))
 }
 }
 

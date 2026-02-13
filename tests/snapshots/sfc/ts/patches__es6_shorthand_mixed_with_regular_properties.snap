@@ -17,7 +17,7 @@ const name = ref('test')
 return (_ctx: any,_cache: any) => {
   const _component_Component = _resolveComponent("Component")
 
-  return (_openBlock(), _createBlock(_component_Component, { options: { name.value, extra: 'value' } }, null, 8 /* PROPS */, ["options"]))
+  return (_openBlock(), _createBlock(_component_Component, { options: { name: name.value, extra: 'value' } }, null, 8 /* PROPS */, ["options"]))
 }
 }
 

@@ -6,7 +6,7 @@ use super::children::generate_children;
 use super::context::CodegenContext;
 use super::element::{generate_vshow_closing, has_vshow_directive};
 use super::expression::generate_expression;
-use super::helpers::escape_js_string;
+use super::helpers::{escape_js_string, is_builtin_component};
 use super::node::generate_node;
 use super::patch_flag::{calculate_element_patch_info, patch_flag_name};
 
@@ -298,7 +298,12 @@ fn generate_for_item_props(
     key_exp: Option<&ExpressionNode<'_>>,
 ) {
     let has_other = has_other_props(el);
-    let scope_id = ctx.options.scope_id.clone();
+    // For component elements, skip_scope_id suppresses the attribute.
+    let scope_id = if ctx.skip_scope_id {
+        None
+    } else {
+        ctx.options.scope_id.clone()
+    };
 
     if key_exp.is_none() && !has_other && scope_id.is_none() {
         ctx.push(", null");
@@ -422,6 +427,7 @@ pub fn generate_for_item(ctx: &mut CodegenContext, node: &TemplateChildNode<'_>,
             let key_exp = get_element_key(el);
             let is_template = el.tag_type == ElementType::Template;
             let is_component = el.tag_type == ElementType::Component;
+            let prev_skip_scope_id = ctx.skip_scope_id;
 
             // Check for v-show directive
             let has_vshow = has_vshow_directive(el);
@@ -430,6 +436,11 @@ pub fn generate_for_item(ctx: &mut CodegenContext, node: &TemplateChildNode<'_>,
                 ctx.use_helper(RuntimeHelper::VShow);
                 ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
                 ctx.push("(");
+            }
+
+            // Components: skip scope_id in props — Vue runtime applies it via __scopeId
+            if is_component {
+                ctx.skip_scope_id = true;
             }
 
             if is_stable {
@@ -494,9 +505,49 @@ pub fn generate_for_item(ctx: &mut CodegenContext, node: &TemplateChildNode<'_>,
                     ctx.use_helper(RuntimeHelper::CreateBlock);
                     ctx.push(ctx.helper(RuntimeHelper::CreateBlock));
                     ctx.push("(");
-                    // In inline mode, components are directly in scope (imported at module level)
-                    // In function mode, use $setup.ComponentName to access setup bindings
-                    if ctx.is_component_in_bindings(&el.tag) {
+                    // Handle dynamic component (<component :is="...">)
+                    if el.tag == "component" {
+                        let dynamic_is = el.props.iter().find_map(|p| {
+                            if let PropNode::Directive(dir) = p {
+                                if dir.name == "bind" {
+                                    if let Some(ExpressionNode::Simple(arg)) = &dir.arg {
+                                        if arg.content == "is" {
+                                            return dir.exp.as_ref();
+                                        }
+                                    }
+                                }
+                            }
+                            None
+                        });
+                        let static_is = el.props.iter().find_map(|p| {
+                            if let PropNode::Attribute(attr) = p {
+                                if attr.name == "is" {
+                                    return attr.value.as_ref().map(|v| v.content.as_str());
+                                }
+                            }
+                            None
+                        });
+                        if let Some(is_exp) = dynamic_is {
+                            ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+                            ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+                            ctx.push("(");
+                            generate_expression(ctx, is_exp);
+                            ctx.push(")");
+                        } else if let Some(name) = static_is {
+                            ctx.use_helper(RuntimeHelper::ResolveDynamicComponent);
+                            ctx.push(ctx.helper(RuntimeHelper::ResolveDynamicComponent));
+                            ctx.push("(\"");
+                            ctx.push(name);
+                            ctx.push("\")");
+                        } else {
+                            ctx.push("_component_component");
+                        }
+                    } else if let Some(builtin) = is_builtin_component(&el.tag) {
+                        ctx.use_helper(builtin);
+                        ctx.push(ctx.helper(builtin));
+                    } else if ctx.is_component_in_bindings(&el.tag) {
+                        // In inline mode, components are directly in scope (imported at module level)
+                        // In function mode, use $setup.ComponentName to access setup bindings
                         if !ctx.options.inline {
                             ctx.push("$setup.");
                         }
@@ -625,6 +676,8 @@ pub fn generate_for_item(ctx: &mut CodegenContext, node: &TemplateChildNode<'_>,
                     generate_vshow_closing(ctx, el);
                 }
             }
+
+            ctx.skip_scope_id = prev_skip_scope_id;
         }
         _ => generate_node(ctx, node),
     }

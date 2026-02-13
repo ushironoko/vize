@@ -159,10 +159,19 @@ fn prefix_identifiers_with_context(content: &str, ctx: &CodegenContext) -> Strin
                                 return;
                             }
 
+                            let mut is_ref = false;
+                            let mut needs_unref = false;
                             let prefix = if let Some(ref metadata) =
                                 self.ctx.options.binding_metadata
                             {
                                 if let Some(binding_type) = metadata.bindings.get(name) {
+                                    is_ref = self.ctx.options.inline
+                                        && matches!(binding_type, BindingType::SetupRef);
+                                    needs_unref = self.ctx.options.inline
+                                        && matches!(
+                                            binding_type,
+                                            BindingType::SetupLet | BindingType::SetupMaybeRef
+                                        );
                                     match binding_type {
                                         BindingType::Props | BindingType::PropsAliased => "$props.",
                                         _ => {
@@ -180,16 +189,38 @@ fn prefix_identifiers_with_context(content: &str, ctx: &CodegenContext) -> Strin
                                 "_ctx."
                             };
 
-                            if !prefix.is_empty() {
+                            // Expand shorthand if prefix is needed, binding is a ref,
+                            // or binding needs _unref() wrapping.
+                            // In inline mode, ref bindings need .value:
+                            // { hasForm } -> { hasForm: hasForm.value }
+                            // SetupLet/SetupMaybeRef bindings need _unref():
+                            // { paddingBottom } -> { paddingBottom: _unref(paddingBottom) }
+                            if !prefix.is_empty() || is_ref || needs_unref {
                                 let start = (prop.span.start - self.offset) as usize;
                                 let end = (prop.span.end - self.offset) as usize;
+                                let (value_prefix, value_suffix) = if needs_unref {
+                                    ("_unref(", ")")
+                                } else if is_ref {
+                                    ("", ".value")
+                                } else {
+                                    ("", "")
+                                };
                                 let mut replacement = String::with_capacity(
-                                    name.len() + 2 + prefix.len() + name.len(),
+                                    name.len()
+                                        + 2
+                                        + value_prefix.len()
+                                        + prefix.len()
+                                        + name.len()
+                                        + value_suffix.len(),
                                 );
                                 replacement.push_str(name);
                                 replacement.push_str(": ");
-                                replacement.push_str(prefix);
+                                replacement.push_str(value_prefix);
+                                if !needs_unref {
+                                    replacement.push_str(prefix);
+                                }
                                 replacement.push_str(name);
+                                replacement.push_str(value_suffix);
                                 self.rewrites.push((start, end, replacement));
                                 return;
                             }
@@ -405,11 +436,18 @@ pub fn generate_simple_expression(ctx: &mut CodegenContext, exp: &SimpleExpressi
         ctx.push("\"");
     } else {
         // Strip TypeScript if needed
-        let content = if ctx.options.is_ts && exp.content.contains(" as ") {
+        let mut content = if ctx.options.is_ts && exp.content.contains(" as ") {
             crate::transforms::strip_typescript_from_expression(&exp.content)
         } else {
             exp.content.to_string()
         };
+
+        // Convert // line comments to /* */ block comments.
+        // Template parsers may normalize newlines in attribute values to spaces,
+        // which causes // comments to eat subsequent code on the same line.
+        if content.contains("//") {
+            content = convert_line_comments_to_block(&content);
+        }
 
         // Replace _ctx.X with X when X is a known slot/v-for parameter.
         // This handles destructured variables that the transform phase
@@ -420,6 +458,81 @@ pub fn generate_simple_expression(ctx: &mut CodegenContext, exp: &SimpleExpressi
             ctx.push(&content);
         }
     }
+}
+
+/// Convert `// ...` line comments to `/* ... */` block comments.
+/// Handles strings (single/double/template) to avoid modifying `//` inside string literals.
+fn convert_line_comments_to_block(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        match bytes[i] {
+            // Skip string literals
+            b'\'' | b'"' | b'`' => {
+                let quote = bytes[i];
+                result.push(quote as char);
+                i += 1;
+                while i < len {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        result.push(bytes[i] as char);
+                        result.push(bytes[i + 1] as char);
+                        i += 2;
+                    } else if bytes[i] == quote {
+                        result.push(quote as char);
+                        i += 1;
+                        break;
+                    } else {
+                        result.push(bytes[i] as char);
+                        i += 1;
+                    }
+                }
+            }
+            // Check for //
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                // Collect comment text until end of line or end of string
+                let comment_start = i + 2;
+                let mut comment_end = comment_start;
+                while comment_end < len && bytes[comment_end] != b'\n' {
+                    comment_end += 1;
+                }
+                let comment_text = &content[comment_start..comment_end].trim_end();
+                result.push_str("/* ");
+                result.push_str(comment_text);
+                result.push_str(" */");
+                i = comment_end;
+                // Skip the newline if present
+                if i < len && bytes[i] == b'\n' {
+                    result.push('\n');
+                    i += 1;
+                }
+            }
+            // Skip existing block comments
+            b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
+                result.push('/');
+                result.push('*');
+                i += 2;
+                while i + 1 < len {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        result.push('*');
+                        result.push('/');
+                        i += 2;
+                        break;
+                    }
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+            }
+            _ => {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+    }
+
+    result
 }
 
 /// Strip `_ctx.` prefix for identifiers that are slot/v-for parameters.

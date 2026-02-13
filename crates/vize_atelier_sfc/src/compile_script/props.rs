@@ -16,12 +16,81 @@ pub struct PropTypeInfo {
     pub optional: bool,
 }
 
+/// Strip single-line (`//`) and multi-line (`/* */`) comments from TypeScript source text.
+/// Preserves string literals (single-quoted, double-quoted, and backtick).
+fn strip_ts_comments(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut result = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        // Check for string literals
+        if chars[i] == '"' || chars[i] == '\'' || chars[i] == '`' {
+            let quote = chars[i];
+            result.push(quote);
+            i += 1;
+            while i < len {
+                if chars[i] == '\\' && i + 1 < len {
+                    result.push(chars[i]);
+                    result.push(chars[i + 1]);
+                    i += 2;
+                } else if chars[i] == quote {
+                    result.push(quote);
+                    i += 1;
+                    break;
+                } else {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            }
+            continue;
+        }
+
+        // Check for // single-line comment
+        if i + 1 < len && chars[i] == '/' && chars[i + 1] == '/' {
+            // Skip until end of line
+            i += 2;
+            while i < len && chars[i] != '\n' {
+                i += 1;
+            }
+            // Keep the newline itself (it acts as a delimiter)
+            if i < len {
+                result.push('\n');
+                i += 1;
+            }
+            continue;
+        }
+
+        // Check for /* multi-line comment */
+        if i + 1 < len && chars[i] == '/' && chars[i + 1] == '*' {
+            i += 2;
+            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '/') {
+                i += 1;
+            }
+            if i + 1 < len {
+                i += 2; // skip */
+            }
+            // Replace with a space to preserve token separation
+            result.push(' ');
+            continue;
+        }
+
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    result
+}
+
 /// Extract prop types from TypeScript type definition.
 /// Returns a Vec to preserve definition order (important for matching Vue's output).
 pub fn extract_prop_types_from_type(type_args: &str) -> Vec<(String, PropTypeInfo)> {
     let mut props = Vec::new();
 
-    let content = type_args.trim();
+    // Strip comments before parsing
+    let cleaned = strip_ts_comments(type_args);
+    let content = cleaned.trim();
     let content = if content.starts_with('{') && content.ends_with('}') {
         &content[1..content.len() - 1]
     } else {
@@ -29,22 +98,38 @@ pub fn extract_prop_types_from_type(type_args: &str) -> Vec<(String, PropTypeInf
     };
 
     // Split by commas/semicolons/newlines (but not inside nested braces)
-    let mut depth = 0;
+    let mut depth: i32 = 0;
     let mut current = String::new();
+    let chars: Vec<char> = content.chars().collect();
 
-    for c in content.chars() {
+    for i in 0..chars.len() {
+        let c = chars[i];
         match c {
-            '{' | '<' | '(' | '[' => {
+            '{' | '(' | '[' => {
                 depth += 1;
                 current.push(c);
             }
-            '}' | '>' | ')' | ']' => {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '}' | ')' | ']' => {
                 depth -= 1;
                 current.push(c);
             }
-            ',' | ';' | '\n' if depth == 0 => {
+            '>' => {
+                // Don't count > as generic closer if preceded by = (arrow function =>)
+                if i > 0 && chars[i - 1] == '=' {
+                    current.push(c);
+                } else {
+                    depth -= 1;
+                    current.push(c);
+                }
+            }
+            ',' | ';' | '\n' if depth <= 0 => {
                 extract_prop_type_info(&current, &mut props);
                 current.clear();
+                depth = 0; // Reset depth at delimiters
             }
             _ => current.push(c),
         }

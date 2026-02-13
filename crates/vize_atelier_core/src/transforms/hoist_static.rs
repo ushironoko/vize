@@ -27,10 +27,16 @@ fn is_static_element(el: &ElementNode<'_>) -> bool {
         return false;
     }
 
-    // Check for dynamic props
+    // Check for dynamic props or ref
     for prop in el.props.iter() {
-        if let PropNode::Directive(_) = prop {
-            return false;
+        match prop {
+            PropNode::Directive(_) => return false,
+            PropNode::Attribute(attr) => {
+                // ref attribute prevents hoisting - refs need runtime owner context
+                if attr.name == "ref" {
+                    return false;
+                }
+            }
         }
     }
 
@@ -74,10 +80,18 @@ fn get_element_static_type(el: &ElementNode<'_>) -> StaticType {
     let mut has_dynamic_text = false;
 
     for prop in el.props.iter() {
-        if let PropNode::Directive(_) = prop {
-            // Any directive makes the element dynamic (non-static)
-            // This includes v-bind:class, v-bind:style, v-on:*, etc.
-            return StaticType::NotStatic;
+        match prop {
+            PropNode::Directive(_) => {
+                // Any directive makes the element dynamic (non-static)
+                // This includes v-bind:class, v-bind:style, v-on:*, etc.
+                return StaticType::NotStatic;
+            }
+            PropNode::Attribute(attr) => {
+                // ref attribute prevents hoisting - refs need runtime owner context
+                if attr.name == "ref" {
+                    return StaticType::NotStatic;
+                }
+            }
         }
     }
 
@@ -547,5 +561,30 @@ mod tests {
         }
 
         assert!(!is_static_node(&root.children[0]));
+    }
+
+    #[test]
+    fn test_ref_attribute_prevents_hoisting() {
+        // Bug-30: Elements with ref attribute should NOT be hoisted
+        // because ref needs runtime owner context
+        let allocator = Bump::new();
+        let (root, _) = parse(&allocator, r#"<div ref="myRef" class="static">content</div>"#);
+
+        assert!(
+            !is_static_node(&root.children[0]),
+            "Element with ref attribute should not be static"
+        );
+    }
+
+    #[test]
+    fn test_static_element_without_ref_is_static() {
+        // Verify that without ref, the same element IS static
+        let allocator = Bump::new();
+        let (root, _) = parse(&allocator, r#"<div class="static">content</div>"#);
+
+        assert!(
+            is_static_node(&root.children[0]),
+            "Element without ref should be static"
+        );
     }
 }

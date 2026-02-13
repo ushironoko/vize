@@ -13,7 +13,12 @@ export default {
 
 
 return (_ctx, _cache) => {
-  return (_openBlock(), _createBlock(DataTable, null, { "item-header": _withCtx(({ item }) => [ _createElementVNode("span", null, _toDisplayString(item.title), 1 /* TEXT */) ]), _: 1 /* STABLE */ }))
+  return (_openBlock(), _createBlock(DataTable, null, {
+      "item-header": _withCtx(({ item }) => [
+        _createElementVNode("span", null, _toDisplayString(item.title), 1 /* TEXT */)
+      ]),
+      _: 1 /* STABLE */
+    }))
 }
 }
 

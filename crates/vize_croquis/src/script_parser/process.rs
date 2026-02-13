@@ -591,7 +591,7 @@ fn process_variable_declarator(
                     let binding_type = if is_define_props {
                         BindingType::Props
                     } else {
-                        get_binding_type_from_kind(kind)
+                        infer_destructure_binding_type(kind, declarator.init.as_ref())
                     };
                     result.bindings.add(&local_name, binding_type);
 
@@ -628,7 +628,7 @@ fn process_variable_declarator(
                     let binding_type = if is_define_props {
                         BindingType::Props
                     } else {
-                        get_binding_type_from_kind(kind)
+                        infer_destructure_binding_type(kind, declarator.init.as_ref())
                     };
                     result.bindings.add(&name, binding_type);
 
@@ -649,16 +649,16 @@ fn process_variable_declarator(
 
         BindingPatternKind::ArrayPattern(arr) => {
             // Handle array destructuring
+            let arr_binding_type =
+                infer_destructure_binding_type(kind, declarator.init.as_ref());
             for elem in arr.elements.iter().flatten() {
                 if let Some(name) = get_binding_pattern_name(&elem.kind) {
-                    let binding_type = get_binding_type_from_kind(kind);
-                    result.bindings.add(&name, binding_type);
+                    result.bindings.add(&name, arr_binding_type);
                 }
             }
             if let Some(rest) = &arr.rest {
                 if let Some(name) = get_binding_pattern_name(&rest.argument.kind) {
-                    let binding_type = get_binding_type_from_kind(kind);
-                    result.bindings.add(&name, binding_type);
+                    result.bindings.add(&name, arr_binding_type);
                 }
             }
         }
@@ -680,6 +680,27 @@ fn get_binding_pattern_name(kind: &BindingPatternKind<'_>) -> Option<String> {
             get_binding_pattern_name(&assign.left.kind)
         }
         _ => None,
+    }
+}
+
+/// Infer binding type for destructured variables, matching the non-destructured inference logic.
+/// For `const { x } = useComposable()`, returns SetupMaybeRef since the properties may be refs.
+fn infer_destructure_binding_type(
+    kind: VariableDeclarationKind,
+    init: Option<&Expression<'_>>,
+) -> BindingType {
+    if kind == VariableDeclarationKind::Const {
+        if let Some(init) = init {
+            if is_function_expression(init) {
+                BindingType::SetupConst
+            } else {
+                BindingType::SetupMaybeRef
+            }
+        } else {
+            BindingType::SetupConst
+        }
+    } else {
+        get_binding_type_from_kind(kind)
     }
 }
 

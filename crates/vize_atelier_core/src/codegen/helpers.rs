@@ -195,15 +195,16 @@ pub fn capitalize_first(s: &str) -> String {
     capitalize(s).into()
 }
 
-/// Check if a component is a Vue built-in that should be imported directly
+/// Check if a component is a Vue built-in that should be imported directly.
+/// Handles both PascalCase and kebab-case tag names.
 pub fn is_builtin_component(name: &str) -> Option<RuntimeHelper> {
     match name {
-        "Teleport" => Some(RuntimeHelper::Teleport),
-        "Suspense" => Some(RuntimeHelper::Suspense),
-        "KeepAlive" => Some(RuntimeHelper::KeepAlive),
-        "BaseTransition" => Some(RuntimeHelper::BaseTransition),
-        "Transition" => Some(RuntimeHelper::Transition),
-        "TransitionGroup" => Some(RuntimeHelper::TransitionGroup),
+        "Teleport" | "teleport" => Some(RuntimeHelper::Teleport),
+        "Suspense" | "suspense" => Some(RuntimeHelper::Suspense),
+        "KeepAlive" | "keep-alive" => Some(RuntimeHelper::KeepAlive),
+        "BaseTransition" | "base-transition" => Some(RuntimeHelper::BaseTransition),
+        "Transition" | "transition" => Some(RuntimeHelper::Transition),
+        "TransitionGroup" | "transition-group" => Some(RuntimeHelper::TransitionGroup),
         _ => None,
     }
 }

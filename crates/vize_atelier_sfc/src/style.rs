@@ -35,10 +35,13 @@ pub fn apply_scoped_css(css: &str, scope_id: &str) -> String {
     let mut string_char = '"';
     let mut in_comment = false;
     let mut in_at_rule = false; // Track if we're in an at-rule header
-    let mut brace_depth = 0;
-    let mut at_rule_depth = 0; // Track nested at-rule depth
+    let mut brace_depth: u32 = 0;
+    let mut at_rule_depth: u32 = 0; // Track nested at-rule depth
     let mut last_selector_end = 0;
     let mut current = String::new();
+    let mut pending_keyframes = false;
+    let mut keyframes_brace_depth: Option<u32> = None;
+    let mut saved_at_rule_depth: Option<u32> = None;
 
     while let Some(c) = chars.next() {
         current.push(c);
@@ -81,8 +84,20 @@ pub fn apply_scoped_css(css: &str, scope_id: &str) -> String {
                     output.push_str(at_rule_part.trim());
                     output.push('{');
                     in_at_rule = false;
+                    if pending_keyframes {
+                        saved_at_rule_depth = Some(at_rule_depth);
+                        keyframes_brace_depth = Some(brace_depth);
+                        pending_keyframes = false;
+                    }
                     at_rule_depth = brace_depth;
                     in_selector = true;
+                    last_selector_end = current.len();
+                } else if keyframes_brace_depth.is_some_and(|d| brace_depth > d) {
+                    // Inside @keyframes: stops (from/to/0%/100%) are not selectors
+                    let kf_part = &current[last_selector_end..current.len() - 1];
+                    output.push_str(kf_part.trim());
+                    output.push('{');
+                    in_selector = false;
                     last_selector_end = current.len();
                 } else if in_selector && brace_depth == 1 {
                     // End of selector at root level, apply scope
@@ -105,6 +120,13 @@ pub fn apply_scoped_css(css: &str, scope_id: &str) -> String {
             '}' => {
                 brace_depth -= 1;
                 output.push(c);
+                // Check @keyframes block end — restore parent at_rule_depth
+                if keyframes_brace_depth.is_some_and(|d| brace_depth < d) {
+                    keyframes_brace_depth = None;
+                    if let Some(saved) = saved_at_rule_depth.take() {
+                        at_rule_depth = saved;
+                    }
+                }
                 if brace_depth == 0 {
                     in_selector = true;
                     at_rule_depth = 0;
@@ -119,6 +141,12 @@ pub fn apply_scoped_css(css: &str, scope_id: &str) -> String {
                 // Start of at-rule (e.g., @media, @keyframes, @supports)
                 in_at_rule = true;
                 in_selector = false;
+                // Look ahead to detect @keyframes (including vendor prefixes)
+                let css_remaining = &css[current.len()..];
+                pending_keyframes = css_remaining.starts_with("keyframes")
+                    || css_remaining.starts_with("-webkit-keyframes")
+                    || css_remaining.starts_with("-moz-keyframes")
+                    || css_remaining.starts_with("-o-keyframes");
             }
             _ if in_selector || in_at_rule => {
                 // Still building selector or at-rule header
@@ -405,6 +433,58 @@ mod tests {
         assert!(
             result.contains("@keyframes spin"),
             "Should preserve keyframes. Got: {}",
+            result
+        );
+        assert!(
+            !result.contains("from[data-v-123]"),
+            "Should not scope 'from' keyframe stop. Got: {}",
+            result
+        );
+        assert!(
+            !result.contains("to[data-v-123]"),
+            "Should not scope 'to' keyframe stop. Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_scope_webkit_keyframes() {
+        let css = "@-webkit-keyframes fade { 0% { opacity: 0; } 100% { opacity: 1; } }";
+        let result = apply_scoped_css(css, "data-v-123");
+        assert!(
+            result.contains("@-webkit-keyframes fade"),
+            "Should preserve vendor-prefixed keyframes. Got: {}",
+            result
+        );
+        assert!(
+            !result.contains("0%[data-v-123]"),
+            "Should not scope '0%' keyframe stop. Got: {}",
+            result
+        );
+        assert!(
+            !result.contains("100%[data-v-123]"),
+            "Should not scope '100%' keyframe stop. Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_scope_keyframes_inside_media() {
+        let css = "@media (prefers-reduced-motion: no-preference) { @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } .foo { color: red; } }";
+        let result = apply_scoped_css(css, "data-v-123");
+        assert!(
+            !result.contains("from[data-v-123]"),
+            "Should not scope 'from' inside nested @keyframes. Got: {}",
+            result
+        );
+        assert!(
+            !result.contains("to[data-v-123]"),
+            "Should not scope 'to' inside nested @keyframes. Got: {}",
+            result
+        );
+        assert!(
+            result.contains(".foo[data-v-123]"),
+            "Should scope .foo inside @media but outside @keyframes. Got: {}",
             result
         );
     }

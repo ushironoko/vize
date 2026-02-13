@@ -392,23 +392,44 @@ impl ScriptCompileContext {
 
                             // Register each destructured binding (skip for props destructure)
                             if !is_props_destructure {
+                                // Infer binding type from the initializer.
+                                // For `const { x, y } = useComposable()`, each destructured
+                                // property might be a ref, so we use the same inference as
+                                // non-destructured declarations. This ensures _unref() is
+                                // applied in templates for composable returns.
+                                let destructure_type = if let Some(init) = &decl.init {
+                                    infer_binding_type(init, var_decl.kind)
+                                } else {
+                                    match var_decl.kind {
+                                        VariableDeclarationKind::Const => BindingType::SetupConst,
+                                        _ => BindingType::SetupLet,
+                                    }
+                                };
                                 for prop in obj_pat.properties.iter() {
                                     if let BindingPatternKind::BindingIdentifier(id) =
                                         &prop.value.kind
                                     {
                                         self.bindings
                                             .bindings
-                                            .insert(id.name.to_string(), BindingType::SetupConst);
+                                            .insert(id.name.to_string(), destructure_type);
                                     }
                                 }
                             }
                         }
                         BindingPatternKind::ArrayPattern(arr_pat) => {
+                            let destructure_type = if let Some(init) = &decl.init {
+                                infer_binding_type(init, var_decl.kind)
+                            } else {
+                                match var_decl.kind {
+                                    VariableDeclarationKind::Const => BindingType::SetupConst,
+                                    _ => BindingType::SetupLet,
+                                }
+                            };
                             for elem in arr_pat.elements.iter().flatten() {
                                 if let BindingPatternKind::BindingIdentifier(id) = &elem.kind {
                                     self.bindings
                                         .bindings
-                                        .insert(id.name.to_string(), BindingType::SetupConst);
+                                        .insert(id.name.to_string(), destructure_type);
                                 }
                             }
                         }
@@ -769,15 +790,17 @@ fn extract_args_from_call(call: &CallExpression<'_>, source: &str) -> String {
 
 /// Check if expression is a literal
 fn is_literal(expr: &Expression<'_>) -> bool {
-    matches!(
-        expr,
+    match expr {
         Expression::StringLiteral(_)
-            | Expression::NumericLiteral(_)
-            | Expression::BooleanLiteral(_)
-            | Expression::NullLiteral(_)
-            | Expression::BigIntLiteral(_)
-            | Expression::TemplateLiteral(_)
-    )
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_) => true,
+        // Template literals are only literal if they have no expressions (e.g., `hello`)
+        // Template literals with expressions (e.g., `${x}`) depend on runtime values
+        Expression::TemplateLiteral(tl) => tl.expressions.is_empty(),
+        _ => false,
+    }
 }
 
 fn is_import_type_only(import_decl: &ImportDeclaration<'_>, source: &str) -> bool {
