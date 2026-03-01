@@ -33,7 +33,7 @@ import Button from './Button.vue'
 ### From VSIX
 
 ```bash
-code --install-extension vize-art-0.15.0.vsix
+code --install-extension vize-art-0.16.0.vsix
 ```
 
 ### Development
