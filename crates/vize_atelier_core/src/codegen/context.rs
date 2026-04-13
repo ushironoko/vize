@@ -31,9 +31,10 @@ pub struct CodegenContext {
     pub(super) used_helpers: FxHashSet<RuntimeHelper>,
     /// Cache index for v-once
     pub(super) cache_index: usize,
-    /// Template-scope parameters (slot props and v-for aliases) that should
-    /// not be prefixed with `_ctx.`
+    /// Slot parameters (identifiers that should not be prefixed with _ctx.)
     pub(super) slot_params: FxHashSet<String>,
+    /// Depth counter for slot render generation scope.
+    pub(super) slot_render_depth: u32,
     /// When true, skip `is` prop in generate_props (used for dynamic components)
     pub(super) skip_is_prop: bool,
     /// When true, skip scope_id attribute in props (used for component/slot elements)
@@ -71,6 +72,7 @@ impl CodegenContext {
             used_helpers: FxHashSet::default(),
             cache_index: 0,
             slot_params: FxHashSet::default(),
+            slot_render_depth: 0,
             skip_is_prop: false,
             skip_scope_id: false,
             skip_normalize: false,
@@ -79,36 +81,56 @@ impl CodegenContext {
         }
     }
 
-    /// Add template-scope parameters (identifiers that should not be prefixed)
+    /// Add slot parameters (identifiers that should not be prefixed)
     pub fn add_slot_params(&mut self, params: &[String]) {
         for param in params {
             self.slot_params.insert(param.clone());
         }
     }
 
-    /// Remove template-scope parameters when exiting their scope
+    /// Remove slot parameters (when exiting slot scope)
     pub fn remove_slot_params(&mut self, params: &[String]) {
         for param in params {
             self.slot_params.remove(param);
         }
     }
 
-    /// Check if an identifier is a template-scope parameter
+    /// Check if an identifier is a slot parameter
     pub fn is_slot_param(&self, name: &str) -> bool {
         self.slot_params.contains(name)
     }
 
-    /// Check if there are any template-scope parameters registered
+    /// Check if there are any slot parameters registered (fast path check)
     #[inline]
     pub fn has_slot_params(&self) -> bool {
         !self.slot_params.is_empty()
     }
 
-    /// Event handler caching is unsafe while template-scope params are in play,
-    /// because a cached closure would capture the first scoped value.
+    /// Event handler caching is unsafe while scoped params or slot render content
+    /// are in play, because a cached closure would capture the first scoped value.
     #[inline]
     pub fn cache_handlers_in_current_scope(&self) -> bool {
-        self.options.cache_handlers && !self.has_slot_params()
+        self.options.cache_handlers && !self.has_slot_params() && !self.in_slot_render()
+    }
+
+    /// Enter slot render generation scope.
+    #[inline]
+    pub fn enter_slot_render(&mut self) {
+        self.slot_render_depth += 1;
+    }
+
+    /// Exit slot render generation scope.
+    #[inline]
+    pub fn exit_slot_render(&mut self) {
+        if self.slot_render_depth > 0 {
+            self.slot_render_depth -= 1;
+        }
+    }
+
+    /// Returns true when currently generating slot render content.
+    #[inline]
+    pub fn in_slot_render(&self) -> bool {
+        self.slot_render_depth > 0
     }
 
     /// Get next cache index for v-once

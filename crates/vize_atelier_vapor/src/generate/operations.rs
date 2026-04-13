@@ -786,7 +786,7 @@ fn generate_component_props_str(
                     ["() => (\"", first.content.as_str(), "\")"].concat().into()
                 } else if is_event {
                     let resolved = ctx.resolve_expression(first.content.as_str());
-                    ["() => ", &resolved].concat().into()
+                    resolved
                 } else {
                     let resolved = ctx.resolve_expression(first.content.as_str());
                     ["() => (", &resolved, ")"].concat().into()

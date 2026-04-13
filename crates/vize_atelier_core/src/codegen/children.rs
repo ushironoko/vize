@@ -233,10 +233,14 @@ pub fn generate_comment(ctx: &mut CodegenContext, comment: &CommentNode) {
 
 /// Generate interpolation
 pub fn generate_interpolation(ctx: &mut CodegenContext, interp: &InterpolationNode<'_>) {
+    let create_text = ctx.helper(RuntimeHelper::CreateText);
     let helper = ctx.helper(RuntimeHelper::ToDisplayString);
+    ctx.use_helper(RuntimeHelper::CreateText);
     ctx.use_helper(RuntimeHelper::ToDisplayString);
+    ctx.push(create_text);
+    ctx.push("(");
     ctx.push(helper);
     ctx.push("(");
     generate_expression(ctx, &interp.content);
-    ctx.push(")");
+    ctx.push("), 1 /* TEXT */)");
 }

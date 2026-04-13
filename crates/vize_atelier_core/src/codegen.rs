@@ -286,6 +286,134 @@ mod tests {
     }
 
     #[test]
+    fn test_patch_flag_dynamic_style_and_class_without_bindings() {
+        use crate::codegen::patch_flag::calculate_element_patch_info;
+        use crate::parser::parse;
+
+        let allocator = bumpalo::Bump::new();
+        let (root, errors) = parse(
+            &allocator,
+            r#"<div><div :style="knobStyle" :class="{ dragging }"></div></div>"#,
+        );
+        assert!(errors.is_empty(), "Parse errors: {:?}", errors);
+
+        let inner = match &root.children[0] {
+            crate::ast::TemplateChildNode::Element(el) => match &el.children[0] {
+                crate::ast::TemplateChildNode::Element(inner) => inner,
+                other => panic!("expected inner element, got {:?}", other.node_type()),
+            },
+            other => panic!("expected root element, got {:?}", other.node_type()),
+        };
+
+        let (flag, dynamic_props) = calculate_element_patch_info(inner, None, false);
+        assert_eq!(flag, Some(6), "expected CLASS|STYLE patch flag");
+        assert_eq!(dynamic_props, None, "class/style should not produce dynamic prop list");
+    }
+
+    #[test]
+    fn test_patch_flag_dynamic_style_and_class_after_transform_with_prefix_identifiers() {
+        use crate::codegen::patch_flag::calculate_element_patch_info;
+        use crate::options::TransformOptions;
+        use crate::parser::parse;
+        use crate::transform::transform;
+
+        let allocator = bumpalo::Bump::new();
+        let (mut root, errors) = parse(
+            &allocator,
+            r#"<div class="map"><div :style="knobStyle" :class="{ dragging }"></div></div>"#,
+        );
+        assert!(errors.is_empty(), "Parse errors: {:?}", errors);
+
+        transform(
+            &allocator,
+            &mut root,
+            TransformOptions {
+                prefix_identifiers: true,
+                hoist_static: true,
+                ..Default::default()
+            },
+            None,
+        );
+
+        let inner = match &root.children[0] {
+            crate::ast::TemplateChildNode::Element(el) => match &el.children[0] {
+                crate::ast::TemplateChildNode::Element(inner) => inner,
+                other => panic!("expected inner element, got {:?}", other.node_type()),
+            },
+            other => panic!("expected root element, got {:?}", other.node_type()),
+        };
+
+        let (flag, dynamic_props) = calculate_element_patch_info(inner, None, false);
+        assert_eq!(
+            flag,
+            Some(6),
+            "expected CLASS|STYLE patch flag after transform, props: {:?}",
+            inner.props
+        );
+        assert_eq!(dynamic_props, None, "class/style should not produce dynamic prop list");
+    }
+
+    #[test]
+    fn test_patch_flag_dynamic_style_for_setup_ref_member_access_after_transform() {
+        use crate::codegen::patch_flag::calculate_element_patch_info;
+        use crate::options::{BindingMetadata, BindingType, TransformOptions};
+        use crate::parser::parse;
+        use crate::transform::transform;
+        use vize_carton::FxHashMap;
+
+        let allocator = bumpalo::Bump::new();
+        let (mut root, errors) = parse(
+            &allocator,
+            r#"<div><div :style="floatingStyles.value"></div></div>"#,
+        );
+        assert!(errors.is_empty(), "Parse errors: {:?}", errors);
+
+        transform(
+            &allocator,
+            &mut root,
+            TransformOptions {
+                prefix_identifiers: true,
+                hoist_static: true,
+                ..Default::default()
+            },
+            None,
+        );
+
+        let inner = match &root.children[0] {
+            crate::ast::TemplateChildNode::Element(el) => match &el.children[0] {
+                crate::ast::TemplateChildNode::Element(inner) => inner,
+                other => panic!("expected inner element, got {:?}", other.node_type()),
+            },
+            other => panic!("expected root element, got {:?}", other.node_type()),
+        };
+
+        let mut bindings = FxHashMap::default();
+        bindings.insert("floatingStyles".into(), BindingType::SetupRef);
+        let binding_metadata = BindingMetadata {
+            bindings,
+            props_aliases: FxHashMap::default(),
+            is_script_setup: true,
+        };
+
+        let (flag_with_binding, dynamic_props_with_binding) = calculate_element_patch_info(
+            inner,
+            Some(&binding_metadata),
+            false,
+        );
+        assert_eq!(
+            flag_with_binding,
+            Some(4),
+            "expected STYLE patch flag with setup ref binding metadata, props: {:?}",
+            inner.props
+        );
+        assert_eq!(
+            dynamic_props_with_binding,
+            None,
+            "style should not produce dynamic prop list with bindings"
+        );
+    }
+
+    #[test]
     fn test_codegen_preamble_module() {
         use crate::options::CodegenMode;
         let options = super::CodegenOptions {
@@ -394,6 +522,23 @@ mod tests {
     }
 
     #[test]
+    fn test_codegen_dynamic_slot_outlet_name() {
+        let result = compile!(
+            r#"<div><template v-for="tab in tabs" :key="tab.key"><slot :name="tab.key" :tab="tab" /></template></div>"#
+        );
+        assert!(
+            result.code.contains("_renderSlot(_ctx.$slots, tab.key, {tab: tab})"),
+            "dynamic slot outlet should use the dynamic slot name expression:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("{ name: tab.key"),
+            "dynamic slot outlet should not leak `name` into slot props:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
     fn test_codegen_conditional_slot_with_else_does_not_append_undefined() {
         let result = compile!(
             r#"<MyDialog>
@@ -490,6 +635,26 @@ mod tests {
                 .code
                 .contains("[_toDisplayString(speaker.affiliation),"),
             "expected v-if branch children array to avoid raw string entries. Got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_codegen_v_for_template_else_interpolation_wraps_text_vnode() {
+        let result = compile!(
+            r#"<p><template v-for="(seg, i) in splitByQuery(name)" :key="i"><mark v-if="seg.match">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template></p>"#
+        );
+
+        assert!(
+            result
+                .code
+                .contains("_createTextVNode(_toDisplayString(seg.text), 1 /* TEXT */)"),
+            "expected v-for template else interpolation to be wrapped in createTextVNode. Got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("[_toDisplayString(seg.text)]"),
+            "expected v-for template else interpolation to avoid raw string fragment children. Got:\n{}",
             result.code
         );
     }

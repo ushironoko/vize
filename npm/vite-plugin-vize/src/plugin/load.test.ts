@@ -82,6 +82,7 @@ export default _sfc_main`,
 
 const firstLoad = loadHook(hmrState, toVirtualId(realPath), { ssr: false });
 assert.ok(firstLoad && typeof firstLoad === "object", "Virtual module should load as code object");
+assert.equal(firstLoad.moduleType, "js", "Virtual modules should be marked as JS for Vite 8");
 assert.match(
   firstLoad.code,
   /__hmrUpdateType = "template-only"/,
@@ -132,6 +133,11 @@ assert.ok(
   inlineLoad && typeof inlineLoad === "object",
   "Inline-template virtual modules should load as code objects",
 );
+assert.equal(
+  inlineLoad.moduleType,
+  "js",
+  "Inline-template virtual modules should be marked as JS for Vite 8",
+);
 assert.match(
   inlineLoad.code,
   /__hmrUpdateType = "full-reload"/,
@@ -171,6 +177,11 @@ assert.ok(
   clientEnvironmentLoad && typeof clientEnvironmentLoad === "object",
   "Client environment loads should succeed",
 );
+assert.equal(
+  clientEnvironmentLoad.moduleType,
+  "js",
+  "Client virtual modules should be marked as JS for Vite 8",
+);
 assert.match(
   clientEnvironmentLoad.code,
   /ClientCompiled/,
@@ -182,10 +193,66 @@ assert.ok(
   ssrEnvironmentLoad && typeof ssrEnvironmentLoad === "object",
   "SSR environment loads should succeed",
 );
+assert.equal(
+  ssrEnvironmentLoad.moduleType,
+  "js",
+  "SSR virtual modules should be marked as JS for Vite 8",
+);
 assert.match(
   ssrEnvironmentLoad.code,
   /ServerCompiled/,
   "SSR loads should read from the SSR compilation cache",
+);
+
+const assetUrlPath = "/src/components/common/BrandLogo.vue";
+const assetUrlState: VizePluginState = {
+  ...hmrState,
+  root: "/src",
+  cache: new Map([
+    [
+      assetUrlPath,
+      {
+        code: `export default {
+  __name: "BrandLogo",
+  setup() {
+    const getIcon = (name, theme) => new URL(\`../../assets/logos/brand_\${name}_\${theme}.svg\`, import.meta.url).href;
+    return { getIcon };
+  }
+}`,
+        scopeId: "asset1234",
+        hasScoped: false,
+        styles: [],
+      },
+    ],
+  ]),
+  ssrCache: new Map(),
+  pendingHmrUpdateTypes: new Map(),
+};
+
+const assetUrlLoad = loadHook(assetUrlState, toVirtualId(assetUrlPath), { ssr: false });
+assert.ok(
+  assetUrlLoad && typeof assetUrlLoad === "object",
+  "Virtual modules with dynamic asset URLs should still load as code objects",
+);
+assert.equal(
+  assetUrlLoad.moduleType,
+  "js",
+  "Dynamic asset URL virtual modules should be marked as JS for Vite 8",
+);
+assert.match(
+  assetUrlLoad.code,
+  /import\.meta\.glob\("\/assets\/logos\/brand_\*_\*\.svg", \{"eager":true,"import":"default","query":"\?url"\}\)/,
+  "Dynamic new URL(import.meta.url) expressions should be rewritten to a root-absolute import.meta.glob",
+);
+assert.match(
+  assetUrlLoad.code,
+  /`\/assets\/logos\/brand_\$\{name\}_\$\{theme\}\.svg`/,
+  "Rewritten dynamic asset URLs should use a root-absolute lookup key",
+);
+assert.doesNotMatch(
+  assetUrlLoad.code,
+  /new URL\(`\.\.\/\.\.\/assets\/logos/,
+  "Original relative dynamic new URL(import.meta.url) expression should be rewritten away",
 );
 
 console.log("✅ vite-plugin-vize load boundary tests passed!");

@@ -11,12 +11,12 @@ use vize_carton::ToCompactString;
 
 use super::{
     super::{
-        children::{generate_children_force_array, is_directive_comment},
+        children::{generate_children, is_directive_comment},
         context::CodegenContext,
-        element::is_whitespace_or_comment,
         element::{
-            generate_custom_directives_closing, generate_vmodel_closing, generate_vshow_closing,
-            has_custom_directives, has_vmodel_directive, has_vshow_directive,
+            generate_custom_directives_closing, generate_vmodel_closing,
+            generate_vshow_closing, has_custom_directives, has_vmodel_directive,
+            has_vshow_directive, is_whitespace_or_comment,
         },
         expression::generate_expression,
         helpers::{escape_js_string, is_builtin_component},
@@ -24,7 +24,10 @@ use super::{
         patch_flag::{
             calculate_element_patch_info, calculate_element_patch_info_skip_is, patch_flag_name,
         },
-        slots::{generate_slots, has_dynamic_slots_flag, has_slot_children},
+        slots::{
+            generate_slot_outlet_name, generate_slot_outlet_props_entries, generate_slots,
+            has_dynamic_slots_flag, has_slot_children, has_slot_outlet_props,
+        },
     },
     generate::{
         extract_static_class_style, generate_if_branch_props_object, has_dynamic_class,
@@ -65,6 +68,7 @@ pub(super) fn generate_if_branch(
                     // Component
                     generate_if_branch_component(ctx, el, branch, branch_index);
                 } else if el.tag_type == ElementType::Slot {
+                    // Slot outlet
                     generate_if_branch_slot(ctx, el, branch, branch_index);
                 } else {
                     // Regular element
@@ -82,57 +86,6 @@ pub(super) fn generate_if_branch(
     }
 }
 
-/// Generate slot outlet for if branch.
-fn generate_if_branch_slot(
-    ctx: &mut CodegenContext,
-    el: &ElementNode<'_>,
-    branch: &IfBranchNode<'_>,
-    branch_index: usize,
-) {
-    ctx.use_helper(RuntimeHelper::RenderSlot);
-    ctx.push(ctx.helper(RuntimeHelper::RenderSlot));
-    ctx.push("(_ctx.$slots, ");
-
-    let slot_name = el
-        .props
-        .iter()
-        .find_map(|p| match p {
-            PropNode::Attribute(attr) if attr.name == "name" => {
-                attr.value.as_ref().map(|v| v.content.as_str())
-            }
-            _ => None,
-        })
-        .unwrap_or("default");
-    ctx.push("\"");
-    ctx.push(slot_name);
-    ctx.push("\"");
-    ctx.push(", { key: ");
-    generate_if_branch_key(ctx, branch, branch_index);
-    ctx.push(" }");
-
-    if !el.children.is_empty() {
-        ctx.push(", () => [");
-        ctx.indent();
-        let filtered: Vec<_> = el
-            .children
-            .iter()
-            .filter(|c| !is_directive_comment(c))
-            .collect();
-        for (i, child) in filtered.iter().enumerate() {
-            if i > 0 {
-                ctx.push(",");
-            }
-            ctx.newline();
-            generate_node(ctx, child);
-        }
-        ctx.deindent();
-        ctx.newline();
-        ctx.push("])");
-    } else {
-        ctx.push(")");
-    }
-}
-
 /// Generate component for if branch.
 fn generate_if_branch_component(
     ctx: &mut CodegenContext,
@@ -141,20 +94,6 @@ fn generate_if_branch_component(
     branch_index: usize,
 ) {
     let is_dynamic_component = el.tag == "component" || el.tag == "Component";
-    let has_custom_dirs = has_custom_directives(el);
-    if has_custom_dirs {
-        ctx.use_helper(RuntimeHelper::WithDirectives);
-        ctx.use_helper(RuntimeHelper::ResolveDirective);
-        ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
-        ctx.push("(");
-    }
-    let has_vshow = has_vshow_directive(el) && !has_custom_dirs;
-    if has_vshow {
-        ctx.use_helper(RuntimeHelper::WithDirectives);
-        ctx.use_helper(RuntimeHelper::VShow);
-        ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
-        ctx.push("(");
-    }
 
     // Components: skip scope_id in props -- Vue runtime applies it via __scopeId
     let prev_skip_scope_id = ctx.skip_scope_id;
@@ -222,13 +161,13 @@ fn generate_if_branch_component(
         calculate_element_patch_info_skip_is(
             el,
             ctx.options.binding_metadata.as_ref(),
-            ctx.cache_handlers_in_current_scope(),
+            ctx.options.cache_handlers,
         )
     } else {
         calculate_element_patch_info(
             el,
             ctx.options.binding_metadata.as_ref(),
-            ctx.cache_handlers_in_current_scope(),
+            ctx.options.cache_handlers,
         )
     };
 
@@ -369,14 +308,49 @@ fn generate_if_branch_component(
         ctx.push("]");
     }
 
-    ctx.push("))");
+    ctx.push("))")
+}
 
-    if has_custom_dirs {
-        generate_custom_directives_closing(ctx, el);
+/// Generate slot outlet for if branch.
+fn generate_if_branch_slot(
+    ctx: &mut CodegenContext,
+    el: &ElementNode<'_>,
+    branch: &IfBranchNode<'_>,
+    branch_index: usize,
+) {
+    // Slots don't use blocks in branch output; use renderSlot directly.
+    let helper = ctx.helper(RuntimeHelper::RenderSlot);
+    ctx.use_helper(RuntimeHelper::RenderSlot);
+    ctx.push(helper);
+    ctx.push("(_ctx.$slots, ");
+    generate_slot_outlet_name(ctx, el);
+
+    // 3rd arg: slot props with branch key
+    ctx.push(", { key: ");
+    generate_if_branch_key(ctx, branch, branch_index);
+    if has_slot_outlet_props(el) {
+        ctx.push(", ");
+        generate_slot_outlet_props_entries(ctx, el);
     }
-    if has_vshow {
-        generate_vshow_closing(ctx, el);
+    ctx.push("}");
+
+    // Fallback content, if present
+    if !el.children.is_empty() {
+        ctx.push(", () => [");
+        let filtered: Vec<_> = el
+            .children
+            .iter()
+            .filter(|c| !is_directive_comment(c))
+            .collect();
+        for (i, child) in filtered.iter().enumerate() {
+            if i > 0 {
+                ctx.push(",");
+            }
+            generate_node(ctx, child);
+        }
+        ctx.push("]");
     }
+    ctx.push(")");
 }
 
 /// Generate element for if branch.
@@ -386,6 +360,13 @@ fn generate_if_branch_element(
     branch: &IfBranchNode<'_>,
     branch_index: usize,
 ) {
+    let (patch_flag, dynamic_props) = calculate_element_patch_info(
+        el,
+        ctx.options.binding_metadata.as_ref(),
+        ctx.cache_handlers_in_current_scope(),
+    );
+    let has_patch_info = patch_flag.is_some() || dynamic_props.is_some();
+
     let has_custom_dirs = has_custom_directives(el);
     if has_custom_dirs {
         ctx.use_helper(RuntimeHelper::WithDirectives);
@@ -393,12 +374,14 @@ fn generate_if_branch_element(
         ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
         ctx.push("(");
     }
+
     let has_vmodel = has_vmodel_directive(el) && !has_custom_dirs;
     if has_vmodel {
         ctx.use_helper(RuntimeHelper::WithDirectives);
         ctx.push(ctx.helper(RuntimeHelper::WithDirectives));
         ctx.push("(");
     }
+
     let has_vshow = has_vshow_directive(el) && !has_vmodel && !has_custom_dirs;
     if has_vshow {
         ctx.use_helper(RuntimeHelper::WithDirectives);
@@ -507,6 +490,30 @@ fn generate_if_branch_element(
         } else {
             generate_if_branch_children(ctx, &el.children);
         }
+    } else if has_patch_info {
+        ctx.push(", null");
+    }
+
+    if let Some(flag) = patch_flag {
+        ctx.push(", ");
+        ctx.push(&flag.to_compact_string());
+        ctx.push(" /* ");
+        let flag_name = patch_flag_name(flag);
+        ctx.push(&flag_name);
+        ctx.push(" */");
+    }
+
+    if let Some(props) = dynamic_props {
+        ctx.push(", [");
+        for (i, prop) in props.iter().enumerate() {
+            if i > 0 {
+                ctx.push(", ");
+            }
+            ctx.push("\"");
+            ctx.push(prop);
+            ctx.push("\"");
+        }
+        ctx.push("]");
     }
 
     ctx.push("))");
@@ -514,9 +521,11 @@ fn generate_if_branch_element(
     if has_custom_dirs {
         generate_custom_directives_closing(ctx, el);
     }
+
     if has_vmodel {
         generate_vmodel_closing(ctx, el);
     }
+
     if has_vshow {
         generate_vshow_closing(ctx, el);
     }
@@ -531,6 +540,7 @@ fn generate_if_branch_template_fragment(
 ) {
     ctx.use_helper(RuntimeHelper::CreateElementBlock);
     ctx.use_helper(RuntimeHelper::Fragment);
+    ctx.use_helper(RuntimeHelper::CreateElementVNode);
     ctx.push("(");
     ctx.push(ctx.helper(RuntimeHelper::OpenBlock));
     ctx.push("(), ");
@@ -539,9 +549,22 @@ fn generate_if_branch_template_fragment(
     ctx.push(ctx.helper(RuntimeHelper::Fragment));
     ctx.push(", { key: ");
     generate_if_branch_key(ctx, branch, branch_index);
-    ctx.push(" }, ");
-    generate_children_force_array(ctx, children);
-    ctx.push(", 64 /* STABLE_FRAGMENT */))");
+    ctx.push(" }, [");
+    ctx.indent();
+    let filtered: Vec<_> = children
+        .iter()
+        .filter(|c| !is_directive_comment(c))
+        .collect();
+    for (i, child) in filtered.iter().enumerate() {
+        if i > 0 {
+            ctx.push(",");
+        }
+        ctx.newline();
+        generate_node(ctx, child);
+    }
+    ctx.deindent();
+    ctx.newline();
+    ctx.push("], 64 /* STABLE_FRAGMENT */))");
 }
 
 /// Generate fragment wrapper for if branch with multiple children.
@@ -561,7 +584,7 @@ fn generate_if_branch_fragment(
     ctx.push(", { key: ");
     generate_if_branch_key(ctx, branch, branch_index);
     ctx.push(" }, ");
-    generate_children_force_array(ctx, &branch.children);
+    generate_children(ctx, &branch.children);
     ctx.push(", 64 /* STABLE_FRAGMENT */))");
 }
 
@@ -580,10 +603,6 @@ fn generate_if_branch_children(ctx: &mut CodegenContext, children: &[TemplateChi
     });
 
     if has_only_text_or_interpolation {
-        let has_interpolation = children
-            .iter()
-            .any(|c| matches!(c, TemplateChildNode::Interpolation(_)));
-
         // Use string concatenation for text/interpolation mix
         for (i, child) in children.iter().enumerate() {
             if i > 0 {
@@ -605,13 +624,23 @@ fn generate_if_branch_children(ctx: &mut CodegenContext, children: &[TemplateChi
                 _ => {}
             }
         }
-
-        if has_interpolation {
-            ctx.push(", 1 /* TEXT */");
-        }
     } else {
-        // Complex branch children need the same text/interpolation grouping as
-        // regular element children to avoid raw string array entries.
-        generate_children_force_array(ctx, children);
+        // Complex children - use array (filter directive comments)
+        let filtered: Vec<_> = children
+            .iter()
+            .filter(|c| !is_directive_comment(c))
+            .collect();
+        ctx.push("[");
+        ctx.indent();
+        for (i, child) in filtered.iter().enumerate() {
+            if i > 0 {
+                ctx.push(",");
+            }
+            ctx.newline();
+            generate_node(ctx, child);
+        }
+        ctx.deindent();
+        ctx.newline();
+        ctx.push("]");
     }
 }

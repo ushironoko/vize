@@ -16,7 +16,11 @@ import {
   RESOLVED_CSS_MODULE,
   rewriteDynamicTemplateImports,
 } from "../virtual.js";
-import { rewriteStaticAssetUrls, applyDefineReplacements } from "../transform.js";
+import {
+  rewriteStaticAssetUrls,
+  rewriteDynamicAssetImportMetaUrls,
+  applyDefineReplacements,
+} from "../transform.js";
 
 const SERVER_PLACEHOLDER_CODE = `import { createElementBlock, defineComponent } from "vue";
 export default defineComponent({
@@ -26,6 +30,20 @@ export default defineComponent({
   }
 });
 `;
+
+type JsModuleLoadResult = {
+  code: string;
+  map: null;
+  moduleType: "js";
+};
+
+function asJsModule(code: string): JsModuleLoadResult {
+  return {
+    code,
+    map: null,
+    moduleType: "js",
+  };
+}
 
 export function getBoundaryPlaceholderCode(realPath: string, ssr: boolean): string | null {
   if (ssr && realPath.endsWith(".client.vue")) {
@@ -43,11 +61,16 @@ function getOxcDumpPath(root: string, realPath: string): string {
   return path.join(dumpDir, `vize-oxc-error-${path.basename(realPath)}.ts`);
 }
 
+function hasRelativeImportMetaGlob(code: string): boolean {
+  return /import\.meta\.glob\(\s*(['"`])(?:\.\/|\.\.\/)/.test(code);
+}
+
+
 export function loadHook(
   state: VizePluginState,
   id: string,
   loadOptions?: { ssr?: boolean },
-): string | { code: string; map: null } | null {
+): string | { code: string; map: null } | JsModuleLoadResult | null {
   // Pick the correct viteBase for URL resolution based on the build environment.
   const currentBase = loadOptions?.ssr ? state.serverViteBase : state.clientViteBase;
 
@@ -135,13 +158,10 @@ export function loadHook(
       const setupMatch = source.match(/<script\s+setup[^>]*>([\s\S]*?)<\/script>/);
       if (setupMatch) {
         const scriptContent = setupMatch[1];
-        return {
-          code: `${scriptContent}\nexport default {}`,
-          map: null,
-        };
+        return asJsModule(`${scriptContent}\nexport default {}`);
       }
     }
-    return { code: "export default {}", map: null };
+    return asJsModule("export default {}");
   }
 
   // Handle vize virtual modules
@@ -157,10 +177,7 @@ export function loadHook(
     const placeholderCode = getBoundaryPlaceholderCode(realPath, !!loadOptions?.ssr);
     if (placeholderCode) {
       state.logger.log(`load: using boundary placeholder for ${realPath}`);
-      return {
-        code: placeholderCode,
-        map: null,
-      };
+      return asJsModule(placeholderCode);
     }
 
     const cache = getEnvironmentCache(state, isSsr);
@@ -191,24 +208,28 @@ export function loadHook(
       }
       const output = rewriteStaticAssetUrls(
         rewriteDynamicTemplateImports(
-          generateOutput(compiled, {
-            isProduction: state.isProduction,
-            isDev: state.server !== null && !isSsr,
-            hmrUpdateType: pendingHmrUpdateType,
-            extractCss: state.extractCss,
-            filePath: realPath,
-          }),
+          rewriteDynamicAssetImportMetaUrls(
+            generateOutput(compiled, {
+              isProduction: state.isProduction,
+              isDev: state.server !== null && !isSsr,
+              hmrUpdateType: pendingHmrUpdateType,
+              extractCss: state.extractCss,
+              filePath: realPath,
+            }),
+            realPath,
+            state.root,
+          ),
           state.dynamicImportAliasRules,
         ),
         state.dynamicImportAliasRules,
       );
+      if (hasRelativeImportMetaGlob(output)) {
+        state.logger.warn(`load: virtual module for ${realPath} still contains import.meta.glob`);
+      }
       if (!loadOptions?.ssr) {
         state.pendingHmrUpdateTypes.delete(realPath);
       }
-      return {
-        code: output,
-        map: null,
-      };
+      return asJsModule(output);
     }
   }
 
@@ -229,7 +250,9 @@ export function loadHook(
           ? `${pathToFileURL(fsPath).href}${querySuffix}`
           : "/@fs" + fsPath + querySuffix;
       state.logger.log(`load: proxying \0-prefixed file ${id} -> re-export from ${importPath}`);
-      return `export { default } from ${JSON.stringify(importPath)};\nexport * from ${JSON.stringify(importPath)};`;
+      return asJsModule(
+        `export { default } from ${JSON.stringify(importPath)};\nexport * from ${JSON.stringify(importPath)};`,
+      );
     }
   }
 
@@ -256,7 +279,11 @@ export async function transformHook(
         transformed = applyDefineReplacements(transformed, defines);
       }
 
-      return { code: transformed, map: result.map as TransformResult["map"] };
+      return {
+        code: transformed,
+        map: result.map as TransformResult["map"],
+        moduleType: "js",
+      };
     } catch (e: unknown) {
       state.logger.error(`transformWithOxc failed for ${realPath}:`, e);
       const dumpPath = getOxcDumpPath(state.root, realPath);

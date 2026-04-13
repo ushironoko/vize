@@ -261,6 +261,27 @@ function increment() { count.value++ }
     }
 
     #[test]
+    fn test_inject_ref_binding_is_maybe_ref() {
+        let content = r#"
+import { inject, ref, type Ref } from 'vue'
+
+const selectedView = inject<Ref<'all' | 'draft'>>('selectedView', ref('all'))
+const panelState = inject<Ref<'closing' | 'opening'>>('panelState')
+"#;
+        let mut ctx = ScriptCompileContext::new(content);
+        ctx.analyze();
+
+        assert_eq!(
+            ctx.bindings.bindings.get("selectedView"),
+            Some(&BindingType::SetupMaybeRef)
+        );
+        assert_eq!(
+            ctx.bindings.bindings.get("panelState"),
+            Some(&BindingType::SetupMaybeRef)
+        );
+    }
+
+    #[test]
     fn test_props_destructure() {
         let content = r#"const { foo, bar } = defineProps<{ foo: string, bar: number }>()"#;
         let mut ctx = ScriptCompileContext::new(content);
@@ -424,6 +445,20 @@ const props = withDefaults(defineProps<Props>(), {
         assert_eq!(
             ctx.bindings.bindings.get("count"),
             Some(&BindingType::Props)
+        );
+    }
+
+    #[test]
+    fn test_object_destructure_from_composable_registers_bindings() {
+        let content = r#"
+const { format } = useFormatter(catalog)
+"#;
+        let mut ctx = ScriptCompileContext::new(content);
+        ctx.analyze();
+
+        assert_eq!(
+            ctx.bindings.bindings.get("format"),
+            Some(&BindingType::SetupMaybeRef)
         );
     }
 }

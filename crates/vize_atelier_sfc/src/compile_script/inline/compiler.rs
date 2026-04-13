@@ -19,11 +19,14 @@ use super::super::macros::{
     is_macro_call_line, is_multiline_macro_start, is_paren_macro_start, is_props_destructure_line,
 };
 use super::super::props::{
-    extract_emit_names_from_type, extract_prop_types_from_type, extract_with_defaults_defaults,
+    add_null_to_runtime_type, extract_emit_names_from_type, extract_prop_types_from_type,
+    extract_with_defaults_defaults,
 };
 use super::super::typescript::transform_typescript_to_js;
 use super::super::{ScriptCompileResult, TemplateParts};
-use super::helpers::{extract_const_name, strip_comments_for_counting};
+use super::helpers::{
+    extract_const_name, strip_comments_and_strings_for_counting, strip_comments_for_counting,
+};
 use super::type_handling::resolve_type_args;
 
 const VAPOR_RENDER_ALIAS_BASE: &str = "__vaporRender";
@@ -914,8 +917,9 @@ fn parse_script_content(content: &str, is_ts: bool) -> (Vec<String>, Vec<String>
         if in_object_literal {
             object_literal_buffer.push_str(line);
             object_literal_buffer.push('\n');
-            object_literal_brace_depth += trimmed.matches('{').count() as i32;
-            object_literal_brace_depth -= trimmed.matches('}').count() as i32;
+            let cleaned = strip_comments_and_strings_for_counting(trimmed);
+            object_literal_brace_depth += cleaned.matches('{').count() as i32;
+            object_literal_brace_depth -= cleaned.matches('}').count() as i32;
             if object_literal_brace_depth <= 0 {
                 // Object literal is complete, add to setup_lines
                 for buf_line in object_literal_buffer.lines() {
@@ -931,16 +935,16 @@ fn parse_script_content(content: &str, is_ts: bool) -> (Vec<String>, Vec<String>
         if (trimmed.starts_with("const ")
             || trimmed.starts_with("let ")
             || trimmed.starts_with("var "))
-            && trimmed.contains('=')
-            && trimmed.ends_with('{')
             && !trimmed.contains("defineProps")
             && !trimmed.contains("defineEmits")
             && !trimmed.contains("defineModel")
+            && is_strict_multiline_object_literal_start(trimmed)
         {
             in_object_literal = true;
             object_literal_buffer = line.to_compact_string() + "\n";
+            let cleaned = strip_comments_and_strings_for_counting(trimmed);
             object_literal_brace_depth =
-                trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+                cleaned.matches('{').count() as i32 - cleaned.matches('}').count() as i32;
             continue;
         }
 
@@ -1210,6 +1214,29 @@ fn parse_script_content(content: &str, is_ts: bool) -> (Vec<String>, Vec<String>
     (user_imports, setup_lines, ts_declarations)
 }
 
+/// True only for strict multiline object literal starts like:
+/// - `const x = {`
+/// - `const x: T = {`
+///
+/// Excludes function blocks such as:
+/// - `const x = computed(() => {`
+/// - `const x = fn({`
+fn is_strict_multiline_object_literal_start(line: &str) -> bool {
+    let without_comments = strip_comments_for_counting(line);
+    let trimmed = without_comments.trim();
+
+    if !trimmed.ends_with('{') {
+        return false;
+    }
+
+    let before_brace = trimmed[..trimmed.len() - 1].trim_end();
+    let Some(eq_idx) = before_brace.rfind('=') else {
+        return false;
+    };
+
+    before_brace[eq_idx + 1..].trim().is_empty()
+}
+
 /// Build props and emits definition buffer from context macros.
 fn build_props_emits(
     ctx: &ScriptCompileContext,
@@ -1256,10 +1283,12 @@ fn build_props_emits(
                     } else {
                         prop_type.js_type.clone()
                     };
+                    let runtime_js_type =
+                        add_null_to_runtime_type(&resolved_js_type, prop_type.nullable);
                     props_emits_buf.extend_from_slice(b"    ");
                     props_emits_buf.extend_from_slice(name.as_bytes());
                     props_emits_buf.extend_from_slice(b": { type: ");
-                    props_emits_buf.extend_from_slice(resolved_js_type.as_bytes());
+                    props_emits_buf.extend_from_slice(runtime_js_type.as_bytes());
                     if needs_prop_type {
                         if let Some(ref ts_type) = prop_type.ts_type {
                             if resolved_js_type == "null" {

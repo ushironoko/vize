@@ -336,6 +336,11 @@ const activeTab = ref<'a' | 'b'>('a');
 </template>"#;
 
     let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let script_setup = descriptor.script_setup.as_ref().expect("script setup");
+    let mut ctx = crate::script::ScriptCompileContext::new(&script_setup.content);
+    ctx.analyze();
+    eprintln!("dynamic ctx reference binding: {:?}", ctx.bindings.bindings.get("reference"));
+    eprintln!("dynamic ctx floating binding: {:?}", ctx.bindings.bindings.get("floating"));
     let result =
         compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
 
@@ -347,6 +352,30 @@ const activeTab = ref<'a' | 'b'>('a');
     assert!(
         result.code.contains("activeTab.value === 'a'"),
         "Expected ref access to stay reactive in class binding. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_inline_template_injected_ref_assignment_uses_value() {
+    let source = r#"<script setup lang="ts">
+import { inject, type Ref } from 'vue';
+
+const status = inject<Ref<'closing' | 'opening'>>('status');
+</script>
+
+<template>
+  <button @click="status = 'closing'">{{ status }}</button>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result =
+        compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        result.code.contains("status.value = \"closing\"")
+            || result.code.contains("status.value = 'closing'"),
+        "Expected injected ref assignment to target `.value`. Got:\n{}",
         result.code
     );
 }
@@ -430,6 +459,75 @@ const currentCode = ref('dom');
     assert!(
         result.code.contains("[\"code\"]"),
         "Expected v-if branch component dynamic props list to include code. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_options_api_dynamic_style_and_class_keep_patch_flags() {
+    let source = r#"<script>
+export default {
+  computed: {
+    knobStyle() {
+      return { transform: 'translate(10px, 20px)' }
+    },
+  },
+}
+</script>
+
+<template>
+  <div class="map">
+    <div :style="knobStyle" :class="{ dragging }"></div>
+  </div>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result =
+        compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        result.code.contains("6 /* CLASS, STYLE */")
+            || result.code.contains("4 /* STYLE */")
+            || result.code.contains("2 /* CLASS */"),
+        "Expected options API dynamic style/class to preserve patch flags. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_inline_v_if_branch_maybe_ref_style_keeps_style_patch_flag() {
+    let source = r#"<script setup lang="ts">
+import { ref } from 'vue'
+
+const show = ref(true)
+const floatingStyles = ref({ left: '10px', top: '20px' })
+</script>
+
+<template>
+  <div v-if="show" :style="floatingStyles"></div>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let script_setup = descriptor.script_setup.as_ref().expect("script setup");
+    let mut ctx = crate::script::ScriptCompileContext::new(&script_setup.content);
+    ctx.analyze();
+    assert_eq!(
+        ctx.bindings.bindings.get("floatingStyles"),
+        Some(&BindingType::SetupRef),
+        "Expected destructured useFloating style binding to be treated as ref-like. Got: {:?}",
+        ctx.bindings.bindings.get("floatingStyles")
+    );
+    let result =
+        compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        result.code.contains("floatingStyles.value") || result.code.contains("_unref(floatingStyles)"),
+        "Expected maybe-ref style binding to stay reactive. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("4 /* STYLE */") || result.code.contains("6 /* CLASS, STYLE */"),
+        "Expected v-if branch style binding to preserve STYLE patch flag. Got:\n{}",
         result.code
     );
 }
@@ -539,6 +637,345 @@ var c = 3
 }
 
 #[test]
+fn test_component_event_member_expression_handler_is_not_wrapped() {
+    let source = r#"<script setup>
+const actionHandler = useActionHandler()
+</script>
+
+<template>
+  <ActionPanel @selectItem="actionHandler.selectItem" />
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result = compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        !result
+            .code
+            .contains("onSelectItem: ($event) => _unref(actionHandler).selectItem"),
+        "member-expression component listener should not be wrapped in a no-op arrow. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result
+            .code
+            .contains("_unref(actionHandler).selectItem(...args)"),
+        "member-expression component listener should invoke the method reference. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_component_event_rest_param_handler_keeps_rest_args_local() {
+    let source = r#"<script setup>
+const emit = defineEmits(['update'])
+</script>
+
+<template>
+  <Child @update="(...$args) => emit('update', ...$args)" @change="(...args) => emit('update', ...args)" />
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result = compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        result.code.contains("(...$args) =>")
+            && result.code.contains("...$args"),
+        "rest-param component listener should keep $args local. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("(...args) =>")
+            && result.code.contains("...args"),
+        "rest-param component listener should keep args local. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("..._ctx.$args") && !result.code.contains("..._ctx.args"),
+        "rest-param component listener should not rewrite rest args through _ctx. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_destructured_composable_binding_is_not_rewritten_to_props_in_slot_scope() {
+    let source = r#"<script setup>
+const { format } = useFormatter(catalog)
+</script>
+
+<template>
+  <PopupMenu>
+    <template #trigger>
+      <span>{{ format('hello') }}</span>
+    </template>
+  </PopupMenu>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result = compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        !result.code.contains("__props.format("),
+        "destructured composable binding should not be rewritten to props in slot scope. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("format('hello')") || result.code.contains("_unref(format)('hello')"),
+        "destructured composable binding should remain a setup binding in slot scope. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_destructured_composable_binding_survives_destructured_slot_scope() {
+    let source = r#"<script setup>
+const { format } = useFormatter(catalog)
+</script>
+
+<template>
+  <PopupMenu>
+    <template #items="{ close }">
+      <button @click="close()">{{ format('hello') }}</button>
+    </template>
+  </PopupMenu>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result = compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        !result.code.contains("__props.format("),
+        "destructured composable binding should not be rewritten to props when slot params are destructured. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_destructured_composable_binding_survives_nested_slot_scopes() {
+    let source = r#"<script setup>
+const { format } = useFormatter(catalog)
+const items = ['a']
+</script>
+
+<template>
+  <PopupMenu>
+    <template #items="{ close }">
+      <template v-for="item in items" :key="item">
+        <OptionRow v-slot="{ active }">
+          <li :class="{ active }" @click="close()">{{ format(item) }}</li>
+        </OptionRow>
+      </template>
+    </template>
+  </PopupMenu>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result = compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        !result.code.contains("__props.format("),
+        "destructured composable binding should not be rewritten to props in nested slot scopes. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_function_typed_prop_param_does_not_override_local_t_in_slot_scope() {
+    let source = r#"<script setup lang="ts">
+const { format } = useFormatter(catalog)
+const props = defineProps<{
+  renderLabel: (value: string, format: any) => string
+}>()
+</script>
+
+<template>
+  <PopupMenu>
+    <template #items="{ close }">
+      <OptionRow v-slot="{ active }">
+        <li :class="{ active }" @click="close()">
+          <span>{{ format('hello') }}</span>
+          <span>{{ renderLabel('x', format) }}</span>
+        </li>
+      </OptionRow>
+    </template>
+  </PopupMenu>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let opts = SfcCompileOptions {
+        script: ScriptCompileOptions {
+            is_ts: true,
+            ..Default::default()
+        },
+        template: TemplateCompileOptions {
+            is_ts: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let result = compile_sfc(&descriptor, opts).expect("Failed to compile SFC");
+
+    assert!(
+        !result.code.contains("__props.format("),
+        "local composable binding should not be rewritten to props inside slot scopes even when a prop function type uses the same parameter name. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("renderLabel('x', format)")
+            || result.code.contains("renderLabel(\"x\", format)")
+            || result.code.contains("renderLabel('x', _unref(format))")
+            || result.code.contains("renderLabel(\"x\", _unref(format))"),
+        "local binding should remain the second argument passed to the prop callback. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_fast_and_full_analysis_agree_on_local_t_when_prop_fn_type_uses_t_param() {
+    let source = r#"
+import type { Composer } from 'vue-i18n'
+
+const { format } = useFormatter(catalog)
+const props = defineProps<{
+  renderLabel: (value: string, format: Composer['t']) => string
+}>()
+"#;
+
+    let fast = crate::script::analyze_script_setup_to_summary(source);
+    let full = crate::script::analyze_script_setup_full(source);
+
+    assert_eq!(
+        fast.bindings.get("format"),
+        Some(BindingType::SetupMaybeRef),
+        "fast analysis should keep the local destructured binding as a setup binding. Got: {:?}",
+        fast.bindings.get("format")
+    );
+    assert_eq!(
+        full.bindings.get("format"),
+        Some(BindingType::SetupMaybeRef),
+        "full analysis should keep the local destructured binding as a setup binding. Got: {:?}",
+        full.bindings.get("format")
+    );
+}
+
+#[test]
+fn test_template_compile_keeps_local_t_in_slot_scope_with_prop_fn_param_name_collision() {
+    let source = r#"<script setup lang="ts">
+import type { Composer } from 'vue-i18n'
+
+const { format } = useFormatter(catalog)
+const props = defineProps<{
+  groupedItems: string[]
+  activeItem: string | null
+  highlightedItems: string[]
+  getItemKind: (value: string) => string | null
+  renderLabel: (value: string, format: Composer['t']) => string
+  selectedNodes: unknown[]
+  hasNestedSelection: boolean
+  itemGroups: { group: string; values: string[] }[]
+}>()
+</script>
+
+<template>
+  <PopupMenu>
+    <template #trigger>
+      <div>
+        <span>{{ format('Item: default') }}</span>
+      </div>
+    </template>
+    <template #items="{ close }">
+      <ul>
+        <li v-for="{ group, values } of itemGroups" :key="group" class="item-group">
+          <p class="item-group-title">
+            <span>{{ format(`ItemGroup: ${group}`) }}</span>
+          </p>
+          <ul class="selection">
+            <template v-for="value of values" :key="value">
+              <OptionRow v-slot="{ active }">
+                <li
+                  class="selection-item"
+                  :class="{ selected: value === activeItem, highlighted: highlightedItems.includes(value), active: active }"
+                  :data-kind="getItemKind(value)"
+                  @click="close()"
+                >
+                  <span class="value">{{ renderLabel(value, format) }}</span>
+                </li>
+              </OptionRow>
+            </template>
+          </ul>
+        </li>
+      </ul>
+    </template>
+  </PopupMenu>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let script_setup = descriptor.script_setup.as_ref().expect("script setup");
+    let template = descriptor.template.as_ref().expect("template");
+
+    let mut croquis = crate::script::analyze_script_setup_to_summary(&script_setup.content);
+    let mut script_bindings = super::bindings::croquis_to_legacy_bindings(&croquis.bindings);
+    let mut ctx = crate::script::ScriptCompileContext::new(&script_setup.content);
+    ctx.analyze();
+
+    for (name, bt) in &ctx.bindings.bindings {
+        if matches!(
+            bt,
+            BindingType::Props
+                | BindingType::PropsAliased
+                | BindingType::SetupRef
+                | BindingType::SetupMaybeRef
+                | BindingType::SetupReactiveConst
+        ) {
+            script_bindings.bindings.insert(name.clone(), *bt);
+            croquis.bindings.add(name.as_str(), *bt);
+        }
+    }
+    for (local, key) in &ctx.bindings.props_aliases {
+        script_bindings
+            .props_aliases
+            .insert(local.clone(), key.clone());
+        croquis
+            .bindings
+            .props_aliases
+            .insert(local.clone(), key.clone());
+    }
+
+    assert_eq!(
+        script_bindings.bindings.get("format"),
+        Some(&BindingType::SetupMaybeRef),
+        "legacy binding metadata should keep the local binding as a setup binding. Got: {:?}",
+        script_bindings.bindings.get("format")
+    );
+    assert_eq!(
+        croquis.bindings.get("format"),
+        Some(BindingType::SetupMaybeRef),
+        "croquis bindings should keep the local binding as a setup binding. Got: {:?}",
+        croquis.bindings.get("format")
+    );
+
+    let output = crate::compile_template::compile_template_block(
+        template,
+        &TemplateCompileOptions {
+            is_ts: true,
+            ..Default::default()
+        },
+        "test-scope",
+        false,
+        true,
+        Some(&script_bindings),
+        Some(croquis),
+    )
+    .expect("template compile should succeed");
+
+    assert!(
+        !output.contains("__props.format("),
+        "template compiler should not rewrite the local binding to props inside slot scope. Got:\n{}",
+        output
+    );
+}
+
+#[test]
 fn test_extract_normal_script_content() {
     let input = r#"import type { NuxtRoute } from "@typed-router";
 import { useBreakpoint } from "./_utils";
@@ -581,6 +1018,83 @@ export default {
     assert!(
         !result.contains("export default"),
         "Should NOT contain export default"
+    );
+}
+
+#[test]
+fn test_template_ref_uses_setup_ref_binding_in_inline_mode() {
+    let source = r#"<script setup lang="ts">
+import { ref } from 'vue'
+const reference = ref<HTMLElement>()
+const floating = ref<HTMLElement>()
+</script>
+
+<template>
+  <button ref="reference">open</button>
+  <div ref="floating">panel</div>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result =
+        compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        result.code.contains("ref_key: \"reference\", ref: reference"),
+        "template ref should bind to setup ref `reference`. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("ref_key: \"floating\", ref: floating"),
+        "template ref should bind to setup ref `floating`. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_template_ref_uses_setup_ref_binding_with_dynamic_props() {
+    let source = r#"<script setup lang="ts">
+import { computed, ref } from 'vue'
+const reference = ref<HTMLElement>()
+const floating = ref<HTMLElement>()
+const isOpen = ref(true)
+const klass = computed(() => 'x')
+const styles = computed(() => ({ left: '0px', top: '0px' }))
+function toggle() {}
+</script>
+
+<template>
+  <button
+    v-if="isOpen"
+    ref="reference"
+    :id="isOpen ? 'open' : undefined"
+    class="base"
+    :class="klass"
+    @click="toggle"
+  >
+    open
+  </button>
+  <div
+    v-if="isOpen"
+    ref="floating"
+    :style="styles"
+  >
+    panel
+  </div>
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let result =
+        compile_sfc(&descriptor, SfcCompileOptions::default()).expect("Failed to compile SFC");
+
+    assert!(
+        result.code.contains("ref_key: \"reference\", ref: reference"),
+        "dynamic props should preserve setup ref `reference`. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("ref_key: \"floating\", ref: floating"),
+        "dynamic props should preserve setup ref `floating`. Got:\n{}",
+        result.code
     );
 }
 
@@ -1290,6 +1804,49 @@ import FooPanel from './FooPanel.vue'
     assert!(
         !result.code.contains("_resolveComponent(\"FooPanel\")"),
         "Imported script setup components should not go through resolveComponent. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_script_setup_keeps_imported_custom_directive_binding() {
+    let source = r#"<script setup lang="ts">
+import { vElementHover } from '@vueuse/components'
+</script>
+
+<template>
+  <div v-element-hover="() => {}" />
+</template>"#;
+
+    let descriptor = parse_sfc(source, SfcParseOptions::default()).expect("Failed to parse SFC");
+    let opts = SfcCompileOptions {
+        script: ScriptCompileOptions {
+            is_ts: true,
+            ..Default::default()
+        },
+        template: TemplateCompileOptions {
+            is_ts: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let result = compile_sfc(&descriptor, opts).expect("Failed to compile SFC");
+
+    assert!(
+        result
+            .code
+            .contains("import { vElementHover } from '@vueuse/components'"),
+        "Imported custom directive binding should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("_resolveDirective(\"element-hover\")"),
+        "Imported custom directives should not be resolved from app context. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("vElementHover"),
+        "Generated directive usage should reference the imported binding. Got:\n{}",
         result.code
     );
 }

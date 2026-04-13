@@ -90,21 +90,35 @@ impl ScriptCompileContext {
         let mut depth = 0;
         let mut current = vize_carton::String::default();
 
-        for c in resolved_content.chars() {
+        let chars: Vec<char> = resolved_content.chars().collect();
+        for (i, c) in chars.iter().enumerate() {
             match c {
                 '{' | '<' | '(' | '[' => {
                     depth += 1;
-                    current.push(c);
+                    current.push(*c);
                 }
-                '}' | '>' | ')' | ']' => {
-                    depth -= 1;
-                    current.push(c);
+                '>' => {
+                    // Don't treat the arrow in function types (`=>`) as a closing bracket.
+                    if i > 0 && chars[i - 1] == '=' {
+                        current.push(*c);
+                    } else {
+                        if depth > 0 {
+                            depth -= 1;
+                        }
+                        current.push(*c);
+                    }
+                }
+                '}' | ')' | ']' => {
+                    if depth > 0 {
+                        depth -= 1;
+                    }
+                    current.push(*c);
                 }
                 ',' | ';' | '\n' if depth == 0 => {
                     self.extract_single_prop_from_type(&current);
                     current.clear();
                 }
-                _ => current.push(c),
+                _ => current.push(*c),
             }
         }
         self.extract_single_prop_from_type(&current);

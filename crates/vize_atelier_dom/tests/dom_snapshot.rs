@@ -201,4 +201,59 @@ mod component {
     fn simple_component() {
         insta::assert_snapshot!(get_compiled("<MyComponent></MyComponent>"));
     }
+
+    #[test]
+    fn dynamic_component_uses_block_in_non_block_context() {
+        let code = get_compiled(r#"<div><component :is="current" /></div>"#);
+        assert!(
+            code.contains("(_openBlock(), _createBlock(_resolveDynamicComponent("),
+            "dynamic component should use block form in nested context:\n{code}"
+        );
+    }
+
+    #[test]
+    fn forwarded_slot_flag_is_emitted() {
+        let code = get_compiled(r#"<component :is="current"><slot /></component>"#);
+        assert!(
+            code.contains("_: 3 /* FORWARDED */"),
+            "forwarded slot should use FORWARDED slot flag:\n{code}"
+        );
+    }
+
+    #[test]
+    fn dynamic_slot_still_uses_dynamic_flag_even_with_slot_forwarding() {
+        let code = get_compiled(r#"<Comp><template #[name]><slot /></template></Comp>"#);
+        assert!(
+            code.contains("_: 2 /* DYNAMIC */"),
+            "dynamic slots should keep DYNAMIC slot flag:\n{code}"
+        );
+    }
+
+    #[test]
+    fn sibling_v_if_groups_get_unique_auto_keys() {
+        let code = get_compiled(r#"<div><span v-if="a">A</span><span v-if="b">B</span></div>"#);
+        assert!(
+            code.contains("{ key: 0 }"),
+            "first v-if group should use key 0:\n{code}"
+        );
+        assert!(
+            code.contains("{ key: 1 }"),
+            "second v-if group should use key 1:\n{code}"
+        );
+    }
+
+    #[test]
+    fn slot_outlet_in_v_if_branch_uses_render_slot() {
+        let code = get_compiled(
+            r#"<button><slot v-if="ok" name="icon" /><slot v-else /></button>"#,
+        );
+        assert!(
+            code.contains("_renderSlot(_ctx.$slots, \"icon\", { key: 0"),
+            "slot v-if branch should compile to renderSlot:\n{code}"
+        );
+        assert!(
+            code.contains("_renderSlot(_ctx.$slots, \"default\", { key: 1"),
+            "slot v-else branch should compile to renderSlot:\n{code}"
+        );
+    }
 }

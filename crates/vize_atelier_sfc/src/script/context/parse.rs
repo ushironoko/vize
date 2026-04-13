@@ -258,7 +258,7 @@ impl ScriptCompileContext {
 
                             // Determine binding type
                             let binding_type = if let Some(init) = &decl.init {
-                                infer_binding_type(init, var_decl.kind)
+                                infer_binding_type(init, var_decl.kind, source)
                             } else {
                                 match var_decl.kind {
                                     VariableDeclarationKind::Const => BindingType::SetupConst,
@@ -315,7 +315,7 @@ impl ScriptCompileContext {
                                 // non-destructured declarations. This ensures _unref() is
                                 // applied in templates for composable returns.
                                 let destructure_type = if let Some(init) = &decl.init {
-                                    infer_binding_type(init, var_decl.kind)
+                                    infer_binding_type(init, var_decl.kind, source)
                                 } else {
                                     match var_decl.kind {
                                         VariableDeclarationKind::Const => BindingType::SetupConst,
@@ -333,7 +333,7 @@ impl ScriptCompileContext {
                         }
                         BindingPattern::ArrayPattern(arr_pat) => {
                             let destructure_type = if let Some(init) = &decl.init {
-                                infer_binding_type(init, var_decl.kind)
+                                infer_binding_type(init, var_decl.kind, source)
                             } else {
                                 match var_decl.kind {
                                     VariableDeclarationKind::Const => BindingType::SetupConst,

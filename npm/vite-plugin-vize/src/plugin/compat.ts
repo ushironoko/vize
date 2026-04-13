@@ -2,10 +2,16 @@ import type { Plugin, TransformResult } from "vite";
 import { transformWithOxc } from "vite";
 import { createRequire } from "node:module";
 
-import { getCompileOptionsForRequest, getEnvironmentCache, type VizePluginState } from "./state.js";
+import type { VizePluginState } from "./state.js";
 import { compileFile } from "../compiler.js";
 import { generateOutput } from "../utils/index.js";
 import { applyDefineReplacements } from "../transform.js";
+
+function looksLikeSfcSource(code: string): boolean {
+  const trimmed = code.trimStart();
+  if (!trimmed.startsWith("<")) return false;
+  return /^(?:<!--[\s\S]*?-->\s*)*<(template|script|style)\b/i.test(trimmed);
+}
 
 export function createVueCompatPlugin(state: VizePluginState): Plugin {
   let compilerSfc: unknown = null;
@@ -51,15 +57,19 @@ export function createPostTransformPlugin(state: VizePluginState): Plugin {
         !id.endsWith(".vue.ts") &&
         !id.includes("node_modules") &&
         id.endsWith(".setup.ts") &&
+        looksLikeSfcSource(code) &&
         /<script\s+setup[\s>]/.test(code)
       ) {
         state.logger.log(`post-transform: compiling virtual SFC content from ${id}`);
         try {
-          const isSsr = !!transformOptions?.ssr;
           const compiled = compileFile(
             id,
-            getEnvironmentCache(state, isSsr),
-            getCompileOptionsForRequest(state, isSsr),
+            state.cache,
+            {
+              sourceMap: state.mergedOptions?.sourceMap ?? !(state.isProduction ?? false),
+              ssr: state.mergedOptions?.ssr ?? false,
+              vapor: state.mergedOptions?.vapor ?? false,
+            },
             code,
           );
 

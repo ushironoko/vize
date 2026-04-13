@@ -619,6 +619,83 @@ const itemCount = computed(() => items.length)
         assert!(find("count").unwrap().optional);
         assert!(find("disabled").unwrap().optional);
         assert!(find("items").unwrap().optional);
+
+    }
+
+    #[test]
+    fn test_extract_prop_types_with_union_runtime_types() {
+        let type_args = r#"{
+  focusedRenderId: string | undefined
+  activeKey: string | null
+  items: Array<{ id: string; key: string; label: string }> | null
+  tabListClass?: string | Record<string, boolean> | (string | Record<string, boolean>)[]
+  refreshMethod: (loaded: Function) => Promise<void> | void
+  boolish: boolean | number | undefined
+}"#;
+        let props = extract_prop_types_from_type(type_args);
+        let find = |name: &str| props.iter().find(|(n, _)| n == name).map(|(_, v)| v);
+
+        assert_eq!(find("focusedRenderId").unwrap().js_type, "String");
+        assert!(find("focusedRenderId").unwrap().optional);
+        assert!(!find("focusedRenderId").unwrap().nullable);
+        assert_eq!(find("activeKey").unwrap().js_type, "String");
+        assert!(find("activeKey").unwrap().nullable);
+        assert_eq!(find("items").unwrap().js_type, "Array");
+        assert!(find("items").unwrap().nullable);
+        assert_eq!(
+            find("tabListClass").unwrap().js_type,
+            "[String, Object, Array]"
+        );
+        assert!(!find("tabListClass").unwrap().nullable);
+        assert_eq!(find("refreshMethod").unwrap().js_type, "Function");
+        assert_eq!(find("boolish").unwrap().js_type, "[Boolean, Number]");
+        assert!(find("boolish").unwrap().optional);
+        assert!(!find("boolish").unwrap().nullable);
+    }
+
+    #[test]
+    fn test_compile_script_setup_runtime_props_for_nullable_record_and_undefined_union() {
+        let content = r#"
+const props = defineProps<{
+  focusedRenderId: string | undefined
+  groupLabel: string | undefined
+  activeKey: string | null
+  items: Array<{ id: string; key: string; label: string }> | null
+  tabListClass?: string | Record<string, boolean> | (string | Record<string, boolean>)[]
+}>()
+"#;
+        let result = compile_script_setup(content, "Test", false, true, None).unwrap();
+
+        let code = &result.code;
+        assert!(
+            code.contains("focusedRenderId: { type: String as PropType<string | undefined>, required: false }"),
+            "focusedRenderId should be optional when undefined is part of the union. Got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("groupLabel: { type: String as PropType<string | undefined>, required: false }"),
+            "groupLabel should be optional when undefined is part of the union. Got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("activeKey: { type: [String, null] as PropType<string | null>, required: true }"),
+            "activeKey should accept null at runtime. Got:\n{}",
+            code
+        );
+        assert!(
+            code.contains(
+                "items: { type: [Array, null] as PropType<Array<{ id: string; key: string; label: string }> | null>, required: true }"
+            ),
+            "items should accept null at runtime. Got:\n{}",
+            code
+        );
+        assert!(
+            code.contains(
+                "tabListClass: { type: [String, Object, Array] as PropType<string | Record<string, boolean> | (string | Record<string, boolean>)[]>, required: false }"
+            ),
+            "tabListClass should preserve Record as Object in runtime prop constructors. Got:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -657,6 +734,10 @@ function handleClick(e: MouseEvent) {
             result.code.contains("emits:"),
             "Should have emits definition"
         );
+        assert!(
+            result.code.contains(r#"emits: ["click", "update"]"#),
+            "Should preserve event names in emits array"
+        );
     }
 
     #[test]
@@ -677,6 +758,52 @@ const emit = defineEmits<(e: 'click') => void>()
         assert!(
             result.code.contains("const emit = __emit"),
             "Should bind emit to __emit"
+        );
+        assert!(
+            result.code.contains(r#"emits: ["click"]"#),
+            "Should preserve the single event name in emits array"
+        );
+    }
+
+    #[test]
+    fn test_compile_script_setup_with_function_typed_define_emits_keeps_event_names() {
+        let content = r#"
+const emit = defineEmits<{
+  (_: 'updateNodes', nodes: NodeState[], key: keyof NodeStyle, values: string[], options?: { isStaged?: boolean }): void
+  (_: 'updateAttrs', nodes: NodeState[], styles: Partial<NodeStyle>[], options?: { isStaged?: boolean }): void
+  (_: 'changePanelTab', panelTab: 'motion' | 'box'): void
+  (_: 'toggleAssetPicker', isOpen: boolean | { update: (src: string) => void; confirm: () => void }): void
+  (_: 'togglePreview', isOpen: boolean, withPoster?: boolean): void
+  (_: 'toggleGlyphPicker', isOpen: boolean): void
+  (_: 'cancel'): void
+  (_: 'confirm'): void
+  (_: 'appendItem'): void
+  (_: 'appendProperty'): void
+}>()
+"#;
+        let result = compile_script_setup(content, "Test", false, true, None).unwrap();
+
+        println!("Function-typed defineEmits output:\n{}", result.code);
+
+        assert!(
+            result.code.contains(r#""updateNodes""#)
+                && result.code.contains(r#""updateAttrs""#)
+                && result.code.contains(r#""changePanelTab""#)
+                && result.code.contains(r#""toggleAssetPicker""#)
+                && result.code.contains(r#""togglePreview""#)
+                && result.code.contains(r#""toggleGlyphPicker""#)
+                && result.code.contains(r#""cancel""#)
+                && result.code.contains(r#""confirm""#)
+                && result.code.contains(r#""appendItem""#)
+                && result.code.contains(r#""appendProperty""#),
+            "Should preserve defineEmits call signature event names"
+        );
+        assert!(
+            !result.code.contains(r#""e""#)
+                && !result.code.contains(r#""doms""#)
+                && !result.code.contains(r#""values""#)
+                && !result.code.contains(r#""options""#),
+            "Should not emit call signature parameter names"
         );
     }
 
