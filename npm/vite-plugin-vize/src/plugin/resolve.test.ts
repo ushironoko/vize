@@ -11,6 +11,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const workspaceRoot = path.resolve(__dirname, "../../../..");
 
+function hasFixtureFile(projectRoot: string, relativePath: string): boolean {
+  return fs.existsSync(path.join(projectRoot, relativePath));
+}
+
+function skipMissingFixture(projectRoot: string, relativePath: string): boolean {
+  if (hasFixtureFile(projectRoot, relativePath)) {
+    return false;
+  }
+
+  console.warn(
+    `skipping resolve fixture ${path.basename(projectRoot)}: missing ${relativePath} (git submodule not initialized)`,
+  );
+  return true;
+}
+
 function createState(root: string): VizePluginState {
   return {
     cache: new Map(),
@@ -61,21 +76,23 @@ function expectResolvedId(resolved: Awaited<ReturnType<typeof resolveIdHook>>): 
 
 {
   const projectRoot = path.join(workspaceRoot, "tests", "_fixtures", "_git", "npmx.dev");
-  const importer = toVirtualId(path.join(projectRoot, "app", "pages", "index.vue"));
-  const resolved = await resolveIdHook(
-    nullResolveContext,
-    createState(projectRoot),
-    "vue-data-ui/style.css",
-    importer,
-    undefined,
-  );
+  if (!skipMissingFixture(projectRoot, path.join("app", "pages", "index.vue"))) {
+    const importer = toVirtualId(path.join(projectRoot, "app", "pages", "index.vue"));
+    const resolved = await resolveIdHook(
+      nullResolveContext,
+      createState(projectRoot),
+      "vue-data-ui/style.css",
+      importer,
+      undefined,
+    );
 
-  assert.match(expectResolvedId(resolved), /vue-data-ui\/dist\/style\.css$/);
+    assert.match(expectResolvedId(resolved), /vue-data-ui\/dist\/style\.css$/);
+  }
 }
 
 {
   const projectRoot = path.join(workspaceRoot, "tests", "_fixtures", "_git", "vuefes-2025");
-  if (fs.existsSync(path.join(projectRoot, "package.json"))) {
+  if (!skipMissingFixture(projectRoot, "package.json")) {
     const importer = toVirtualId(path.join(projectRoot, "app", "pages", "index.vue"));
     const resolved = await resolveIdHook(
       nullResolveContext,
@@ -94,37 +111,70 @@ function expectResolvedId(resolved: Awaited<ReturnType<typeof resolveIdHook>>): 
 
 {
   const projectRoot = path.join(workspaceRoot, "tests", "_fixtures", "_git", "npmx.dev");
-  const source = path.join(projectRoot, "app", "pages", "index.vue");
-  const resolved = await resolveIdHook(
-    nullResolveContext,
-    createState(projectRoot),
-    source,
-    undefined,
-    { isEntry: true, ssr: true },
-  );
+  if (!skipMissingFixture(projectRoot, path.join("app", "pages", "index.vue"))) {
+    const source = path.join(projectRoot, "app", "pages", "index.vue");
+    const resolved = await resolveIdHook(
+      nullResolveContext,
+      createState(projectRoot),
+      source,
+      undefined,
+      { isEntry: true, ssr: true },
+    );
+
+    assert.equal(
+      expectResolvedId(resolved),
+      toVirtualId(source, true),
+      "SSR resolves should use a dedicated virtual module ID",
+    );
+  }
+}
+
+{
+  const projectRoot = path.join(workspaceRoot, "tests", "_fixtures", "_git", "npmx.dev");
+  if (!skipMissingFixture(projectRoot, path.join("app", "pages", "index.vue"))) {
+    const source = path.join(projectRoot, "app", "pages", "index.vue");
+    const resolved = await resolveIdHook(
+      nullResolveContext,
+      createState(projectRoot),
+      toVirtualId(source),
+      undefined,
+      { isEntry: false, ssr: true },
+    );
+
+    assert.equal(
+      expectResolvedId(resolved),
+      toVirtualId(source, true),
+      "SSR resolution should upgrade client virtual IDs to SSR-specific virtual IDs",
+    );
+  }
+}
+
+{
+  const projectRoot = path.join(workspaceRoot, "tests", "_fixtures", "_git", "npmx.dev");
+  const buildState = {
+    ...createState(projectRoot),
+    server: null,
+  };
+  const styleRequest = `${path.join(projectRoot, "app", "pages", "index.vue")}?vue&type=style&index=0&lang=scss`;
+  const resolved = await resolveIdHook(nullResolveContext, buildState, styleRequest, undefined, {});
 
   assert.equal(
     expectResolvedId(resolved),
-    toVirtualId(source, true),
-    "SSR resolves should use a dedicated virtual module ID",
+    `${styleRequest}.scss`,
+    "Build style requests should stay null-byte-free so @vitejs/plugin-vue can read the descriptor",
   );
 }
 
 {
   const projectRoot = path.join(workspaceRoot, "tests", "_fixtures", "_git", "npmx.dev");
-  const source = path.join(projectRoot, "app", "pages", "index.vue");
-  const resolved = await resolveIdHook(
-    nullResolveContext,
-    createState(projectRoot),
-    toVirtualId(source),
-    undefined,
-    { isEntry: false, ssr: true },
-  );
+  const devState = createState(projectRoot);
+  const styleRequest = `${path.join(projectRoot, "app", "pages", "index.vue")}?vue&type=style&index=0&lang=scss`;
+  const resolved = await resolveIdHook(nullResolveContext, devState, styleRequest, undefined, {});
 
   assert.equal(
     expectResolvedId(resolved),
-    toVirtualId(source, true),
-    "SSR resolution should upgrade client virtual IDs to SSR-specific virtual IDs",
+    `\0${styleRequest}.scss`,
+    "Dev style requests should keep the virtual-module prefix for the CSS pipeline",
   );
 }
 

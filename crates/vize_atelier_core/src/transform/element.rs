@@ -1,6 +1,6 @@
 //! Element transformation functions.
 
-use vize_carton::{is_builtin_directive, Box, String, Vec};
+use vize_carton::{camelize, capitalize, is_builtin_directive, Box, String, Vec};
 
 use crate::ast::*;
 use crate::transforms::transform_expression::process_inline_handler;
@@ -9,6 +9,15 @@ use super::{ExitFn, TransformContext};
 
 fn is_dynamic_component_tag(tag: &str) -> bool {
     matches!(tag, "component" | "Component")
+}
+
+fn imported_directive_binding_name(name: &str) -> String {
+    let camel = camelize(name);
+    let pascal = capitalize(&camel);
+    let mut binding = String::with_capacity(1 + pascal.len());
+    binding.push('v');
+    binding.push_str(&pascal);
+    binding
 }
 
 /// Transform element node
@@ -142,7 +151,10 @@ fn process_element_props<'a>(ctx: &mut TransformContext<'a>, el: &mut Box<'a, El
                 // Handle custom directives - register them for resolveDirective
                 _ if !is_builtin_directive(&dir.name) => {
                     ctx.helper(RuntimeHelper::WithDirectives);
-                    ctx.helper(RuntimeHelper::ResolveDirective);
+                    let imported_binding = imported_directive_binding_name(&dir.name);
+                    if !ctx.is_variable_defined(imported_binding.as_str()) {
+                        ctx.helper(RuntimeHelper::ResolveDirective);
+                    }
                     ctx.add_directive(dir.name.clone());
                 }
                 _ => {}

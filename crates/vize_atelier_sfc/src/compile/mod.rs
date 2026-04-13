@@ -283,7 +283,7 @@ pub fn compile_sfc(
     };
 
     // 1. Croquis parser: rich analysis with ReactivityTracker
-    let croquis = crate::script::analyze_script_setup_to_summary(&script_setup.content);
+    let mut croquis = crate::script::analyze_script_setup_to_summary(&script_setup.content);
     let mut script_bindings = croquis_to_legacy_bindings(&croquis.bindings);
 
     // 2. ScriptCompileContext: needed for macro span info and TypeScript type resolution
@@ -303,12 +303,31 @@ pub fn compile_sfc(
     }
     ctx.analyze();
 
-    // 3. Merge Props bindings from ScriptCompileContext (type resolution fallback)
-    //    Croquis can't resolve interface references, so we take Props from the legacy analyzer
+    // 3. Merge bindings from ScriptCompileContext that need type-aware fallback.
+    //    Croquis handles most setup analysis, but ScriptCompileContext can infer
+    //    additional ref-like bindings from TypeScript generics (e.g. inject<Ref<T>>)
+    //    and resolve Props from interface/type references.
     for (name, bt) in &ctx.bindings.bindings {
-        if matches!(bt, BindingType::Props | BindingType::PropsAliased) {
-            script_bindings.bindings.entry(name.clone()).or_insert(*bt);
+        if matches!(
+            bt,
+            BindingType::Props
+                | BindingType::PropsAliased
+                | BindingType::SetupRef
+                | BindingType::SetupMaybeRef
+                | BindingType::SetupReactiveConst
+        ) {
+            script_bindings.bindings.insert(name.clone(), *bt);
+            croquis.bindings.add(name.as_str(), *bt);
         }
+    }
+    for (local, key) in &ctx.bindings.props_aliases {
+        script_bindings
+            .props_aliases
+            .insert(local.clone(), key.clone());
+        croquis
+            .bindings
+            .props_aliases
+            .insert(local.clone(), key.clone());
     }
 
     // Register $emit or __emit binding when defineEmits is used, so the template
@@ -320,9 +339,19 @@ pub fn compile_sfc(
                 .bindings
                 .entry(binding_name.clone())
                 .or_insert(BindingType::SetupConst);
+            croquis
+                .bindings
+                .bindings
+                .entry(binding_name.clone())
+                .or_insert(BindingType::SetupConst);
         } else {
             // defineEmits([...]) without assignment -> $emit is exposed in setup args
             script_bindings
+                .bindings
+                .entry("$emit".to_compact_string())
+                .or_insert(BindingType::SetupConst);
+            croquis
+                .bindings
                 .bindings
                 .entry("$emit".to_compact_string())
                 .or_insert(BindingType::SetupConst);

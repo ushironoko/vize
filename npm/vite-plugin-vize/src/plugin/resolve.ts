@@ -104,6 +104,11 @@ export async function resolveIdHook(
   const isBuild = state.server === null;
   const isSsrRequest = !!options?.ssr || (importer ? isVizeSsrVirtual(importer) : false);
 
+  const makeStyleRequestId = (requestId: string, lang: string, isModule: boolean): string => {
+    const suffix = isModule ? `.module.${lang}` : `.${lang}`;
+    return isBuild ? `${requestId}${suffix}` : `\0${requestId}${suffix}`;
+  };
+
   // Skip all virtual module IDs
   if (id.startsWith("\0")) {
     // This is one of our .vue.ts virtual modules -- pass through
@@ -184,11 +189,11 @@ export async function resolveIdHook(
     if (params.has("module")) {
       // For CSS Modules, append .module.{lang} suffix so Vite's CSS pipeline
       // automatically treats it as a CSS module and returns the class mapping.
-      return `\0${id}.module.${lang}`;
+      return makeStyleRequestId(id, lang, true);
     }
     // Append .{lang} suffix so Vite's CSS pipeline recognizes the file type
     // and applies the appropriate preprocessor (SCSS, Less, etc.).
-    return `\0${id}.${lang}`;
+    return makeStyleRequestId(id, lang, false);
   }
 
   // If importer is a vize virtual module or macro module, resolve imports against the real path

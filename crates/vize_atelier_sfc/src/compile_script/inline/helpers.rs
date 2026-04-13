@@ -53,6 +53,64 @@ pub(crate) fn strip_comments_for_counting(line: &str) -> String {
     result
 }
 
+/// Strip comments and string literals from a line for brace/paren counting.
+/// Removes:
+/// - `// ...` line comments
+/// - `/* ... */` block comments (single-line)
+/// - `'...'`, `"..."`, and `` `...` `` string/template literal contents
+///
+/// Keeps non-string code intact so structural tokens (`{}`, `()`, `<>`) can be counted safely.
+pub(crate) fn strip_comments_and_strings_for_counting(line: &str) -> String {
+    let mut result = String::with_capacity(line.len());
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut string_char = b'"';
+
+    while i < bytes.len() {
+        if in_string {
+            if bytes[i] == b'\\' {
+                i += 1;
+                if i < bytes.len() {
+                    i += 1;
+                }
+                continue;
+            }
+            if bytes[i] == string_char {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match bytes[i] {
+            b'\'' | b'"' | b'`' => {
+                in_string = true;
+                string_char = bytes[i];
+                i += 1;
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                break;
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                if i + 1 < bytes.len() {
+                    i += 2;
+                }
+            }
+            _ => {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+    }
+
+    result
+}
+
 /// Extract the variable name from a const declaration line.
 /// e.g., "const msg = 'hello'" -> Some("msg")
 /// e.g., "const count = ref(0)" -> Some("count")

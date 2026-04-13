@@ -2,7 +2,7 @@
 //!
 //! Free functions used by the parsing and props extraction logic.
 
-use oxc_ast::ast::{CallExpression, Expression, ImportDeclaration, VariableDeclarationKind};
+use oxc_ast::ast::{Argument, CallExpression, Expression, ImportDeclaration, VariableDeclarationKind};
 use oxc_span::GetSpan;
 
 use crate::types::BindingType;
@@ -42,9 +42,13 @@ pub(super) fn extract_macro_from_expr(
 pub(super) fn infer_binding_type(
     init: &Expression<'_>,
     kind: VariableDeclarationKind,
+    source: &str,
 ) -> BindingType {
     // Check for macro calls
     if let Expression::CallExpression(call) = init {
+        if let Some(binding_type) = infer_inject_binding_type(call, source) {
+            return binding_type;
+        }
         if let Some(name) = get_callee_name(call) {
             match name.as_str() {
                 // defineProps binding is the props OBJECT, not a prop - treat as SetupReactiveConst
@@ -93,6 +97,43 @@ pub(super) fn infer_binding_type(
             BindingType::SetupConst
         }
     }
+}
+
+fn infer_inject_binding_type(call: &CallExpression<'_>, source: &str) -> Option<BindingType> {
+    if !is_call_of(call, "inject") {
+        return None;
+    }
+
+    if let Some(type_args) = &call.type_arguments {
+        let start = type_args.span.start as usize;
+        let end = type_args.span.end as usize;
+        if start < end && end <= source.len() {
+            let normalized: std::string::String = source[start..end]
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            if normalized.contains("Ref<")
+                || normalized.contains("ShallowRef<")
+                || normalized.contains("ComputedRef<")
+                || normalized.contains("WritableComputedRef<")
+            {
+                return Some(BindingType::SetupMaybeRef);
+            }
+        }
+    }
+
+    if let Some(Argument::CallExpression(inner_call)) = call.arguments.get(1) {
+        if let Some(name) = get_callee_name(inner_call) {
+            match name.as_str() {
+                "ref" | "shallowRef" | "customRef" | "toRef" | "computed" => {
+                    return Some(BindingType::SetupMaybeRef);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    None
 }
 
 /// Get callee name from call expression

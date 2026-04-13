@@ -355,9 +355,21 @@ pub fn is_constant_simple_expression(
         return true;
     }
 
+    // Expressions that already reference runtime instance/setup/props context are never
+    // compile-time constants. Returning false here is conservative and prevents
+    // transformed bindings like `_ctx.foo` from incorrectly dropping patch flags.
+    let content = exp.content.as_str();
+    if content.contains("_ctx.")
+        || content.contains("$setup.")
+        || content.contains("__props.")
+        || content.contains("$props.")
+    {
+        return false;
+    }
+
     let mut wrapped = String::with_capacity(exp.content.len() + 2);
     wrapped.push('(');
-    wrapped.push_str(exp.content.as_str());
+    wrapped.push_str(content);
     wrapped.push(')');
 
     let allocator = oxc_allocator::Allocator::default();

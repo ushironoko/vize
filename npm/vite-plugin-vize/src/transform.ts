@@ -5,6 +5,8 @@
  * provides the debug logger.
  */
 
+import path from "node:path";
+
 import { escapeRegExp, type DynamicImportAliasRule } from "./virtual.js";
 
 /**
@@ -17,6 +19,10 @@ import { escapeRegExp, type DynamicImportAliasRule } from "./virtual.js";
 // File extensions that are code modules, not static assets.
 // These should never be rewritten to default imports by rewriteStaticAssetUrls.
 const SCRIPT_EXTENSIONS = /\.(js|mjs|cjs|ts|mts|cts|jsx|tsx)$/i;
+
+type TemplatePart =
+  | { type: "static"; value: string }
+  | { type: "expr"; value: string };
 
 export function rewriteStaticAssetUrls(code: string, aliasRules: DynamicImportAliasRule[]): string {
   let rewritten = code;
@@ -50,6 +56,134 @@ export function rewriteStaticAssetUrls(code: string, aliasRules: DynamicImportAl
     rewritten = imports.join("\n") + "\n" + rewritten;
   }
   return rewritten;
+}
+
+function splitTemplateLiteralParts(raw: string): TemplatePart[] | null {
+  const parts: TemplatePart[] = [];
+  let cursor = 0;
+
+  while (cursor < raw.length) {
+    const exprStart = raw.indexOf("${", cursor);
+    if (exprStart === -1) {
+      if (cursor < raw.length) {
+        parts.push({ type: "static", value: raw.slice(cursor) });
+      }
+      return parts;
+    }
+
+    if (exprStart > cursor) {
+      parts.push({ type: "static", value: raw.slice(cursor, exprStart) });
+    }
+
+    let depth = 1;
+    let index = exprStart + 2;
+    while (index < raw.length && depth > 0) {
+      const char = raw[index];
+      if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+      }
+      index += 1;
+    }
+
+    if (depth !== 0) {
+      return null;
+    }
+
+    parts.push({ type: "expr", value: raw.slice(exprStart + 2, index - 1) });
+    cursor = index;
+  }
+
+  return parts;
+}
+
+function toBrowserGlobPath(resolvedPath: string, root: string): string {
+  const normalizedRoot = path.resolve(root).replace(/\\/g, "/");
+  const normalizedPath = path.resolve(resolvedPath).replace(/\\/g, "/");
+  if (normalizedPath.startsWith(normalizedRoot + "/")) {
+    return "/" + path.posix.relative(normalizedRoot, normalizedPath);
+  }
+  return `/@fs${normalizedPath}`;
+}
+
+function buildResolvedTemplateLiteral(
+  parts: TemplatePart[],
+  realPath: string,
+  root: string,
+): { pattern: string; key: string } | null {
+  const firstStatic = parts.find((part): part is { type: "static"; value: string } => part.type === "static");
+  if (!firstStatic) {
+    return null;
+  }
+  if (!firstStatic.value.startsWith("./") && !firstStatic.value.startsWith("../")) {
+    return null;
+  }
+
+  const slashIndex = firstStatic.value.lastIndexOf("/");
+  const relativeDir = slashIndex >= 0 ? firstStatic.value.slice(0, slashIndex + 1) : "./";
+  const firstStaticRemainder = slashIndex >= 0 ? firstStatic.value.slice(slashIndex + 1) : firstStatic.value;
+
+  const importerDir = path.dirname(realPath);
+  const resolvedDir = toBrowserGlobPath(path.resolve(importerDir, relativeDir), root).replace(/\/$/, "");
+  let patternSuffix = firstStaticRemainder;
+  let keySuffix = firstStaticRemainder;
+  let consumedFirstStatic = false;
+
+  for (const part of parts) {
+    if (part.type === "static") {
+      if (!consumedFirstStatic) {
+        consumedFirstStatic = true;
+        continue;
+      }
+      patternSuffix += part.value;
+      keySuffix += part.value;
+      continue;
+    }
+
+    patternSuffix += "*";
+    keySuffix += `\${${part.value}}`;
+  }
+
+  patternSuffix = patternSuffix.replace(/\*{2,}/g, "*");
+  return {
+    pattern: `${resolvedDir}/${patternSuffix}`,
+    key: `${resolvedDir}/${keySuffix}`,
+  };
+}
+
+export function rewriteDynamicAssetImportMetaUrls(
+  code: string,
+  realPath: string,
+  root: string,
+): string {
+  return code.replace(
+    /\bnew\s+URL\s*\(\s*`([^`$\\]*(?:\\.[^`$\\]*)*(?:\$\{[\s\S]*?\}[^`$\\]*(?:\\.[^`$\\]*)*)+)`\s*,\s*import\.meta\.url\s*\)/g,
+    (match, rawTemplate: string) => {
+      const parts = splitTemplateLiteralParts(rawTemplate);
+      if (!parts) {
+        return match;
+      }
+
+      const resolved = buildResolvedTemplateLiteral(parts, realPath, root);
+      if (!resolved) {
+        return match;
+      }
+
+      const globOptions = JSON.stringify({
+        eager: true,
+        import: "default",
+        query: "?url",
+      });
+      return (
+        `new URL((import.meta.glob(${JSON.stringify(resolved.pattern)}, ${globOptions}))[` +
+        "`" +
+        `${resolved.key}` +
+        "`" +
+        `], import.meta.url)`
+      );
+    },
+  );
 }
 
 /**

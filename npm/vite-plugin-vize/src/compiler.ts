@@ -24,16 +24,20 @@ export function extractStyleBlocks(source: string): StyleBlockInfo[] {
   const blocks: StyleBlockInfo[] = [];
   const styleRegex = /<style([^>]*)>([\s\S]*?)<\/style>/gi;
   let match;
-  let index = 0;
   while ((match = styleRegex.exec(source)) !== null) {
     const attrs = match[1];
     const content = match[2];
+    const hasSrc = /\bsrc=["'][^"']+["']/.test(attrs);
+    // Keep parity with vue/compiler-sfc descriptor indexing:
+    // empty inline <style> blocks are dropped and do not consume indices.
+    if (!hasSrc && content.trim().length === 0) {
+      continue;
+    }
     const lang = attrs.match(/\blang=["']([^"']+)["']/)?.[1] ?? null;
     const scoped = /\bscoped\b/.test(attrs);
     const moduleMatch = attrs.match(/\bmodule(?:=["']([^"']+)["'])?/);
     const isModule = moduleMatch ? moduleMatch[1] || true : false;
-    blocks.push({ content, lang, scoped, module: isModule, index });
-    index++;
+    blocks.push({ content, lang, scoped, module: isModule, index: blocks.length });
   }
   return blocks;
 }

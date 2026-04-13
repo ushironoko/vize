@@ -9,7 +9,7 @@ import { openBlock as _openBlock, createElementBlock as _createElementBlock, cre
 export default /*@__PURE__*/_defineComponent({
   __name: 'test',
   props: {
-    context: { type: Object, required: true }
+    context: { type: Object as PropType<{ open(): void; close(): void; isOpened: boolean }>, required: true }
   },
   setup(__props: any) {
 

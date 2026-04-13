@@ -126,6 +126,40 @@ const identifier =
     }
 
     #[test]
+    fn test_arrow_function_block_not_misdetected_as_object_literal() {
+        let content = r#"
+import { computed } from 'vue'
+
+const inputValue = 'prefix {{foo}} suffix'
+const isVariable = computed(() => {
+  return inputValue.includes('{{')
+})
+const reference = computed(() => {
+  return isVariable.value ? inputValue.match(/{{([^{}]+)}}/) : null
+})
+"#;
+        let output = compile_setup(content);
+        let is_variable_pos = output.find("const isVariable = computed(() => {");
+        let reference_pos = output.find("const reference = computed(() => {");
+
+        assert!(
+            is_variable_pos.is_some(),
+            "isVariable declaration should be preserved. Got:\n{}",
+            output
+        );
+        assert!(
+            reference_pos.is_some(),
+            "reference declaration should be preserved. Got:\n{}",
+            output
+        );
+        assert!(
+            reference_pos.unwrap() > is_variable_pos.unwrap(),
+            "reference should appear after isVariable. Got:\n{}",
+            output
+        );
+    }
+
+    #[test]
     fn test_destructure_with_multiline_function_call() {
         let content = r#"
 import { ref, toRef } from 'vue'

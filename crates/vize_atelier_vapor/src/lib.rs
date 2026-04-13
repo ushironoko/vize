@@ -350,6 +350,34 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_component_event_listener_not_wrapped_in_getter() {
+        let allocator = Bump::new();
+        let result = compile_vapor(
+            &allocator,
+            r#"<Child @selectItem="(value) => emit('selectItem', value)" />"#,
+            Default::default(),
+        );
+
+        assert!(
+            result.error_messages.is_empty(),
+            "Expected no errors: {:?}",
+            result.error_messages
+        );
+
+        let code = normalize_code(&result.code);
+        assert!(
+            code.contains("onSelectItem: (value) => _ctx.emit('selectItem', value)"),
+            "Should pass component listener as direct handler: {}",
+            code
+        );
+        assert!(
+            !code.contains("onSelectItem: () => (value) => _ctx.emit('selectItem', value)"),
+            "Should not wrap component listener in getter: {}",
+            code
+        );
+    }
+
+    #[test]
     fn test_compile_branch_component_under_existing_parent() {
         let allocator = Bump::new();
         let result = compile_vapor(
