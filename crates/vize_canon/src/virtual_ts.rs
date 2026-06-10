@@ -14,6 +14,9 @@ mod props;
 mod scope;
 mod types;
 
+#[cfg(test)]
+mod options_api_tests;
+
 pub use generator::{generate_virtual_ts, generate_virtual_ts_with_offsets};
 pub use types::{TemplateGlobal, VirtualTsOptions, VirtualTsOutput, VizeMapping};
 
